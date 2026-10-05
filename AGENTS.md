@@ -74,7 +74,7 @@ Build rules (Diego, 2026-10-05):
 - Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 dev-1 (i18n gate fix); S4.1 dev-4. CH1 ✅ 32db67c (dev profile debuginfo trimmed).
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; main verified 110 tests green; S4.1 dev-4 (last W4 slice). CH1 ✅ 32db67c (dev profile debuginfo trimmed).
 - Dispatch: orquestador creates worktrees by hand (git worktree add) + hermad spawn, max 4 live devs; plan-devs is not used (it ignores live devs and reuses names). Chore CH1 (dev-profile debuginfo) dev-1.
 
 | Area | Docs | Status |
