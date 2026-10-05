@@ -98,7 +98,12 @@
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
+  --color-on-primary: var(--on-primary);
+  --color-on-primary-soft: var(--on-primary-soft);
+  --color-on-accent: var(--on-accent);
+  --color-focus: var(--focus);
   --color-accent: var(--accent);
   --color-success: var(--success);
   --color-warning: var(--warning);

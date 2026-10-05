@@ -20,3 +20,57 @@ body {
   color: var(--fg);
   font-family: var(--font-sans);
 }
+
+/* Visible focus ring on every interactive element (EXPERIENCE §7, AC3). */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: inherit;
+  }
+}
+
+/* Skip link: hidden until focused, then pinned top-left (AC3). */
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+/* Window floor (DESIGN.md §10.4): below 960 px the shell is replaced. */
+.resize-floor {
+  display: none;
+}
+
+@media (max-width: 959.98px) {
+  .shell {
+    display: none;
+  }
+
+  .resize-floor {
+    display: grid;
+  }
+}
+
+/* Reduced motion: content appears in its final state (EXPERIENCE §7, AC3). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+}
