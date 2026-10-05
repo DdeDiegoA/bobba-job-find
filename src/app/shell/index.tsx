@@ -1,0 +1,134 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Outlet, useNavigate } from "react-router";
+import { useTheme } from "@/app/theme";
+import { EmptyState } from "@/components/ui/empty-state";
+import { IDLE_RUN_STATE, NAV_ITEMS, type RunState } from "./nav";
+import { Sidebar } from "./sidebar";
+import { Topbar } from "./topbar";
+
+function isEditable(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  return (
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT" ||
+    el.isContentEditable
+  );
+}
+
+/**
+ * Shell-level global shortcuts (DESIGN.md §10.4). List-scoped keys (J/K, C, A,
+ * S, X, Enter) belong to their feature slices; the Kill Switch override is S9.8.
+ */
+function useShellShortcuts({
+  focusSearch,
+  toggleTheme,
+}: {
+  focusSearch: () => void;
+  toggleTheme: () => void;
+}) {
+  const navigate = useNavigate();
+  const gotoPending = useRef(false);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const mod = event.metaKey || event.ctrlKey;
+      const key = event.key.toLowerCase();
+
+      if (mod && key === "k" && !event.shiftKey) {
+        event.preventDefault();
+        focusSearch();
+        return;
+      }
+      if (mod && event.shiftKey && key === "l") {
+        event.preventDefault();
+        toggleTheme();
+        return;
+      }
+      if (mod && key === ",") {
+        event.preventDefault();
+        navigate("/settings");
+        return;
+      }
+      if (mod && /^[1-7]$/.test(event.key)) {
+        event.preventDefault();
+        navigate(NAV_ITEMS[Number(event.key) - 1].to);
+        return;
+      }
+
+      if (mod || event.altKey || isEditable(event.target)) return;
+
+      if (event.key === "/") {
+        event.preventDefault();
+        focusSearch();
+        return;
+      }
+      if (key === "g") {
+        gotoPending.current = true;
+        return;
+      }
+      if (gotoPending.current) {
+        gotoPending.current = false;
+        const item = NAV_ITEMS.find((nav) => nav.goto === key);
+        if (item) {
+          event.preventDefault();
+          navigate(item.to);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [navigate, focusSearch, toggleTheme]);
+}
+
+/** Shell root (owned by S1.5): sidebar + topbar + routed content. */
+export function Shell() {
+  const { t } = useTranslation();
+  const { toggleTheme } = useTheme();
+  const searchRef = useRef<HTMLButtonElement>(null);
+  // ponytail: idle placeholder; the run lifecycle (S2.2) and Kill Switch (S9.8)
+  // wire the real values over IPC.
+  const [run] = useState<RunState>(IDLE_RUN_STATE);
+  const focusSearch = useCallback(() => searchRef.current?.focus(), []);
+  useShellShortcuts({ focusSearch, toggleTheme });
+
+  return (
+    <>
+      <a href="#main" className="skip-link">
+        {t("shell:shell.skipToContent")}
+      </a>
+      <div className="shell grid h-full grid-cols-[15rem_minmax(0,1fr)] max-xl:grid-cols-[4rem_minmax(0,1fr)]">
+        <Sidebar run={run} />
+        <div className="flex h-full min-w-0 flex-col">
+          <Topbar run={run} searchRef={searchRef} onSearch={focusSearch} />
+          <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto">
+            <Outlet />
+          </main>
+        </div>
+      </div>
+      <ResizeFloor />
+    </>
+  );
+}
+
+/** Catch-all screen inside the shell (placeholder empty state, AC1). */
+export function NotFound() {
+  const { t } = useTranslation();
+  return <EmptyState title={t("shell:empty.title")} description={t("shell:empty.body")} />;
+}
+
+/** Below the 960 px window floor (DESIGN.md §10.4). */
+function ResizeFloor() {
+  const { t } = useTranslation();
+  return (
+    <div className="resize-floor h-full place-items-center p-6 text-center">
+      <div className="flex flex-col gap-2">
+        <p className="font-display text-xl text-fg">{t("shell:shell.resizeTitle")}</p>
+        <p className="text-sm text-fg-muted">{t("shell:shell.resizeBody")}</p>
+      </div>
+    </div>
+  );
+}
