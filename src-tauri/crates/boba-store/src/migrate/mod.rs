@@ -55,6 +55,12 @@ pub fn embedded() -> Migrations<'static> {
     Migrations::new(MIGRATIONS.iter().map(|(_, sql)| M::up(sql)).collect())
 }
 
+/// The embedded `(file_name, sql)` pairs, sorted by file name. Exposed so tests
+/// can assert no non-migration files slip into the chain.
+pub fn embedded_files() -> &'static [(&'static str, &'static str)] {
+    MIGRATIONS
+}
+
 /// Apply the embedded migrations, snapshotting first when needed.
 pub fn apply(
     conn: &mut Connection,

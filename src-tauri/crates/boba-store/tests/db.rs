@@ -175,6 +175,33 @@ fn migrations_are_discovered_by_sorted_file_name() {
     assert_eq!(has_meta, 1);
 }
 
+// AC-4 (AD-20): no placeholder/comment-only file may enter the migration chain.
+#[test]
+fn no_placeholder_migrations_are_embedded() {
+    assert!(
+        !migrate::embedded_files().is_empty(),
+        "at least 0001_init.sql must be embedded"
+    );
+    for (name, sql) in migrate::embedded_files() {
+        let first = sql.lines().map(str::trim).find(|line| !line.is_empty());
+        assert!(
+            !first.unwrap_or("").starts_with("-- Placeholder"),
+            "{name} is a placeholder migration; it would advance user_version without a schema change"
+        );
+    }
+}
+
+// AC-4: user_version advances exactly once per embedded migration on a fresh DB.
+#[test]
+fn fresh_database_records_one_version_per_migration() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    let migrations = migrate::embedded();
+    let pending = migrations.pending_migrations(&conn).unwrap();
+    assert!(pending >= 1);
+    migrations.to_latest(&mut conn).expect("migrate");
+    assert_eq!(user_version(&conn), pending as i64);
+}
+
 // AC-2 (AD-20): a pending migration snapshots first (encrypted, owner-only).
 #[test]
 fn pre_migration_snapshot_is_encrypted_owner_only_and_same_key() {

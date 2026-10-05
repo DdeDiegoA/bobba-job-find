@@ -19,7 +19,7 @@ r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }
 keyring-core = { workspace = true }
 zeroize = { workspace = true }
-getrandom = "0.4"
+getrandom = { workspace = true }
 
 # Platform credential stores (ADR-004/ADR-009). Each store crate requires a
 # feature to select its backend; the store itself is registered at startup.
@@ -32,12 +32,12 @@ windows-native-keyring-store = { workspace = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus-secret-service-keyring-store = { workspace = true, features = ["crypto-rust"] }
 
-# Free-disk check before a pre-migration snapshot (AD-20). Versions already in the lockfile.
+# Free-disk check before a pre-migration snapshot (AD-20).
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", default-features = false, features = ["fs"] }
+nix = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
