@@ -151,6 +151,8 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 
 *Policy change by Diego, 2026-10-05:* the human gate is now **security only**. These slices need Diego's approval before their plan is approved or they merge. So does **any new security exception** in any slice: an advisory ignore, a crypto or key change, or loosening a permission or the CSP. Everything else, including auto-apply (S9.6–S9.8), backup/restore (S10.2) and CI (S1.8), is approved by the orquestador.
 
+**Standing guard (CH2, 2026-10-05):** a slice that adds Typst `#cite` / `#bibliography`, or parses untrusted or user-supplied fonts, must re-assess the cargo-deny ignores RUSTSEC-2026-0194/0195 (quick-xml via citationberg) and RUSTSEC-2026-0192 (ttf-parser) before merge. Those ignores rest on that code being unreachable. This applies to every E7 (docs) slice and is recorded in their notes.
+
 | Slice | Why |
 |---|---|
 | S1.2a | DB encryption key creation and keychain custody (crypto/key change, ADR-009). *Not in the orquestador's 2026-10-05 list; kept gated by PM as a crypto/key change. Confirm or drop.* |
@@ -310,6 +312,7 @@ Story rows come from `epics-and-stories.md`. `IB-n` rows are hardening items rai
 | 13.2 | Interview prep pack | `boba-app/src/interview_prep/**`, `agent-pack/skills/interview_prep/**` |
 | 13.3 | Weight calibration from outcomes | `boba-domain/src/scoring/calibration/**` |
 | IB-1 | Audit-log hardening: a keyed MAC per row, or an anchor plus row count, so rows appended after the last anchored head (e.g. after a crash) are also tamper-evident. Not MVP: Diego accepted the residual on 2026-10-05 when S1.7 merged (ba75df8). | `boba-domain/src/audit/**`, `boba-store/src/repos/audit.rs` |
+| IB-2 | Revisit the typst-stack cargo-deny ignores (CH2, 9999bd8) at the next typst / citationberg release. Drop RUSTSEC-2026-0194/0195 once citationberg allows quick-xml ≥ 0.41, and re-check the bincode, rustybuzz, ttf-parser and yaml-rust unmaintained advisories. | `deny.toml` |
 
 ## Tracking
 
