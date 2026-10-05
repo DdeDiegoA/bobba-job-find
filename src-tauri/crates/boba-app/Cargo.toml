@@ -14,5 +14,9 @@ embeddings = ["dep:fastembed"]
 [dependencies]
 boba-domain = { path = "../boba-domain" }
 serde = { workspace = true, features = ["derive"] }
+specta = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 fastembed = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

@@ -1,6 +1,6 @@
-# Append-only command registry: parallel slices append one path per line
-# without a merge conflict (backlog ownership convention 3, AD-3).
-src-tauri/src/commands/registry.rs merge=union
+# Append-only command/event registration list: parallel slices append one path
+# per line without a merge conflict (backlog ownership convention 3, AD-3).
+src-tauri/src/ipc/command_list.rs merge=union
 
 # Keep line endings stable across platforms.
 * text=auto eol=lf
