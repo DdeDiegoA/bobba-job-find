@@ -1,7 +1,10 @@
-# cargo-deny configuration (S1.1) — supply-chain gate from tech-stack.md §6.
+# cargo-deny configuration (S1.1; S1.8 supply-chain gate) — from tech-stack.md §6.
 # Run: cargo deny check   (installed in CI by S1.8; optional locally)
 #
 # Licence policy: MIT/Apache-2.0 compatible only. No GPL/AGPL/LGPL-static.
+# The Mozilla CA data crates (webpki-roots, webpki-root-certs) ship under
+# CDLA-Permissive-2.0; that licence is granted as a targeted exception below,
+# NOT added to the global allow list.
 
 [graph]
 targets = [
@@ -15,6 +18,9 @@ all-features = true
 [advisories]
 yanked = "deny"
 ignore = []
+# Fail only when one of *our* direct dependencies is unmaintained; transitive
+# unmaintained crates (e.g. paste, proc-macro-error) do not fail the build.
+unmaintained = "workspace"
 
 [licenses]
 allow = [
@@ -34,9 +40,21 @@ allow = [
 ]
 confidence-threshold = 0.9
 
+# Mozilla CA root data (Apache-2.0 project, CDLA-Permissive-2.0 licence).
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
+[[licenses.exceptions]]
+crate = "webpki-root-certs"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# Our workspace crates are all `publish = false`, so their path dependencies are
+# internal and exempt from the wildcard ban (which still applies to crates.io).
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
