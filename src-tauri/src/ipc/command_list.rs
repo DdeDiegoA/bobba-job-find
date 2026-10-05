@@ -13,6 +13,7 @@ macro_rules! boba_commands {
         tauri_specta::collect_commands![
             crate::ipc::app_info,
             crate::ipc::task_cancel,
+            // slices append ONE line above this comment; never reorder/remove
         ]
     };
 }
@@ -24,6 +25,7 @@ macro_rules! boba_events {
         tauri_specta::collect_events![
             crate::events::TaskProgressed,
             crate::events::TaskFinished,
+            // slices append ONE line above this comment; never reorder/remove
         ]
     };
 }
