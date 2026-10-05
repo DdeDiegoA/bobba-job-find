@@ -14,3 +14,6 @@ boba-mcp-proto = { path = "../boba-mcp-proto" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# Run ids (AD-17) and process-group / Job Object spawning (AD-1).
+ulid = { workspace = true }
+process-wrap = { workspace = true, features = ["std"] }

@@ -113,12 +113,21 @@ if (typeof IntlMessageFormat !== "function") {
 // Keys the core emits as `message_key` (Rust), skipping test modules (throwaway
 // keys); test modules conventionally sit at the end of a file.
 const CORE_KEY = /AppError::[a-z_]+\(\s*"([^"]+)"|message_key:\s*(?:Some\()?\s*"([^"]+)"/g;
+// Keys returned by a const `message_key()`-style fn: `=> "errors.…"` arms.
+// S2.2 added `FailureReason::message_key()`; the pattern catches any fn whose
+// body maps variants to i18n keys.
+const FN_KEY = /=>\s*"((?:errors|common|ui|agent)\.[^"]+)"/g;
 const coreKeys = new Set();
 for (const file of walk(join(ROOT, "src-tauri"), [".rs"])) {
   const code = readFileSync(file, "utf8");
   const testAt = code.search(/^\s*#\[cfg\(test\)\]/m);
   const production = testAt === -1 ? code : code.slice(0, testAt);
   for (const m of production.matchAll(CORE_KEY)) coreKeys.add(m[1] ?? m[2]);
+  // Only inside `fn …message_key(`, so unrelated `=> "…"` matches never count.
+  const fnBody = production.match(/fn\s+message_key[\s\S]*?\n    \}/);
+  if (fnBody) {
+    for (const m of fnBody[0].matchAll(FN_KEY)) coreKeys.add(m[1]);
+  }
 }
 
 // Keys referenced in the UI. Test files are skipped so a key used only in tests

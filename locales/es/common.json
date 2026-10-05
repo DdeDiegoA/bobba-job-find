@@ -1,4 +1,11 @@
 {
   "errors.unknown": "Algo salió mal.",
-  "errors.task.missing_id": "Falta el identificador de la tarea."
+  "errors.task.missing_id": "Falta el identificador de la tarea.",
+  "errors.agent.auth_expired": "Tu herramienta de IA necesita que vuelvas a iniciar sesión. El resto del trabajo continúa.",
+  "errors.agent.quota_exceeded": "Tu herramienta de IA alcanzó su límite de uso. Se reanudará cuando el límite se restablezca.",
+  "errors.agent.not_found": "No se encontró el modelo o la herramienta de IA.",
+  "errors.agent.timeout": "La tarea de IA tardó demasiado y se detuvo.",
+  "errors.agent.limit_exceeded": "La tarea de IA llegó a su límite y se detuvo antes de terminar.",
+  "errors.agent.cancelled": "La tarea de IA se canceló.",
+  "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa."
 }
