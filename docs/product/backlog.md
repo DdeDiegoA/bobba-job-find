@@ -76,7 +76,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 4 | S2.2 | 2.2 | Run lifecycle, ProcessSupervisor and fake CLI | S2.1, S1.3p, S1.4 | L |  |
 | 4 | S1.5 | 1.5 | App shell, design tokens, theme and navigation | S1.3, S1.4 | L |  |
 | 4 | S4.1 | 4.1 | Source Adapter SDK, registry and HttpClient | S1.2a, S1.3p | M |  |
-| 4 | S1.7 | 1.7 | Settings store and hash-chained audit log | S1.2a, S1.3p | L | ⚠ Diego |
+| 4 | S1.7 | 1.7 | Settings store and hash-chained audit log | S1.2a, S1.3p, S1.8, S1.4, S2.1 | L | ⚠ Diego |
 | 5 | S2.3a | 2.3 | boba-mcp shim, MCP server and per-run sandbox | S2.2, S1.8 | M | ⚠ Diego |
 | 5 | S3.4 | 3.4 | Profile fact model and editor with versioning | S1.2a, S1.5, S1.3p | L |  |
 | 5 | S3.1 | 3.1 | Wizard framework and language step | S1.5 | M |  |
@@ -131,7 +131,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 17 | S5.4 | 5.4 | Launch at login and tray run controls | S5.1, S1.6 | M |  |
 | 18 | S6.7 | 6.7 | Keyboard triage and command palette | S6.6 | M |  |
 | 18 | S6.8 | 6.8 | Scoring weights settings and red-flag/scam badges | S6.3 | M |  |
-| 18 | S6.9 | 6.9 | Optional on-device embeddings (F3) via the boba-embed adapter | S6.3, S1.8, S1.3p, S7.1 | L |  |
+| 18 | S6.9 | 6.9 | Optional on-device embeddings (F3) via the boba-embed adapter | S6.3, S1.8, S1.3p, S7.1, S1.7 | L |  |
 | 18 | S8.4 | 8.4 | Reply classification, Status Proposals and email disclosure | S8.3, S2.4 | L |  |
 | 19 | S8.5 | 8.5 | Gmail read via BYO client | S8.3, S8.2 | S | ⚠ Diego |
 | 19 | S9.5 | 9.5 | Duplicate-application guard and follow-up nudges | S9.1 | M |  |
@@ -172,7 +172,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 - **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`
 - **S1.5** (wave 4): `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`, `scripts/check-i18n.mjs`
 - **S4.1** (wave 4): `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs`
-- **S1.7** (wave 4): `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`
+- **S1.7** (wave 4): `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`, `src-tauri/crates/boba-app/Cargo.toml`, `src-tauri/crates/boba-store/Cargo.toml`
 - **S2.3a** (wave 5): `src-tauri/crates/boba-mcp/**`, `src-tauri/crates/boba-mcp-proto/**`, `src-tauri/crates/boba-agent/src/mcp/**`
 - **S3.4** (wave 5): `src-tauri/crates/boba-domain/src/profile/**`, `src-tauri/crates/boba-app/src/profile/**`, `src-tauri/crates/boba-store/src/repos/profile.rs`, `src-tauri/src/commands/profile.rs`, `src/features/profile/**`, `locales/en/profile.json`, `locales/es/profile.json`, `src-tauri/crates/boba-store/migrations/0007_profile.sql`, `src-tauri/crates/boba-app/src/ports/repo/profile.rs`
 - **S3.1** (wave 5): `src/features/onboarding/wizard/**`, `src/features/onboarding/steps/language/**`, `locales/en/onboarding.json`, `locales/es/onboarding.json`
@@ -293,6 +293,8 @@ Every path in the first list exists as a compiling stub after S1.1 (convention 1
 
 ## Icebox (v1.1 and later; not in any wave)
 
+Story rows come from `epics-and-stories.md`. `IB-n` rows are hardening items raised during the build, with no story yet.
+
 | Story | Title | Files (planned) |
 |---|---|---|
 | 11.4 | LATAM session boards (Computrabajo, OCC, Bumeran) | `boba-sources/src/session/latam/**` |
@@ -302,6 +304,7 @@ Every path in the first list exists as a compiling stub after S1.1 (convention 1
 | 13.1 | Follow-up drafting | `boba-app/src/followups/**`, `agent-pack/skills/follow_up/**` |
 | 13.2 | Interview prep pack | `boba-app/src/interview_prep/**`, `agent-pack/skills/interview_prep/**` |
 | 13.3 | Weight calibration from outcomes | `boba-domain/src/scoring/calibration/**` |
+| IB-1 | Audit-log hardening: a keyed MAC per row, or an anchor plus row count, so rows appended after the last anchored head (e.g. after a crash) are also tamper-evident. Not MVP: Diego accepted the residual on 2026-10-05 when S1.7 merged (ba75df8). | `boba-domain/src/audit/**`, `boba-store/src/repos/audit.rs` |
 
 ## Tracking
 

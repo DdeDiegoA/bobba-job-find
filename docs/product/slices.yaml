@@ -111,10 +111,10 @@
   wave: 4
   parent: "1.7"
   title: Settings store and hash-chained audit log
-  deps: [S1.2a, S1.3p]
+  deps: [S1.2a, S1.3p, S1.8, S1.4, S2.1]
   gate: diego
-  files: ["@c/boba-store/src/repos/settings.rs", "@c/boba-store/src/repos/audit.rs", "@c/boba-app/src/system/**", "@c/boba-domain/src/audit/**", "{mig:system}", "@c/boba-app/src/ports/clock.rs", "@c/boba-app/src/ports/repo/system.rs"]
-  notes: Gate added by PM (audit log integrity is security, approval policy). One keychain wrapper only (architect 2026-10-05). boba-store/src/keys from S1.2a, service app.bobajobfind, is the single keyring-core wrapper. The audit-head anchor (AD-12) uses it directly inside boba-store, so no port is needed.
+  files: ["@c/boba-store/src/repos/settings.rs", "@c/boba-store/src/repos/audit.rs", "@c/boba-app/src/system/**", "@c/boba-domain/src/audit/**", "{mig:system}", "@c/boba-app/src/ports/clock.rs", "@c/boba-app/src/ports/repo/system.rs", "@c/boba-app/Cargo.toml", "@c/boba-store/Cargo.toml"]
+  notes: Gate added by PM (audit log integrity is security, approval policy). One keychain wrapper only (architect 2026-10-05). boba-store/src/keys from S1.2a, service app.bobajobfind, is the single keyring-core wrapper. The audit-head anchor (AD-12) uses it directly inside boba-store, so no port is needed. Merged as ba75df8. Also edited boba-app/Cargo.toml and boba-store/Cargo.toml (historical, review P3; Cargo.lock is owned by no slice). S1.8, S1.4 and S2.1 are recorded as dependencies because they edited those manifests and merged first. Diego accepted the residual risk that tail rows written after a crash are not anchored; hardening is in the icebox.
 
 - id: S1.8
   wave: 2
@@ -363,7 +363,7 @@
 - id: S6.9
   parent: "6.9"
   title: Optional on-device embeddings (F3) via the boba-embed adapter
-  deps: [S6.3, S1.8, S1.3p, S7.1]
+  deps: [S6.3, S1.8, S1.3p, S7.1, S1.7]
   files: ["@c/boba-domain/src/scoring/f3/**", "@c/boba-app/src/embeddings/**", "@c/boba-app/src/ports/embedding.rs", "@c/boba-embed/**", "@c/boba-app/Cargo.toml", src-tauri/Cargo.toml, Cargo.toml]
   covers_extra: [AD-8]
   notes: Hexagonal fix (spine update 2026-10-05). New adapter crate boba-embed (publish = false) implements EmbeddingPort over fastembed behind cargo feature embeddings, forwarded by src-tauri. The EmbeddingPort trait lives in boba-app ports. The fastembed dep and embeddings feature are removed from boba-app/Cargo.toml, and boba-app/src/embeddings keeps only the opt-in and model-download use case with no fastembed import. Root Cargo.toml gains the boba-embed member. Depends on S1.8 because S1.8 last edited these manifests, and on S1.3p, which creates the ports/embedding.rs stub, and on S7.1, which also edited the root Cargo.toml.

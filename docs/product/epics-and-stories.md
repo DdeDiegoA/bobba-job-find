@@ -172,7 +172,7 @@ As a user, I want Boba to live in my tray, so that it can work in the background
 - **Given** a second launch **When** Boba is already running **Then** the existing window is focused and no second instance starts.
 
 ### Story 1.7: Settings store and audit log
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs` · **Covers:** AD-12, FR-89 (store), FR-106 (shell), Consistency Conventions (config)
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`, `src-tauri/crates/boba-app/Cargo.toml`, `src-tauri/crates/boba-store/Cargo.toml` · **Covers:** AD-12, FR-89 (store), FR-106 (shell), Consistency Conventions (config)
 
 As a user, I want every automated or outbound action recorded in a log that cannot be tampered with, so that I can always see what Boba did and why.
 

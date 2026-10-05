@@ -76,7 +76,7 @@ stories:
     title: "Settings store and audit log"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-store/src/repos/settings.rs", "src-tauri/crates/boba-store/src/repos/audit.rs", "src-tauri/crates/boba-app/src/system/**", "src-tauri/crates/boba-domain/src/audit/**", "src-tauri/crates/boba-store/migrations/0006_system.sql", "src-tauri/crates/boba-app/src/ports/clock.rs", "src-tauri/crates/boba-app/src/ports/repo/system.rs"]
+    files: ["src-tauri/crates/boba-store/src/repos/settings.rs", "src-tauri/crates/boba-store/src/repos/audit.rs", "src-tauri/crates/boba-app/src/system/**", "src-tauri/crates/boba-domain/src/audit/**", "src-tauri/crates/boba-store/migrations/0006_system.sql", "src-tauri/crates/boba-app/src/ports/clock.rs", "src-tauri/crates/boba-app/src/ports/repo/system.rs", "src-tauri/crates/boba-app/Cargo.toml", "src-tauri/crates/boba-store/Cargo.toml"]
     covers: ["AD-12", "FR-89", "FR-106"]
     ac:
       - "Given any code path that records an outbound action When it runs Then an `intent` row is written before it and an `outcome` row after it, each with `prev_hash` and a blake3 `hash` computed over the RFC 8785 (JCS) form of every column except `hash`. Rows hold metadata, IDs and blake3 hashes of payloads (Package, email body), never the payloads themselves."
