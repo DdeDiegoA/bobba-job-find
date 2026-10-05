@@ -361,6 +361,43 @@ pub fn cli_kind(id: &str) -> Option<CliKind> {
     CliKind::ALL.into_iter().find(|kind| kind.id() == id)
 }
 
+/// Locate (building if needed) the fake CLI used by runtime/supervisor tests.
+///
+/// `cargo test` builds only the test harness in `target/debug/deps`, never
+/// sibling bins, so a cold CI cache has no `target/debug/boba-fake-cli`. This
+/// builds it once on first use. `BOBA_FAKE_CLI` short-circuits (packaged E2E).
+#[cfg(test)]
+pub(crate) fn fake_cli_path() -> std::path::PathBuf {
+    use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
+
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
+            return PathBuf::from(path);
+        }
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|dir| dir.join("Cargo.toml").is_file() && dir.join("tools/fake-cli").is_dir())
+            .expect("workspace root");
+        let status = std::process::Command::new(env!("CARGO"))
+            .args(["build", "-p", "boba-fake-cli"])
+            .current_dir(workspace_root)
+            .status()
+            .expect("run cargo build -p boba-fake-cli");
+        assert!(status.success(), "cargo build -p boba-fake-cli failed");
+        let name = if cfg!(windows) {
+            "boba-fake-cli.exe"
+        } else {
+            "boba-fake-cli"
+        };
+        let bin = workspace_root.join("target/debug").join(name);
+        assert!(bin.exists(), "fake CLI not built at {}", bin.display());
+        bin
+    })
+    .clone()
+}
+
 #[derive(Default, Clone, Copy)]
 struct Usage {
     tokens_in: Option<i64>,

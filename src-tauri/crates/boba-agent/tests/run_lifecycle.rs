@@ -3,6 +3,8 @@
 //! process tree, and failures are classified so AI work can pause (FR-16/21).
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -16,25 +18,32 @@ use boba_app::ports::repo::agent::{
     RunStatus,
 };
 
-/// The fake CLI built by `cargo test` in the workspace.
+/// The fake CLI, built on demand so a cold CI cache still works: `cargo test`
+/// builds only the harness in `target/debug/deps`, never the sibling bin.
 fn fake_cli() -> PathBuf {
-    if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
-        return PathBuf::from(path);
-    }
-    let exe = std::env::current_exe().expect("current exe");
-    let dir = exe.parent().and_then(Path::parent).expect("target dir");
-    let name = if cfg!(windows) {
-        "boba-fake-cli.exe"
-    } else {
-        "boba-fake-cli"
-    };
-    let candidate = dir.join(name);
-    assert!(
-        candidate.exists(),
-        "build the workspace first: cargo build -p boba-fake-cli ({})",
-        candidate.display()
-    );
-    candidate
+    static BIN: OnceLock<PathBuf> = OnceLock::new();
+    BIN.get_or_init(|| {
+        if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
+            return PathBuf::from(path);
+        }
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|dir| dir.join("Cargo.toml").is_file() && dir.join("tools/fake-cli").is_dir())
+            .expect("workspace root");
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "-p", "boba-fake-cli"])
+            .current_dir(workspace_root)
+            .status()
+            .expect("run cargo build -p boba-fake-cli");
+        assert!(status.success(), "cargo build -p boba-fake-cli failed");
+        let name = if cfg!(windows) {
+            "boba-fake-cli.exe"
+        } else {
+            "boba-fake-cli"
+        };
+        workspace_root.join("target/debug").join(name)
+    })
+    .clone()
 }
 
 fn spec(env: &[(&str, &str)]) -> RunSpec {

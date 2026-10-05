@@ -94,6 +94,8 @@ fastembed = { version = "7.1", default-features = false, features = ["hf-hub-nat
 
 # --- Agent runtime / process ---
 cron = "0.17"
+# process-wrap: std frontend + process-group (Unix) / JobObject (Windows), as
+# AD-1 requires for kill-tree. Was tokio1 pre-S2.2; no crate depended on it yet.
 process-wrap = { version = "10.0", default-features = false, features = ["std", "process-group", "job-object", "creation-flags"] }
 interprocess = "2.4"
 which = "8.0"

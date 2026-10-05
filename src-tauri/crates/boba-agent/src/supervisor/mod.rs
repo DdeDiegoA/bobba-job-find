@@ -179,31 +179,11 @@ impl Drop for SupervisedProcess {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::Path;
 
-    /// The fake CLI built by `cargo build`/`cargo test` in the workspace.
+    /// The fake CLI, built on demand so a cold target still works (see
+    /// `runtime::fake_cli_path`).
     fn fake_cli() -> PathBuf {
-        if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
-            return PathBuf::from(path);
-        }
-        let exe = std::env::current_exe().expect("current exe");
-        let dir = exe
-            .parent()
-            .and_then(Path::parent)
-            .expect("target dir")
-            .to_path_buf();
-        let name = if cfg!(windows) {
-            "boba-fake-cli.exe"
-        } else {
-            "boba-fake-cli"
-        };
-        let candidate = dir.join(name);
-        assert!(
-            candidate.exists(),
-            "build the workspace first: cargo build -p boba-fake-cli ({})",
-            candidate.display()
-        );
-        candidate
+        crate::runtime::fake_cli_path()
     }
 
     fn spec(env: &[(&str, &str)]) -> CommandSpec {
