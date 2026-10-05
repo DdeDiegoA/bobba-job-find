@@ -574,7 +574,7 @@ As a user, I want clean ATS-safe templates rendered without LaTeX, so that my do
 - **And** fonts are bundled under the OFL licence, and the user can set a default template.
 
 ### Story 7.2: Tailor task with fact IDs and language auto-match
-**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs` · **Covers:** FR-69, FR-70, AD-15, AD-17
+**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs`, `src-tauri/crates/boba-domain/src/documents/**`, `src-tauri/crates/boba-domain/src/lib.rs`, `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/lib.rs`, `src-tauri/crates/boba-docs/src/typst/**`, `src-tauri/crates/boba-store/src/repos/documents.rs` · **Covers:** FR-69, FR-70, AD-15, AD-17
 
 As a user, I want a CV and cover letter drafted for this Offer in its language, so that I start from a strong draft.
 

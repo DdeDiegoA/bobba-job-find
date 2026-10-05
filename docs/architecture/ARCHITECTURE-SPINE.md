@@ -50,7 +50,7 @@ graph TD
   SHIM["boba-mcp (sidecar bin)"] --> PROTO
 ```
 
-Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never depend on each other: cross-adapter work goes through a use case in `boba-app`. `boba-domain` depends only on `serde`, `thiserror`, `time` and `ulid`.
+Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never depend on each other: cross-adapter work goes through a use case in `boba-app`. `boba-domain` depends only on `serde`, `thiserror`, `time` and `ulid`. **Every type that crosses a port lives in `boba-domain`**: port traits in `boba-app::ports` take and return domain types only, so an adapter's own types never leak upward and `boba-app` never needs an adapter crate.
 
 ## Invariants & Rules
 
@@ -145,7 +145,7 @@ Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never 
 ### AD-14 — One document model, verified renders
 - **Binds:** documents, apply
 - **Prevents:** PDF and DOCX diverging in content, and unverified documents being sent.
-- **Rule:** tailoring produces a structured `CvDocument` or `CoverLetterDocument` (JSON, schema-versioned). Renderers are pure functions of `(document, template, locale)`: Typst (embedded crate) produces the PDF and docx-rs produces the DOCX. A document is `verified` only if all of these pass:
+- **Rule:** tailoring produces a structured `CvDocument` or `CoverLetterDocument` (JSON, schema-versioned). The model types (`CvDocument`, `CoverLetterDocument`, `TemplateId`, the layout report) live in `boba_domain::documents`. `boba_app::ports::RenderPort` takes them, and `boba-docs` implements it. Renderers are pure functions of `(document, template, locale)`: Typst (embedded crate) produces the PDF and docx-rs produces the DOCX. A document is `verified` only if all of these pass:
   - the page budget (CV ≤ 2 pages, letter = 1 page), measured on the laid-out Typst document
   - the ATS text layer (extract the PDF text, check that the contact details are literal and every required keyword the profile backs is present, and that no `(cid:` or U+FFFD characters appear)
   - the fabrication check (AD-15)

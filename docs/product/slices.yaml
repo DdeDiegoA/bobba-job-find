@@ -362,14 +362,20 @@
   parent: "7.2"
   title: Tailor task with fact IDs and language auto-match
   deps: [S7.1, S3.4, S2.4, S1.3p]
-  files: [agent-pack/skills/tailor_application/**, "@c/boba-app/src/tailoring/**", "@c/boba-app/src/ports/render.rs", "@c/boba-app/src/ports/repo/documents.rs"]
-  notes: S7.1 implemented boba-store repos/documents.rs before the DocumentRepo trait existed (accepted by the architect, 2026-10-05). This slice adds the trait in ports/repo/documents.rs and conforms S7.1's impl to it.
+  files: [agent-pack/skills/tailor_application/**, "@c/boba-app/src/tailoring/**", "@c/boba-app/src/ports/render.rs", "@c/boba-app/src/ports/repo/documents.rs", "@c/boba-domain/src/documents/**", "@c/boba-domain/src/lib.rs", "@c/boba-docs/src/model/**", "@c/boba-docs/src/lib.rs", "@c/boba-docs/src/typst/**", "@c/boba-store/src/repos/documents.rs"]
+  notes: S7.1 implemented boba-store repos/documents.rs before the DocumentRepo trait existed (accepted by the architect, 2026-10-05). This slice adds the trait in ports/repo/documents.rs and conforms S7.1's impl to it. RenderPort ruling (architect 2026-10-05, AD-14 and the Design Paradigm rule that every type crossing a port lives in boba-domain). This slice moves the document model from boba-docs/src/model to boba-domain/src/documents with no re-export shim, adds RenderPort over domain types only, and makes boba-docs implement it by wrapping S7.1's render_cv, render_cover and template registry. render_docx returns a not-yet-supported error until S7.7 fills it from boba-docs/src/docx. S7.1 is not reopened.
+  ac_extra:
+    - "Given boba-domain, when I inspect its Cargo.toml, then it still depends only on serde, thiserror, time and ulid, and boba-domain/src/documents holds CvDocument, CoverLetterDocument and their item and section types, schema_version, fact_ids, declared_gaps, TemplateId, LayoutReport (pages, orphans) and RenderedPdf (bytes, layout) (AD-14)."
+    - "Given boba-app::ports::RenderPort, when I read it, then it exposes templates() returning Vec of TemplateInfo, render_pdf taking a DocumentModel enum (Cv or CoverLetter), a TemplateId and a locale and returning RenderedPdf, and render_docx returning bytes, and every type in those signatures comes from boba-domain (AD-14)."
+    - "Given boba-docs, when it implements RenderPort, then it wraps S7.1's render_cv, render_cover and template registry, boba-docs/src/model is deleted with no re-export shim, and S7.1's existing tests pass unchanged apart from import paths."
+    - "Given the workspace, when I run cargo check and inspect boba-app's Cargo.toml, then it passes and boba-app has no dependency on boba-docs (hexagonal rule)."
 
 - id: S7.3
   parent: "7.3"
   title: Fabrication validator and claim traceability
   deps: [S7.2]
   files: ["@c/boba-domain/src/validator/**", src/features/studio/trace/**, "{loc:studio_trace}"]
+  notes: The fabrication validator lives in boba-domain/src/validator (already stubbed) and works on the boba-domain document types that S7.2 moved there (AD-14 ruling 2026-10-05).
 
 - id: S7.4
   parent: "7.4"
