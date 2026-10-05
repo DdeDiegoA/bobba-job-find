@@ -60,7 +60,15 @@ Communication: talk to Diego and write all documents in **English**.
 - `ux` — tab **diseño**
 
 ## Current phase
-**Planning COMPLETE (2026-10-05).** Nothing built yet. Next: build phase starting with E1 Foundations → E2 Agent runtime (human gate before build).
+**BUILD PHASE — MVP (started 2026-10-05).** Human gate passed. Backlog: `docs/product/backlog.md` (76 slices, 21 waves, ≤4 parallel devs; source `docs/product/slices.yaml`). Root `./stories.yaml` = current wave only (`python3 scripts/gen_backlog.py --wave N`). Sprint status: `_bmad-output/implementation-artifacts/sprint-status.yaml`.
+
+Build rules (Diego, 2026-10-05):
+- Devs: all `opencode` DeepSeek V4.1 Flash. Branch `hermad/<story>` in a worktree per slice.
+- Gated slices (S1.2a, S1.2b, S1.7, S2.3a, S2.3b, S8.1, S8.2, S8.5, S9.6–S9.8, S10.2, S10.5, S11.1a, S11.1b, S11.2, S11.3): built normally; after reviewer approval the orquestador **asks Diego before merging**.
+- Cadence: waves run back-to-back; report to Diego at walking skeleton (W2–W4) and at each completed epic. Stop only for gates, conflicts, failures.
+- Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
+
+Wave log: W1 (S1.1 scaffold) — in progress.
 
 | Area | Docs | Status |
 |---|---|---|

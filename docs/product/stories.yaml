@@ -6,7 +6,7 @@ stories:
     title: "Repo scaffold and crate workspace"
     phase: "MVP"
     depends_on: []
-    files: ["src/", "src-tauri/", "src-tauri/crates/*", "package.json", "rust-toolchain.toml"]
+    files: ["package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "tsconfig.json", "vite.config.ts", "index.html", ".gitattributes", ".gitignore", "deny.toml", "src/**", "src-tauri/**", "locales/**", "agent-pack/**", "templates/**", "tools/**", "e2e/**"]
     covers: ["AD-1", "AD-16"]
     ac:
       - "Given a fresh clone When I run the documented dev command Then an empty Boba window opens on macOS, Windows and Linux."
@@ -17,7 +17,7 @@ stories:
     title: "Encrypted store, keychain key and migrations"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: ["boba-store/", "boba-store/migrations/"]
+    files: ["src-tauri/crates/boba-store/src/db/**", "src-tauri/crates/boba-store/src/keys/**", "src-tauri/crates/boba-store/src/migrate/**", "src-tauri/crates/boba-store/tests/db.rs", "src-tauri/crates/boba-store/migrations/0001_init.sql", "src-tauri/crates/boba-store/src/unlock/**", "src-tauri/src/commands/unlock.rs", "src/features/unlock/**", "locales/en/unlock.json", "locales/es/unlock.json", "docs/qa/macos-upgrade-test.md"]
     covers: ["FR-109", "AD-2", "AD-13", "AD-20", "NFR-2", "NFR-12", "ADR-009"]
     ac:
       - "Given the first launch When the store initialises Then a random 256-bit key is created in the keychain (`app.bobajobfind/db-key`), and the DB file cannot be opened with plain SQLite."
@@ -32,7 +32,7 @@ stories:
     title: "Typed IPC, error model and event bus"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: ["src-tauri/src/", "src/lib/ipc/bindings.ts"]
+    files: ["src-tauri/src/ipc/**", "src-tauri/src/events/**", "src-tauri/crates/boba-app/src/error/**", "src/lib/ipc/**", "scripts/gen-bindings.mjs"]
     covers: ["AD-3"]
     ac:
       - "Given a Rust command When I build Then `bindings.ts` is regenerated, and CI fails if it is stale."
@@ -43,7 +43,7 @@ stories:
     title: "i18n catalogues EN/ES (UI and core)"
     phase: "MVP"
     depends_on: ["1.3"]
-    files: ["locales/{en,es}/", "src/app/"]
+    files: ["src/lib/i18n/**", "src-tauri/crates/boba-app/src/i18n/**", "locales/en/common.json", "locales/es/common.json", "scripts/check-i18n.mjs"]
     covers: ["FR-1", "FR-114", "AD-21", "NFR-15"]
     ac:
       - "Given an OS locale of `es-*` When I first launch Then the UI is in Spanish. Otherwise it is in English."
@@ -54,7 +54,7 @@ stories:
     title: "App shell, design tokens, theme and navigation"
     phase: "MVP"
     depends_on: ["1.3", "1.4"]
-    files: ["src/app/", "src/styles/tokens.css", "src/components/ui/"]
+    files: ["src/app/**", "src/styles/**", "src/components/ui/**", "locales/en/shell.json", "locales/es/shell.json"]
     covers: ["FR-1", "NFR-15", "EXPERIENCE §2.1"]
     ac:
       - "Given the shell When it loads Then the sidebar shows Today, Inbox, Studio, Tracker, Profile, Connections and Settings, with a topbar holding the command palette, Run now and run status (plus the Kill Switch when Auto is on), and placeholder empty states."
@@ -65,7 +65,7 @@ stories:
     title: "System tray, single instance and close-to-tray"
     phase: "MVP"
     depends_on: ["1.4"]
-    files: ["src-tauri/src/ (tray)"]
+    files: ["src-tauri/src/tray/menu.rs", "src-tauri/src/tray/mod.rs", "src-tauri/src/lifecycle/**", "locales/en/tray.json", "locales/es/tray.json"]
     covers: ["FR-42", "AD-18", "NFR-18"]
     ac:
       - "Given the app is running When I close the window Then Boba stays in the tray, and the first time this happens it explains why."
@@ -76,7 +76,7 @@ stories:
     title: "Settings store and audit log"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["boba-store/", "boba-app/ (system)"]
+    files: ["src-tauri/crates/boba-store/src/repos/settings.rs", "src-tauri/crates/boba-store/src/repos/audit.rs", "src-tauri/crates/boba-app/src/system/**", "src-tauri/crates/boba-domain/src/audit/**", "src-tauri/crates/boba-store/migrations/0006_system.sql"]
     covers: ["AD-12", "FR-89", "FR-106"]
     ac:
       - "Given any code path that records an outbound action When it runs Then an `intent` row is written before it and an `outcome` row after it, each with `prev_hash` and a blake3 `hash` computed over the RFC 8785 (JCS) form of every column except `hash`. Rows hold metadata, IDs and blake3 hashes of payloads (Package, email body), never the payloads themselves."
@@ -89,7 +89,7 @@ stories:
     title: "CI pipeline"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: [".github/workflows/ci.yml"]
+    files: [".github/workflows/ci.yml", "scripts/ci/**"]
     covers: ["NFR-6", "NFR-22"]
     ac:
       - "Given a PR When CI runs Then it executes Biome, tsc, Vitest, the i18n check and the bindings check; cargo fmt, clippy, test and deny; and a 3-OS `tauri build --no-bundle`."
@@ -100,7 +100,7 @@ stories:
     title: "CLI detection and capability probing"
     phase: "MVP"
     depends_on: ["1.3"]
-    files: ["boba-agent/ (CliDriver)", "cli_install"]
+    files: ["src-tauri/crates/boba-agent/src/drivers/**", "src-tauri/crates/boba-agent/src/detect/**", "src-tauri/crates/boba-store/src/repos/cli_install.rs", "src-tauri/crates/boba-store/migrations/0002_cli_install.sql"]
     covers: ["FR-2", "AD-4"]
     ac:
       - "Given Claude Code, Codex, OpenCode, Gemini CLI or Aider on PATH or in a known location When detection runs Then each is listed with version, path, auth/health status and its probed capabilities (`stream_json`, `mcp`, `tool_allowlist`, `budget_flag`, `turn_flag`, `structured_output`) within ≤ 10 s."
@@ -111,7 +111,7 @@ stories:
     title: "Run lifecycle, ProcessSupervisor and fake CLI"
     phase: "MVP"
     depends_on: ["2.1"]
-    files: ["boba-agent/", "agent_run", "agent_event"]
+    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0005_agent_runs.sql"]
     covers: ["FR-16", "FR-21", "AD-1", "AD-4", "NFR-14"]
     ac:
       - "Given an `AgentTask` When it runs Then the events `Started | Text | ToolCall | ToolResult | Usage | Finished | Failed` are persisted and emitted, and each run is attributed to its CLI and model."
@@ -123,7 +123,7 @@ stories:
     title: "boba-mcp shim, MCP server and sandbox lockdown"
     phase: "MVP"
     depends_on: ["2.2"]
-    files: ["boba-mcp/", "boba-mcp-proto/", "boba-agent/ (MCP server)"]
+    files: ["src-tauri/crates/boba-mcp/**", "src-tauri/crates/boba-mcp-proto/**", "src-tauri/crates/boba-agent/src/mcp/**", "src-tauri/crates/boba-agent/src/lockdown/**", "src-tauri/crates/boba-agent/src/sweep/**", "src-tauri/crates/boba-domain/src/untrusted/**"]
     covers: ["FR-19", "NFR-7", "AD-5", "AD-6", "AD-7", "ADR-010"]
     ac:
       - "Given a run When it starts Then it gets a fresh workspace and an MCP config that lists only `boba-mcp`. Native shell, file-write and web tools are disabled by the CLI's flags. The shim authenticates over an owner-only socket or pipe with a per-run token, and the workspace is deleted at the end."
@@ -138,7 +138,7 @@ stories:
     title: "Agent pack renderer and task registry"
     phase: "MVP"
     depends_on: ["2.3"]
-    files: ["agent-pack/system.md", "agent-pack/skills/*", "boba-agent/ (renderer)"]
+    files: ["agent-pack/system.md", "src-tauri/crates/boba-agent/src/pack/**", "src-tauri/crates/boba-agent/src/tasks/**"]
     covers: ["FR-18", "NFR-21", "AD-4"]
     ac:
       - "Given an `AgentTask` When it runs Then `system.md` plus that task's `SKILL.md` are rendered into the workspace in the CLI's native file (`CLAUDE.md`, `AGENTS.md` or `GEMINI.md`), with `target_language` filled in."
@@ -148,7 +148,7 @@ stories:
     title: "Run budgets and usage display"
     phase: "MVP"
     depends_on: ["2.2"]
-    files: ["boba-agent/", "boba-app/"]
+    files: ["src-tauri/crates/boba-agent/src/budget/**", "src/features/settings/ai-engine/**", "locales/en/ai_engine.json", "locales/es/ai_engine.json"]
     covers: ["FR-20"]
     ac:
       - "Given a per-run budget N (default 30) When more Offers need LLM features Then only N are processed. The rest are ranked deterministically and marked \"Low confidence: not yet analysed\"."
@@ -158,7 +158,7 @@ stories:
     title: "Wizard framework and language step"
     phase: "MVP"
     depends_on: ["1.5"]
-    files: ["src/features/onboarding/"]
+    files: ["src/features/onboarding/wizard/**", "src/features/onboarding/steps/language/**", "locales/en/onboarding.json", "locales/es/onboarding.json"]
     covers: ["FR-1", "FR-10", "EXPERIENCE §4"]
     ac:
       - "Given the first launch When the app opens Then the wizard appears over the shell, starting with language and theme."
@@ -168,7 +168,7 @@ stories:
     title: "Engine step — pick CLI and model and run a test call"
     phase: "MVP"
     depends_on: ["2.4", "3.1"]
-    files: ["src/features/onboarding/", "boba-agent/"]
+    files: ["src/features/onboarding/steps/engine/**", "src-tauri/src/commands/agent.rs", "locales/en/onboarding_engine.json", "locales/es/onboarding_engine.json"]
     covers: ["FR-2", "FR-3", "FR-17", "NFR-3"]
     ac:
       - "Given detected CLIs When I pick one and a model (listed, or typed in) Then a round-trip test runs and shows latency and model identity. On failure it shows the CLI's error and a fix hint."
@@ -179,7 +179,7 @@ stories:
     title: "Limited mode (no agent)"
     phase: "MVP"
     depends_on: ["3.2"]
-    files: ["src/features/* (disabled states)", "boba-app/"]
+    files: ["src-tauri/crates/boba-app/src/capabilities/**", "src/lib/capabilities/**", "src/components/gated/**", "locales/en/gated.json", "locales/es/gated.json"]
     covers: ["FR-4", "EXPERIENCE §9.14"]
     ac:
       - "Given no working CLI When I choose limited mode Then Sources, dedup, deterministic scoring, the Tracker and manual Applications work."
@@ -190,7 +190,7 @@ stories:
     title: "Profile fact model and editor with versioning"
     phase: "MVP"
     depends_on: ["1.2", "1.5"]
-    files: ["boba-domain/ (profile)", "boba-app/", "profile", "profile_fact", "preference", "src/features/profile/"]
+    files: ["src-tauri/crates/boba-domain/src/profile/**", "src-tauri/crates/boba-app/src/profile/**", "src-tauri/crates/boba-store/src/repos/profile.rs", "src-tauri/src/commands/profile.rs", "src/features/profile/**", "locales/en/profile.json", "locales/es/profile.json", "src-tauri/crates/boba-store/migrations/0008_profile.sql"]
     covers: ["FR-11", "FR-12", "FR-13", "AD-15", "EXPERIENCE §9.10"]
     ac:
       - "Given the Profile editor When I add or edit experience, skills (with evidence), education, certifications, languages (CEFR) or eligibility Then each item is a `profile_fact` with a stable ULID."
@@ -201,7 +201,7 @@ stories:
     title: "Master CV import with review"
     phase: "MVP"
     depends_on: ["2.4", "3.4"]
-    files: ["agent-pack/skills/profile_import/", "boba-app/ (profile import)", "src/features/onboarding/"]
+    files: ["agent-pack/skills/profile_import/**", "src-tauri/crates/boba-app/src/profile_import/**", "src/features/onboarding/steps/cv-import/**", "locales/en/onboarding_cv.json", "locales/es/onboarding_cv.json"]
     covers: ["FR-5", "AD-5"]
     ac:
       - "Given a PDF, DOCX or LinkedIn export ZIP (one or more files) When I import Then the agent proposes facts, each shown with its source excerpt, and I confirm, edit or delete each. Nothing is saved without my confirmation."
@@ -211,7 +211,7 @@ stories:
     title: "Profile gap interview and bilingual drafting"
     phase: "MVP"
     depends_on: ["3.5"]
-    files: ["agent-pack/skills/profile_gaps/", "src/features/onboarding/"]
+    files: ["agent-pack/skills/profile_gaps/**", "agent-pack/skills/translate_profile/**", "src-tauri/crates/boba-app/src/profile_gaps/**", "src/features/onboarding/steps/gaps/**", "locales/en/onboarding_gaps.json", "locales/es/onboarding_gaps.json"]
     covers: ["FR-6", "FR-12"]
     ac:
       - "Given missing eligibility, CEFR level, notice period or writing sample When the interview runs Then I get short, skippable questions. Skipped items lower Confidence on related Gates."
@@ -221,7 +221,7 @@ stories:
     title: "Preferences step"
     phase: "MVP"
     depends_on: ["3.4"]
-    files: ["src/features/onboarding/", "src/features/settings/preferences"]
+    files: ["src/features/onboarding/steps/preferences/**", "src/features/settings/preferences/**", "locales/en/preferences.json", "locales/es/preferences.json"]
     covers: ["FR-7", "FR-14", "AD-17"]
     ac:
       - "Given the step When I fill it in Then I can set roles and seniority; Salary Floor (stored as `amount_minor`, currency and period, marked hard or soft); locations and timezone window; work mode; working languages; deal-breakers; and excluded companies."
@@ -231,7 +231,7 @@ stories:
     title: "Wizard finish — sources, email, apply mode and first run"
     phase: "MVP"
     depends_on: ["3.7", "4.8", "5.2", "10.2"]
-    files: ["src/features/onboarding/"]
+    files: ["src/features/onboarding/steps/finish/**", "src/features/onboarding/steps/sources/**", "src/features/onboarding/steps/email/**", "src/features/onboarding/steps/backup/**", "e2e/onboarding/**", "locales/en/onboarding_finish.json", "locales/es/onboarding_finish.json"]
     covers: ["FR-8", "FR-9", "FR-10", "FR-111", "SM-1", "ADR-009"]
     ac:
       - "Given the Sources step When it shows Then recommended Safe Sources for my markets are pre-selected, each with a Risk Tier badge."
@@ -244,7 +244,7 @@ stories:
     title: "Source Adapter SDK, registry and HttpClient"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["boba-sources/ (registry, HttpClient)", "source", "source_run", "source_optin"]
+    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0004_sources.sql"]
     covers: ["FR-32", "AD-9", "AD-10", "NFR-14"]
     ac:
       - "Given a manifest declaring access_class, legal_tier, rate limits, attribution, apply_capability and secrets When it is registered Then the registry refuses to run `html_scrape`, `session_browser` or `external_process` sources that have no recorded opt-in."
@@ -255,7 +255,7 @@ stories:
     title: "Offer normalisation and language detection"
     phase: "MVP"
     depends_on: ["4.1"]
-    files: ["boba-domain/ (posting)", "boba-app/ (ingest)", "posting", "posting_source", "company"]
+    files: ["src-tauri/crates/boba-domain/src/posting/**", "src-tauri/crates/boba-app/src/ingest/normalize/**", "src-tauri/crates/boba-store/src/repos/postings.rs", "src-tauri/crates/boba-store/migrations/0007_postings.sql"]
     covers: ["FR-48", "AD-17"]
     ac:
       - "Given a `RawPosting` When it is normalised Then an Offer is stored with title, company, locations, work mode, money (`amount_minor`, currency, period), dates, description, requirements, `lang` (BCP-47, via lingua), apply hints and a provenance row holding the raw payload."
@@ -265,7 +265,7 @@ stories:
     title: "Deduplication into clusters"
     phase: "MVP"
     depends_on: ["4.2"]
-    files: ["boba-domain/ (dedup)", "boba-app/ (ingest)"]
+    files: ["src-tauri/crates/boba-domain/src/dedup/**", "src-tauri/crates/boba-app/src/ingest/dedup/**"]
     covers: ["FR-49", "AD-19"]
     ac:
       - "Given Offers that share a canonical apply URL or a `job_key` slug (company + title + location bucket), or have description simhash ≥ 0.9 When they are ingested Then they merge into one posting with N provenance rows. Nothing is deleted."
@@ -275,7 +275,7 @@ stories:
     title: "Seen state, repost, staleness and expiry"
     phase: "MVP"
     depends_on: ["4.3"]
-    files: ["boba-app/ (ingest)"]
+    files: ["src-tauri/crates/boba-app/src/ingest/lifecycle/**", "src-tauri/crates/boba-store/migrations/0011_posting_lifecycle.sql"]
     covers: ["FR-50", "FR-51", "FR-52"]
     ac:
       - "Given an Offer I've already seen or dismissed When it reappears without material change Then I am not notified again."
@@ -286,7 +286,7 @@ stories:
     title: "ATS board adapters (Greenhouse, Lever, Ashby, Workable, SmartRecruiters)"
     phase: "MVP"
     depends_on: ["4.2"]
-    files: ["boba-sources/ (ats/*)"]
+    files: ["src-tauri/crates/boba-sources/src/ats/**", "src-tauri/crates/boba-sources/tests/fixtures/ats/**"]
     covers: ["FR-23", "FR-27"]
     ac:
       - "Given a board token or URL for any of the 5 ATSs (Lever EU included) When I add it Then Boba recognises the ATS, runs a test fetch showing a count and a sample, and saves the Source."
@@ -296,7 +296,7 @@ stories:
     title: "Remote feed adapters and aggregator APIs"
     phase: "MVP"
     depends_on: ["4.2"]
-    files: ["boba-sources/ (feeds/*, adzuna, jooble)"]
+    files: ["src-tauri/crates/boba-sources/src/feeds/**", "src-tauri/crates/boba-sources/src/aggregators/**", "src-tauri/crates/boba-sources/tests/fixtures/feeds/**"]
     covers: ["FR-23", "FR-24", "FR-32"]
     ac:
       - "Given Remotive, RemoteOK, Himalayas, Arbeitnow, WeWorkRemotely RSS and HN Who's Hiring When a run executes Then each respects its documented limits (e.g. Remotive at most 4 fetches a day), and attribution shows on its Offers."
@@ -307,7 +307,7 @@ stories:
     title: "Manual Offer intake (URL and text)"
     phase: "MVP"
     depends_on: ["4.2", "2.4"]
-    files: ["boba-app/", "agent-pack/skills/extract_posting/", "src/features/inbox/"]
+    files: ["src-tauri/crates/boba-app/src/ingest/manual/**", "agent-pack/skills/extract_postings/**", "src/features/inbox/manual-add/**", "src-tauri/src/commands/ingest.rs", "locales/en/manual_add.json", "locales/es/manual_add.json"]
     covers: ["FR-25"]
     ac:
       - "Given a URL When I paste it Then Boba fetches it (respecting robots rules) and the agent extracts an Offer. If fetching fails, I'm asked to paste the text."
@@ -317,7 +317,7 @@ stories:
     title: "Connections screen — catalogue, custom RSS and source health"
     phase: "MVP"
     depends_on: ["4.5", "4.6"]
-    files: ["src/features/connections/", "boba-sources/ (rss)"]
+    files: ["src/features/connections/sources/**", "src-tauri/crates/boba-sources/src/rss/**", "src-tauri/crates/boba-app/src/sources/**", "src-tauri/src/commands/sources.rs", "locales/en/connections_sources.json", "locales/es/connections_sources.json"]
     covers: ["FR-23", "FR-26", "FR-31", "EXPERIENCE §9.7"]
     ac:
       - "Given the Connections screen When it opens Then each Source tile shows Type, markets, a Risk Tier badge, last run, Offers found, last error and status (OK, Degraded, Failing)."
@@ -328,7 +328,7 @@ stories:
     title: "Scheduler and job runs"
     phase: "MVP"
     depends_on: ["1.7"]
-    files: ["src-tauri/src/ (scheduler wiring)", "boba-app/", "job_run"]
+    files: ["src-tauri/src/scheduler/**", "src-tauri/crates/boba-app/src/jobs/**", "src-tauri/crates/boba-store/src/repos/jobs.rs", "src-tauri/crates/boba-store/migrations/0015_jobs.sql"]
     covers: ["FR-41", "FR-43", "FR-47", "AD-18"]
     ac:
       - "Given one or more run times and active days When a time arrives Then exactly one `job_run` row is created per `(job, scheduled_for)`."
@@ -339,7 +339,7 @@ stories:
     title: "Daily search use case and run report"
     phase: "MVP"
     depends_on: ["5.1", "4.4"]
-    files: ["boba-app/ (daily_search)", "src/features/today/"]
+    files: ["src-tauri/crates/boba-app/src/daily_search/**", "src/features/today/run-report/**", "locales/en/run_report.json", "locales/es/run_report.json"]
     covers: ["FR-46", "NFR-9", "NFR-14"]
     ac:
       - "Given a run When it executes Then it queries all enabled Sources, ingests, deduplicates, then triggers scoring (E6) and the run budget (2.5). Live progress per Source shows in the topbar."
@@ -350,7 +350,7 @@ stories:
     title: "Digest notifications and quiet hours"
     phase: "MVP"
     depends_on: ["5.2", "6.4"]
-    files: ["src-tauri/src/ (notifications)", "src/features/settings/notifications"]
+    files: ["src-tauri/src/notifications/**", "src-tauri/crates/boba-app/src/digest/**", "src/features/settings/notifications/**", "locales/en/notifications.json", "locales/es/notifications.json"]
     covers: ["FR-45", "FR-107"]
     ac:
       - "Given a run with new ranked Offers When it ends Then a native notification in my UI language summarises them (e.g. \"3 Strong, 5 Good\"), and clicking it deep-links to Today."
@@ -361,7 +361,7 @@ stories:
     title: "Launch at login and tray run controls"
     phase: "MVP"
     depends_on: ["5.1", "1.6"]
-    files: ["src-tauri/src/ (autostart, tray)"]
+    files: ["src-tauri/src/autostart/**", "src-tauri/src/tray/run_controls.rs"]
     covers: ["FR-42", "FR-44", "NFR-10", "NFR-18"]
     ac:
       - "Given launch at login is enabled (default off) When I log in Then Boba starts in the tray with no window."
@@ -372,7 +372,7 @@ stories:
     title: "Gates"
     phase: "MVP"
     depends_on: ["4.2", "3.7"]
-    files: ["boba-domain/scoring/gates"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/gates/**"]
     covers: ["FR-53", "AD-8"]
     ac:
       - "Given an Offer When Gates run Then work eligibility, language, location/work mode, compensation floor and deadline each return PASS, FLAG or VETO with a quoted span and a Confidence."
@@ -383,7 +383,7 @@ stories:
     title: "Posting features extraction (deterministic and LLM-proposed)"
     phase: "MVP"
     depends_on: ["4.2", "2.4"]
-    files: ["boba-app/ (features)", "agent-pack/skills/extract_features/", "posting_features"]
+    files: ["src-tauri/crates/boba-domain/src/posting_features/**", "src-tauri/crates/boba-app/src/posting_features/**", "agent-pack/skills/extract_postings/**", "src-tauri/crates/boba-store/migrations/0012_posting_features.sql"]
     covers: ["FR-55", "FR-56", "FR-61", "AD-5"]
     ac:
       - "Given an Offer When features are extracted Then deterministic extraction (lexicon and regex) always runs, and the LLM *proposes* additional features within the run budget. Both are stored with provenance."
@@ -393,7 +393,7 @@ stories:
     title: "Fit and Quality factors, Rank and Verdict, versioned ScoreCards"
     phase: "MVP"
     depends_on: ["6.1", "6.2"]
-    files: ["boba-domain/scoring/", "score_card", "market_benchmark"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0014_scoring.sql"]
     covers: ["FR-55", "FR-56", "FR-57", "FR-61", "FR-14", "AD-8"]
     ac:
       - "Given features, a Profile snapshot, Preferences and market data When `score()` runs Then factors F1–F6 and Q1–Q5 each emit `{score, weight, matched, missing, evidence, confidence}`, Rank = 0.65·Fit + 0.35·Quality, and the Verdict uses the PRD bands."
@@ -405,7 +405,7 @@ stories:
     title: "Today and Inbox"
     phase: "MVP"
     depends_on: ["6.3", "1.5"]
-    files: ["src/features/inbox/", "src/features/today/"]
+    files: ["src/features/today/matches/**", "src/features/today/index.tsx", "src/features/inbox/list/**", "src/features/inbox/index.tsx", "src-tauri/src/commands/offers.rs", "locales/en/today.json", "locales/es/today.json", "locales/en/inbox.json", "locales/es/inbox.json"]
     covers: ["FR-63", "FR-64", "FR-60", "EXPERIENCE §9.2, §9.3, §9.11"]
     ac:
       - "Given ranked Offers When I open the Inbox Then I see sections Strong, Good, Moderate, Weak/Poor (collapsed), Closing soon and Excluded."
@@ -417,7 +417,7 @@ stories:
     title: "Offer detail, score breakdown and Explanation narration"
     phase: "MVP"
     depends_on: ["6.4", "2.4"]
-    files: ["src/features/offer/", "agent-pack/skills/narrate_scores/", "score_narration"]
+    files: ["src/features/offer/**", "agent-pack/skills/narrate_scores/**", "src-tauri/crates/boba-app/src/narration/**", "locales/en/offer.json", "locales/es/offer.json", "src-tauri/crates/boba-store/migrations/0016_narration.sql"]
     covers: ["FR-59", "FR-65", "AD-5", "EXPERIENCE §9.4"]
     ac:
       - "Given an Offer When I open its detail Then I see the sanitised posting (no remote content loaded), Gates at the top with their quotes, the factor breakdown (matched, missing, evidence), the duplicates and Sources, the original link and the detected Apply Channels."
@@ -428,7 +428,7 @@ stories:
     title: "Inbox actions, Excluded override and dismiss reasons"
     phase: "MVP"
     depends_on: ["6.5", "9.1"]
-    files: ["src/features/inbox/", "boba-app/"]
+    files: ["src/features/inbox/actions/**", "src-tauri/crates/boba-app/src/triage/**", "locales/en/inbox_actions.json", "locales/es/inbox_actions.json"]
     covers: ["FR-54", "FR-66", "FR-67"]
     ac:
       - "Given an Offer When I Save Then an Application is created in Saved (via `TransitionStatus`). When I Dismiss Then I can give an optional reason, and a toast offers Undo for 6 s. Bulk dismiss works."
@@ -439,7 +439,7 @@ stories:
     title: "Keyboard triage and command palette"
     phase: "MVP"
     depends_on: ["6.6"]
-    files: ["src/features/inbox/", "src/app/ (palette)"]
+    files: ["src/features/inbox/keyboard/**", "src/app/palette/**", "locales/en/palette.json", "locales/es/palette.json"]
     covers: ["FR-68", "NFR-15", "EXPERIENCE §6"]
     ac:
       - "Given the list When I press J/K, S (save), D (dismiss), Enter (open) or Cmd/Ctrl+Z (undo) Then each action works, focus is visible and restored after navigation, and screen readers announce the Verdict as text."
@@ -449,7 +449,7 @@ stories:
     title: "Scoring weights settings and red-flag/scam badges"
     phase: "MVP"
     depends_on: ["6.3"]
-    files: ["src/features/settings/scoring", "boba-domain/scoring/ (q4, fraud)"]
+    files: ["src/features/settings/scoring/**", "src-tauri/crates/boba-domain/src/scoring/fraud/**", "src-tauri/crates/boba-domain/src/scoring/weights/**", "locales/en/settings_scoring.json", "locales/es/settings_scoring.json"]
     covers: ["FR-58", "FR-60"]
     ac:
       - "Given Settings → Scoring When I change w_fit/w_quality or factor weights, or reset them Then a new prefs version triggers a re-score."
@@ -459,7 +459,7 @@ stories:
     title: "Optional on-device embeddings (F3)"
     phase: "MVP"
     depends_on: ["6.3"]
-    files: ["boba-domain/scoring/f3", "boba-app/ (model download)"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/f3/**", "src-tauri/crates/boba-app/src/embeddings/**"]
     covers: ["FR-55"]
     ac:
       - "Given I opt in (about 120 MB, multilingual-e5-small) When the download completes Then F3 is computed on-device and the download destination is listed in network activity."
@@ -469,7 +469,7 @@ stories:
     title: "Document model and Typst templates (2)"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["boba-docs/", "templates/{cv,cover}/*.typ", "document", "template"]
+    files: ["src-tauri/crates/boba-docs/src/model/**", "src-tauri/crates/boba-docs/src/typst/**", "templates/cv/**", "templates/cover/**", "templates/fonts/**", "src-tauri/crates/boba-store/src/repos/documents.rs", "src-tauri/crates/boba-store/migrations/0003_documents.sql"]
     covers: ["FR-71", "AD-14"]
     ac:
       - "Given a `CvDocument` or `CoverLetterDocument` (schema-versioned JSON) When it is rendered with either of the 2 MVP templates in EN or ES Then a PDF is produced by embedded Typst, with real text, a single column and standard headings."
@@ -479,7 +479,7 @@ stories:
     title: "Tailor task with fact IDs and language auto-match"
     phase: "MVP"
     depends_on: ["7.1", "3.4", "2.4"]
-    files: ["agent-pack/skills/tailor_application/", "boba-app/ (documents)"]
+    files: ["agent-pack/skills/tailor_application/**", "src-tauri/crates/boba-app/src/tailoring/**"]
     covers: ["FR-69", "FR-70", "AD-15", "AD-17"]
     ac:
       - "Given an Offer in Spanish When I click Tailor Then both drafts are in Spanish (override available). For languages other than ES or EN, EN is used and a notice explains why."
@@ -489,7 +489,7 @@ stories:
     title: "Fabrication validator and claim traceability"
     phase: "MVP"
     depends_on: ["7.2"]
-    files: ["boba-domain/ (validator)", "src/features/studio/"]
+    files: ["src-tauri/crates/boba-domain/src/validator/**", "src/features/studio/trace/**", "locales/en/studio_trace.json", "locales/es/studio_trace.json"]
     covers: ["FR-73", "FR-74", "SM-6", "AD-15"]
     ac:
       - "Given a draft When it is validated Then any item with no facts or unknown `fact_ids` is rejected, and Ready and Send are blocked until I fix the item or confirm it into my Profile."
@@ -499,7 +499,7 @@ stories:
     title: "Reviewer pass and revision"
     phase: "MVP"
     depends_on: ["7.2"]
-    files: ["agent-pack/skills/review_application/", "boba-app/"]
+    files: ["agent-pack/skills/review_application/**", "src-tauri/crates/boba-app/src/review/**"]
     covers: ["FR-22", "FR-72"]
     ac:
       - "Given a draft When generation runs Then a fresh-context review task critiques it, a revision follows, and the reviewer's top findings appear in the studio."
@@ -508,7 +508,7 @@ stories:
     title: "Layout verification and relevance-weighted cutting"
     phase: "MVP"
     depends_on: ["7.1", "7.2"]
-    files: ["boba-docs/ (verify)"]
+    files: ["src-tauri/crates/boba-docs/src/verify/layout/**", "src-tauri/crates/boba-app/src/fitting/**"]
     covers: ["FR-76", "AD-14"]
     ac:
       - "Given a CV over budget (default 2 pages, configurable 1–3) When it is verified Then lines are scored for relevance, uniqueness and cover-letter dependency, the lowest are cut until it fits, and what was cut is shown."
@@ -518,7 +518,7 @@ stories:
     title: "ATS text-layer verification and keyword coverage"
     phase: "MVP"
     depends_on: ["7.5"]
-    files: ["boba-docs/ (verify)", "src/features/studio/"]
+    files: ["src-tauri/crates/boba-docs/src/verify/text_layer/**", "src-tauri/crates/boba-domain/src/keywords/**", "src/features/studio/coverage/**", "locales/en/studio_coverage.json", "locales/es/studio_coverage.json"]
     covers: ["FR-75", "FR-77", "SM-8", "AD-14"]
     ac:
       - "Given a rendered PDF When it is verified Then the text layer shows literal contact details and the correct reading order, with no `(cid:` or U+FFFD characters, and every Profile-backed requirement keyword is present."
@@ -529,7 +529,7 @@ stories:
     title: "Studio UI — edit, regenerate, diff and DOCX export"
     phase: "MVP"
     depends_on: ["7.3", "7.4", "7.6"]
-    files: ["src/features/studio/", "boba-docs/ (docx)"]
+    files: ["src/features/studio/editor/**", "src/features/studio/index.tsx", "src-tauri/crates/boba-docs/src/docx/**", "src-tauri/src/commands/studio.rs", "locales/en/studio.json", "locales/es/studio.json"]
     covers: ["FR-78", "FR-79", "EXPERIENCE §9.5"]
     ac:
       - "Given the studio When I edit inline or regenerate a section Then a diff toggle shows the changes since the previous draft, and the checks from 7.3 and 7.6 re-run."
@@ -539,7 +539,7 @@ stories:
     title: "Screening answers and answer bank"
     phase: "MVP"
     depends_on: ["7.2"]
-    files: ["agent-pack/skills/answer_questions/", "boba-app/", "application_answer_bank"]
+    files: ["agent-pack/skills/answer_questions/**", "src-tauri/crates/boba-app/src/answers/**", "src-tauri/crates/boba-store/migrations/0013_answer_bank.sql"]
     covers: ["FR-80"]
     ac:
       - "Given application questions When answers are drafted Then they follow the no-fabrication rule. Salary and eligibility answers default to Preferences and are always flagged for review."
@@ -549,7 +549,7 @@ stories:
     title: "Microsoft Graph connection (read and send)"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["boba-mail/ (graph)", "email_account", "src/features/connections/email"]
+    files: ["src-tauri/crates/boba-mail/src/graph/**", "src-tauri/crates/boba-mail/src/oauth/**", "src-tauri/crates/boba-store/src/repos/email.rs", "src/features/connections/email/**", "src-tauri/src/commands/email.rs", "locales/en/connections_email.json", "locales/es/connections_email.json", "src-tauri/crates/boba-store/migrations/0009_email_accounts.sql"]
     covers: ["FR-35", "FR-37", "FR-39", "FR-40", "NFR-5", "AD-13"]
     ac:
       - "Given Connect Outlook When I complete OAuth (bundled public client or my own client ID, `/common`) Then only `Mail.Read` and `Mail.Send` (delegated) are requested and listed in plain language, and the tokens are stored only in the keychain."
@@ -561,7 +561,7 @@ stories:
     title: "Gmail send-only and IMAP/SMTP"
     phase: "MVP"
     depends_on: ["8.1"]
-    files: ["boba-mail/ (gmail_send, imap, smtp)"]
+    files: ["src-tauri/crates/boba-mail/src/gmail/**", "src-tauri/crates/boba-mail/src/imap/**", "src-tauri/crates/boba-mail/src/smtp/**"]
     covers: ["FR-34", "FR-36"]
     ac:
       - "Given Connect Gmail When I complete OAuth Then Boba's bundled public desktop client (loopback-only, PKCE S256 and single-use `state` as in 8.1, no confidential secret) requests only `gmail.send`. An \"advanced: use my own client ID\" fallback exists."
@@ -571,7 +571,7 @@ stories:
     title: "Scoped sync and manual .eml import"
     phase: "MVP"
     depends_on: ["8.1", "9.1"]
-    files: ["boba-mail/ (sync)", "email_message"]
+    files: ["src-tauri/crates/boba-mail/src/sync/**", "src-tauri/crates/boba-mail/src/eml/**", "src-tauri/crates/boba-store/migrations/0019_email_messages.sql"]
     covers: ["FR-38", "FR-104", "FR-113"]
     ac:
       - "Given read mode When sync runs (incrementally, with a 60-day default lookback) Then only messages from applied-company domains, ATS senders or sent threads are stored. Everything else is discarded after matching."
@@ -581,7 +581,7 @@ stories:
     title: "Reply classification and Status Proposals"
     phase: "MVP"
     depends_on: ["8.3", "2.4"]
-    files: ["boba-mail/ (rules)", "agent-pack/skills/classify_emails/", "status_proposal", "src/features/today/"]
+    files: ["src-tauri/crates/boba-mail/src/rules/**", "agent-pack/skills/classify_emails/**", "src-tauri/crates/boba-app/src/status_proposals/**", "src/features/today/needs-you/**", "src/features/settings/privacy/disclosures/**", "locales/en/status_proposals.json", "locales/es/status_proposals.json", "src-tauri/crates/boba-store/migrations/0020_status_proposals.sql"]
     covers: ["FR-100", "FR-101", "FR-102", "FR-103", "AD-5", "AD-7"]
     ac:
       - "Given a matched message When it is classified (deterministic EN/ES rules first, then the LLM for uncertain cases) Then it gets a class (Acknowledgement, Rejection, Interview invite, Assessment, Offer, Request for info, Other), a confidence and a quoted line."
@@ -594,7 +594,7 @@ stories:
     title: "Gmail read via BYO client"
     phase: "MVP"
     depends_on: ["8.3", "8.2"]
-    files: ["boba-mail/ (gmail_read)"]
+    files: ["src-tauri/crates/boba-mail/src/gmail_read/**"]
     covers: ["FR-34"]
     ac:
       - "Given my own Google OAuth client ID (BYO) When I connect read+send Then the scoped sync from 8.3 works through the Gmail API. Reading with the bundled client stays deferred until CASA."
@@ -603,7 +603,7 @@ stories:
     title: "Application model and kanban Tracker"
     phase: "MVP"
     depends_on: ["1.7", "1.5"]
-    files: ["boba-domain/ (application)", "application", "status_event", "src/features/tracker/"]
+    files: ["src-tauri/crates/boba-domain/src/application/**", "src-tauri/crates/boba-app/src/applications/**", "src-tauri/crates/boba-store/src/repos/applications.rs", "src/features/tracker/board/**", "src/features/tracker/index.tsx", "src-tauri/src/commands/tracker.rs", "locales/en/tracker.json", "locales/es/tracker.json", "src-tauri/crates/boba-store/migrations/0010_applications.sql"]
     covers: ["FR-93", "FR-94", "AD-16", "EXPERIENCE §9.6"]
     ac:
       - "Given Applications When I open Tracker Then columns show Saved, Preparing, Applied, Interviewing, Offer, Hired, Rejected, No Response and Withdrawn, with the terminal columns collapsible. The stored `application.status` uses the upstream vocabulary plus `saved`, in one status machine with no UI-side state."
@@ -615,7 +615,7 @@ stories:
     title: "Apply Channel detection and Manual (link-out) apply"
     phase: "MVP"
     depends_on: ["9.1", "7.7"]
-    files: ["boba-app/ (apply)", "src/features/studio/"]
+    files: ["src-tauri/crates/boba-domain/src/apply/channel/**", "src-tauri/crates/boba-app/src/apply/manual/**", "src/features/studio/apply-bar/**", "locales/en/apply_bar.json", "locales/es/apply_bar.json"]
     covers: ["FR-81", "FR-82"]
     ac:
       - "Given an Offer When channels are detected Then Email Apply (an apply address), ATS Form (Greenhouse, Lever, Ashby or Workable form URL) or Manual is shown."
@@ -625,7 +625,7 @@ stories:
     title: "Email Apply in Review mode"
     phase: "MVP"
     depends_on: ["9.2", "8.2"]
-    files: ["boba-app/ (apply engine)", "boba-mail/", "outbox", "apply_attempt"]
+    files: ["src-tauri/crates/boba-app/src/apply/engine/**", "src-tauri/crates/boba-app/src/apply/email/**", "src-tauri/crates/boba-store/src/repos/outbox.rs", "src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql"]
     covers: ["FR-82", "FR-88", "NFR-13", "AD-12", "UJ-3"]
     ac:
       - "Given a verified Package and an Email Apply channel When I review the recipient, subject, body and attachments and click Send Then audit `intent` is written, the email goes from my account, audit `outcome` is written with the message ID, and the Application moves to Applied."
@@ -636,7 +636,7 @@ stories:
     title: "ATS Form assist via browser automation"
     phase: "MVP"
     depends_on: ["9.2", "7.8"]
-    files: ["boba-browser/", "boba-app/ (apply)"]
+    files: ["src-tauri/crates/boba-browser/src/driver/**", "src-tauri/crates/boba-browser/src/forms/**", "src-tauri/crates/boba-app/src/apply/ats_form/**"]
     covers: ["FR-82", "FR-88", "AD-10"]
     ac:
       - "Given an ATS Form channel When I click Apply Then a headed browser window, using the Boba browser profile, opens the form and fills fields from the Package and the answer bank. Sensitive field values are never logged."
@@ -647,7 +647,7 @@ stories:
     title: "Duplicate-application guard and follow-up nudges"
     phase: "MVP"
     depends_on: ["9.1"]
-    files: ["boba-domain/apply", "src/features/tracker/"]
+    files: ["src-tauri/crates/boba-domain/src/apply/guard/**", "src/features/tracker/nudges/**", "locales/en/nudges.json", "locales/es/nudges.json"]
     covers: ["FR-92", "FR-95"]
     ac:
       - "Given an existing Application to the same company and a similar role within 30 days When I try to send Then I am warned, and Auto is blocked."
@@ -657,7 +657,7 @@ stories:
     title: "Apply policy engine and Auto Rules"
     phase: "MVP"
     depends_on: ["9.3", "9.4", "6.3"]
-    files: ["boba-domain/apply (decide)", "src/features/settings/applying"]
+    files: ["src-tauri/crates/boba-domain/src/apply/policy/**", "src-tauri/crates/boba-app/src/apply/rules/**", "src/features/settings/applying/rules/**", "locales/en/applying.json", "locales/es/applying.json", "src-tauri/crates/boba-store/migrations/0018_auto_rules.sql"]
     covers: ["FR-83", "FR-87", "FR-108", "AD-11", "EXPERIENCE §9.12"]
     ac:
       - "Given Settings → Applying When I create an Auto Rule scoped to Sources × Apply Channels (Email Apply and ATS Form, plus Session Board for Sources with an active Auto opt-in from 11.3) Then I set the minimum Rank and Fit, minimum Confidence, whether FLAGs are allowed (default no), the Verdict, a daily cap (default 5, maximum 25) and a per-company cap (default 1 per 30 days). A global cap (default 10 a day) and active hours also apply."
@@ -669,7 +669,7 @@ stories:
     title: "Dry run and Outbox hold"
     phase: "MVP"
     depends_on: ["9.6"]
-    files: ["boba-app/ (outbox)", "src/features/today/"]
+    files: ["src-tauri/crates/boba-app/src/apply/outbox/**", "src/features/today/outbox/**", "locales/en/outbox.json", "locales/es/outbox.json"]
     covers: ["FR-84", "FR-85", "UJ-4", "EXPERIENCE §9.9"]
     ac:
       - "Given a new Auto Rule When its first 3 matches occur (configurable, minimum 1) Then Packages are prepared and listed as \"would send\", and nothing is sent until I activate the rule."
@@ -679,7 +679,7 @@ stories:
     title: "Kill Switch"
     phase: "MVP"
     depends_on: ["9.7", "1.6"]
-    files: ["boba-app/ (apply engine)", "src-tauri/src/ (tray, global shortcut)", "src/app/ (header)"]
+    files: ["src-tauri/crates/boba-app/src/apply/kill_switch/**", "src-tauri/src/tray/kill_switch.rs", "src-tauri/src/shortcuts/**", "src/app/header/kill-switch/**", "locales/en/kill_switch.json", "locales/es/kill_switch.json"]
     covers: ["FR-86", "AD-11", "EXPERIENCE §9.9"]
     ac:
       - "Given the Kill Switch in the tray, the app header or the global shortcut (Cmd/Ctrl+Shift+K) When I engage it Then within 2 s all automatic sending stops, in-flight ATS automation is cancelled before the final submit, running agent runs and browser sessions are cancelled, and Outbox items move to the review queue."
@@ -689,7 +689,7 @@ stories:
     title: "Audit Log viewer and funnel stats"
     phase: "MVP"
     depends_on: ["9.3", "1.7"]
-    files: ["src/features/settings/privacy (audit)", "src/features/tracker/ (stats)"]
+    files: ["src/features/settings/privacy/audit/**", "src/features/tracker/stats/**", "src-tauri/crates/boba-app/src/stats/**", "locales/en/audit_stats.json", "locales/es/audit_stats.json"]
     covers: ["FR-89", "FR-97", "SM-4", "SM-5", "SM-7", "EXPERIENCE §9.13"]
     ac:
       - "Given the Audit Log viewer When I open it Then I see every send, Auto decision (with rule and reasons), Kill Switch and opt-in event, and Stage change, with timestamps and a link to the archived Package plus its hash. Hash-chain verification passes, and I can export it as CSV."
@@ -699,7 +699,7 @@ stories:
     title: "Export (upstream-compatible)"
     phase: "MVP"
     depends_on: ["9.1", "7.1", "3.4"]
-    files: ["boba-store/ (export)", "src/features/settings/privacy"]
+    files: ["src-tauri/crates/boba-store/src/export/**", "src/features/settings/privacy/export/**", "locales/en/export.json", "locales/es/export.json"]
     covers: ["FR-110"]
     ac:
       - "Given Export When I pick a folder Then I get the Profile (JSON and Markdown), `job_search_tracker.csv` (upstream vocabulary; `saved` rows are left out), Applications JSON (all statuses, including `saved`), `seen_jobs.json`, application folders with PDF and DOCX, and the audit CSV. A warning first tells me the export is unencrypted."
@@ -708,7 +708,7 @@ stories:
     title: "Encrypted backup, restore and reset"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["boba-store/ (backup)"]
+    files: ["src-tauri/crates/boba-store/src/backup/**", "src-tauri/crates/boba-store/src/reset/**", "src/features/settings/privacy/backup/**", "locales/en/backup.json", "locales/es/backup.json"]
     covers: ["FR-111", "FR-112", "ADR-009"]
     ac:
       - "Given Backup When I set a passphrase Then a single re-keyed SQLCipher file is created, and onboarding requires one as the recovery backup on MVP builds (3.8)."
@@ -721,7 +721,7 @@ stories:
     title: "Retention sweep"
     phase: "MVP"
     depends_on: ["5.1", "8.3"]
-    files: ["boba-app/ (retention_sweep job)"]
+    files: ["src-tauri/crates/boba-app/src/retention/**"]
     covers: ["FR-113"]
     ac:
       - "Given retention settings (raw payloads 90 days, email 180 days) When the daily `retention_sweep` runs Then expired rows are deleted (`secure_delete` on), and Applications and sent Packages are kept."
@@ -730,7 +730,7 @@ stories:
     title: "Network activity view and locale formatting"
     phase: "MVP"
     depends_on: ["4.1", "1.4"]
-    files: ["boba-sources/ (HttpClient log)", "src/features/settings/privacy"]
+    files: ["src-tauri/crates/boba-app/src/network_log/**", "src/features/settings/privacy/network/**", "src/lib/format/**", "locales/en/network.json", "locales/es/network.json"]
     covers: ["NFR-1", "FR-115"]
     ac:
       - "Given Settings → Privacy When I open Network activity Then I see recent destinations grouped by purpose (Sources, email, update, model download, FX). There are no telemetry endpoints."
@@ -740,7 +740,7 @@ stories:
     title: "Release pipeline, updater and installers"
     phase: "MVP"
     depends_on: ["1.8"]
-    files: [".github/workflows/release.yml", "tauri.conf.json"]
+    files: [".github/workflows/release.yml", "src-tauri/tauri.conf.json", "scripts/release/**", "docs/install/**"]
     covers: ["NFR-16", "NFR-17", "NFR-19", "NFR-20", "AD-22", "ADR-009"]
     ac:
       - "Given a `v*` tag When the release workflow runs Then it builds a macOS universal DMG, a Windows NSIS installer (plus MSI) and a Linux AppImage, .deb and .rpm. The versions match the tag (enforced by CI), and the release is published, not left as a draft, with `latest.json`."
@@ -752,7 +752,7 @@ stories:
     title: "Accessibility and cross-platform QA pass"
     phase: "MVP"
     depends_on: ["6.7", "7.7", "9.8"]
-    files: ["src/**"]
+    files: ["docs/qa/accessibility.md", "docs/qa/platforms.md", "e2e/a11y/**"]
     covers: ["NFR-15", "NFR-18", "EXPERIENCE §7"]
     ac:
       - "Given the wizard, Today, Offer detail, Studio, Tracker, Applying and the Kill Switch When they are tested with keyboard only, with a screen reader (VoiceOver and NVDA) and at 200% zoom Then they are fully operable. Verdicts and Stages are announced as text, and reduced motion removes animation."
@@ -762,7 +762,7 @@ stories:
     title: "Session-browser source opt-in and adapters"
     phase: "MVP"
     depends_on: ["4.1", "9.4"]
-    files: ["boba-sources/ (session/*)", "boba-browser/", "source_optin"]
+    files: ["src-tauri/crates/boba-browser/src/session/**", "src-tauri/crates/boba-sources/src/session/sdk/**", "src/features/connections/session-optin/**", "src/features/settings/privacy/sessions/**", "locales/en/session_optin.json", "locales/es/session_optin.json", "src-tauri/crates/boba-sources/src/session/linkedin/**", "src-tauri/crates/boba-sources/src/session/indeed/**", "src-tauri/crates/boba-sources/tests/fixtures/session/**"]
     covers: ["FR-30", "AD-9", "AD-10"]
     ac:
       - "Given a `session_browser` Source When I enable it Then I must read a versioned warning and confirm. The warning names the account-ban risk and states that session cookies live in a dedicated browser profile protected by the browser's own OS encryption, not by Boba's. The opt-in is stored with its timestamp and warning version, and audited."
@@ -777,7 +777,7 @@ stories:
     title: "Session Board apply — Review mode"
     phase: "MVP"
     depends_on: ["11.1"]
-    files: ["boba-browser/", "boba-app/ (apply)"]
+    files: ["src-tauri/crates/boba-browser/src/session_forms/**", "src-tauri/crates/boba-app/src/apply/session/**"]
     covers: ["FR-91"]
     ac:
       - "Given a Session Board Offer When I click Apply Then Boba fills the form in a headed browser, I press submit, and confirmation evidence is captured as in 9.4."
@@ -786,7 +786,7 @@ stories:
     title: "Session Board Auto — separate opt-in and conservative limits"
     phase: "MVP"
     depends_on: ["11.2", "9.8"]
-    files: ["boba-domain/apply", "src/features/settings/applying"]
+    files: ["src-tauri/crates/boba-domain/src/apply/session_policy/**", "src/features/settings/applying/session/**", "locales/en/session_auto.json", "locales/es/session_auto.json"]
     covers: ["FR-91", "AD-11"]
     ac:
       - "Given a Session Board Source When I enable Auto Then this is a separate opt-in from 11.1: I read the ToS and ban warning and type the Source name. A persistent \"ToS risk\" badge then shows on the Source and on its rules."
@@ -799,7 +799,7 @@ stories:
     title: "LATAM session boards (Computrabajo, OCC, Bumeran)"
     phase: "v1.1"
     depends_on: ["11.3"]
-    files: ["boba-sources/ (session/*)"]
+    files: ["src-tauri/crates/boba-sources/src/session/latam/**"]
     covers: ["FR-30"]
     ac:
       - "Given one of these Sources When I opt in Then the same warning, limits and Auto opt-in from 11.1 to 11.3 apply."
@@ -808,7 +808,7 @@ stories:
     title: "InfoJobs Connection, search and sanctioned apply"
     phase: "v1.1"
     depends_on: ["4.1", "9.6"]
-    files: ["boba-sources/ (infojobs)", "boba-app/ (apply)"]
+    files: ["src-tauri/crates/boba-sources/src/infojobs/**", "src-tauri/crates/boba-app/src/apply/sanctioned/**"]
     covers: ["FR-33", "FR-90"]
     ac:
       - "Given InfoJobs OAuth When it is connected Then search works and the `sanctioned_api` channel supports Review and Auto under the policy engine."
@@ -817,7 +817,7 @@ stories:
     title: "Generic careers-page source"
     phase: "v1.1"
     depends_on: ["4.7"]
-    files: ["boba-sources/ (html_scrape)"]
+    files: ["src-tauri/crates/boba-sources/src/html_scrape/**"]
     covers: ["FR-28"]
     ac:
       - "Given a careers URL and my opt-in When a run executes Then the agent extracts listings, and the Source is badged \"best effort\"."
@@ -826,7 +826,7 @@ stories:
     title: "External-process adapter runner (SDK)"
     phase: "v1.1"
     depends_on: ["4.1"]
-    files: ["boba-sources/ (external_process)"]
+    files: ["src-tauri/crates/boba-sources/src/external_process/**"]
     covers: ["FR-29"]
     ac:
       - "Given an adapter I install explicitly When I trust it Then trust is pinned to its path plus a blake3 hash, and a changed binary needs re-approval. It runs through the supervisor with a minimal env (no secrets), a temp working directory, a timeout and kill-tree. Its stdout is capped, schema-validated and treated as untrusted, and it has no access to the DB, keychain or MCP. An honest \"not OS-sandboxed\" warning is shown and audited."
@@ -835,7 +835,7 @@ stories:
     title: "Follow-up drafting"
     phase: "v1.1"
     depends_on: ["9.5", "8.2"]
-    files: []
+    files: ["src-tauri/crates/boba-app/src/followups/**", "agent-pack/skills/follow_up/**"]
     covers: ["FR-96"]
     ac:
       - "Given a nudge When I click Draft follow-up Then an editable draft appears in the Application's language, and I can send it via 9.3."
@@ -844,7 +844,7 @@ stories:
     title: "Interview prep pack"
     phase: "v1.1"
     depends_on: ["9.1", "7.2"]
-    files: []
+    files: ["src-tauri/crates/boba-app/src/interview_prep/**", "agent-pack/skills/interview_prep/**"]
     covers: ["FR-98"]
     ac:
       - "Given an Application in Interviewing When I request prep Then a pack is built from the sent Package plus company research, with research claims marked verified or unverified."
@@ -853,7 +853,7 @@ stories:
     title: "Weight calibration from outcomes"
     phase: "v1.1"
     depends_on: ["9.9", "6.8"]
-    files: []
+    files: ["src-tauri/crates/boba-domain/src/scoring/calibration/**"]
     covers: ["FR-62"]
     ac:
       - "Given 20 or more Applications with outcomes When calibration runs Then it proposes changes with correlation evidence, sample size and before and after values. Accepting creates a new prefs version."

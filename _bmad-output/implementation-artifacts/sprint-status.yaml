@@ -1,0 +1,155 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-05-2026 00:50
+last_updated: 10-05-2026 00:50
+project: boba-job-find
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-repo-scaffold-and-crate-workspace: backlog
+  1-2-encrypted-store-keychain-key-and-migrations: backlog
+  1-3-typed-ipc-error-model-and-event-bus: backlog
+  1-4-i18n-catalogues-en-es-ui-and-core: backlog
+  1-5-app-shell-design-tokens-theme-and-navigation: backlog
+  1-6-system-tray-single-instance-and-close-to-tray: backlog
+  1-7-settings-store-and-audit-log: backlog
+  1-8-ci-pipeline: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-cli-detection-and-capability-probing: backlog
+  2-2-run-lifecycle-processsupervisor-and-fake-cli: backlog
+  2-3-boba-mcp-shim-mcp-server-and-sandbox-lockdown: backlog
+  2-4-agent-pack-renderer-and-task-registry: backlog
+  2-5-run-budgets-and-usage-display: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-wizard-framework-and-language-step: backlog
+  3-2-engine-step-pick-cli-and-model-and-run-a-test-call: backlog
+  3-3-limited-mode-no-agent: backlog
+  3-4-profile-fact-model-and-editor-with-versioning: backlog
+  3-5-master-cv-import-with-review: backlog
+  3-6-profile-gap-interview-and-bilingual-drafting: backlog
+  3-7-preferences-step: backlog
+  3-8-wizard-finish-sources-email-apply-mode-and-first-run: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-source-adapter-sdk-registry-and-httpclient: backlog
+  4-2-offer-normalisation-and-language-detection: backlog
+  4-3-deduplication-into-clusters: backlog
+  4-4-seen-state-repost-staleness-and-expiry: backlog
+  4-5-ats-board-adapters-greenhouse-lever-ashby-workable-smartrecr: backlog
+  4-6-remote-feed-adapters-and-aggregator-apis: backlog
+  4-7-manual-offer-intake-url-and-text: backlog
+  4-8-connections-screen-catalogue-custom-rss-and-source-health: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-scheduler-and-job-runs: backlog
+  5-2-daily-search-use-case-and-run-report: backlog
+  5-3-digest-notifications-and-quiet-hours: backlog
+  5-4-launch-at-login-and-tray-run-controls: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-gates: backlog
+  6-2-posting-features-extraction-deterministic-and-llm-proposed: backlog
+  6-3-fit-and-quality-factors-rank-and-verdict-versioned-scorecard: backlog
+  6-4-today-and-inbox: backlog
+  6-5-offer-detail-score-breakdown-and-explanation-narration: backlog
+  6-6-inbox-actions-excluded-override-and-dismiss-reasons: backlog
+  6-7-keyboard-triage-and-command-palette: backlog
+  6-8-scoring-weights-settings-and-red-flag-scam-badges: backlog
+  6-9-optional-on-device-embeddings-f3: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-document-model-and-typst-templates-2: backlog
+  7-2-tailor-task-with-fact-ids-and-language-auto-match: backlog
+  7-3-fabrication-validator-and-claim-traceability: backlog
+  7-4-reviewer-pass-and-revision: backlog
+  7-5-layout-verification-and-relevance-weighted-cutting: backlog
+  7-6-ats-text-layer-verification-and-keyword-coverage: backlog
+  7-7-studio-ui-edit-regenerate-diff-and-docx-export: backlog
+  7-8-screening-answers-and-answer-bank: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-microsoft-graph-connection-read-and-send: backlog
+  8-2-gmail-send-only-and-imap-smtp: backlog
+  8-3-scoped-sync-and-manual-eml-import: backlog
+  8-4-reply-classification-and-status-proposals: backlog
+  8-5-gmail-read-via-byo-client: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-application-model-and-kanban-tracker: backlog
+  9-2-apply-channel-detection-and-manual-link-out-apply: backlog
+  9-3-email-apply-in-review-mode: backlog
+  9-4-ats-form-assist-via-browser-automation: backlog
+  9-5-duplicate-application-guard-and-follow-up-nudges: backlog
+  9-6-apply-policy-engine-and-auto-rules: backlog
+  9-7-dry-run-and-outbox-hold: backlog
+  9-8-kill-switch: backlog
+  9-9-audit-log-viewer-and-funnel-stats: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-export-upstream-compatible: backlog
+  10-2-encrypted-backup-restore-and-reset: backlog
+  10-3-retention-sweep: backlog
+  10-4-network-activity-view-and-locale-formatting: backlog
+  10-5-release-pipeline-updater-and-installers: backlog
+  10-6-accessibility-and-cross-platform-qa-pass: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-session-browser-source-opt-in-and-adapters: backlog
+  11-2-session-board-apply-review-mode: backlog
+  11-3-session-board-auto-separate-opt-in-and-conservative-limits: backlog
+  11-4-latam-session-boards-computrabajo-occ-bumeran: backlog
+  epic-11-retrospective: optional
+
+  epic-12: backlog
+  12-1-infojobs-connection-search-and-sanctioned-apply: backlog
+  12-2-generic-careers-page-source: backlog
+  12-3-external-process-adapter-runner-sdk: backlog
+  epic-12-retrospective: optional
+
+  epic-13: backlog
+  13-1-follow-up-drafting: backlog
+  13-2-interview-prep-pack: backlog
+  13-3-weight-calibration-from-outcomes: backlog
+  epic-13-retrospective: optional
