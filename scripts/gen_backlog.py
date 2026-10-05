@@ -92,6 +92,7 @@ def validate(slices, stories):
     for s in slices:
         by_parent.setdefault(s["parent"], []).append(s)
     for pid, group in by_parent.items():
+        group = [s for s in group if not s.get("followup")]
         if any("ac_from" not in s for s in group):
             continue
         used = {i for s in group for i in s["ac_from"]}
