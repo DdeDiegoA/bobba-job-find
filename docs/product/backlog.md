@@ -68,7 +68,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 1 | S1.1 | 1.1 | Repo scaffold, crate workspace and module skeleton | — | L |  |
 | 2 | S1.2a | 1.2 | SQLCipher store, keychain key, writer actor and migration runner | S1.1 | L | ⚠ Diego |
 | 2 | S1.3 | 1.3 | Typed IPC, error model and event bus | S1.1 | L |  |
-| 2 | S1.8 | 1.8 | CI pipeline | S1.1 | L | ⚠ Diego |
+| 2 | S1.8 | 1.8 | CI pipeline | S1.1 | L |  |
 | 3 | S1.3p | 1.3 | boba-app ports skeleton | S1.3 | L |  |
 | 3 | S2.1 | 2.1 | CLI detection and capability probing | S1.3, S1.2a | M |  |
 | 3 | S1.4 | 1.4 | i18n catalogues EN/ES (UI and core) | S1.3 | M |  |
@@ -113,15 +113,15 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 13 | S9.4 | 9.4 | ATS Form assist via browser automation | S9.2, S7.8 | M |  |
 | 13 | S3.5 | 3.5 | Master CV import with review | S2.4, S3.4, S3.1 | M |  |
 | 13 | S4.8 | 4.8 | Connections screen — catalogue, custom RSS and source health | S4.5, S4.6 | M |  |
-| 14 | S9.6 | 9.6 | Apply policy engine and Auto Rules | S9.3, S9.4, S6.3 | L | ⚠ Diego |
+| 14 | S9.6 | 9.6 | Apply policy engine and Auto Rules | S9.3, S9.4, S6.3 | L |  |
 | 14 | S11.1a | 11.1 | Session browser, per-Source opt-in, cookie warning and sign-out | S4.1, S9.4 | L | ⚠ Diego |
 | 14 | S5.2 | 5.2 | Daily search use case and run report | S5.1, S4.4 | M |  |
 | 14 | S6.6 | 6.6 | Inbox actions, Excluded override and dismiss reasons | S6.5, S9.1 | M |  |
-| 15 | S9.7 | 9.7 | Dry run and Outbox hold | S9.6 | M | ⚠ Diego |
+| 15 | S9.7 | 9.7 | Dry run and Outbox hold | S9.6 | M |  |
 | 15 | S11.1b | 11.1 | LinkedIn and Indeed session adapters | S11.1a | S | ⚠ Diego |
 | 15 | S8.3 | 8.3 | Scoped sync and manual .eml import | S8.1, S9.1 | S |  |
-| 15 | S10.2 | 10.2 | Encrypted backup, validated restore and reset | S1.2a, S1.5 | L | ⚠ Diego |
-| 16 | S9.8 | 9.8 | Kill Switch | S9.7, S1.6 | M | ⚠ Diego |
+| 15 | S10.2 | 10.2 | Encrypted backup, validated restore and reset | S1.2a, S1.5 | L |  |
+| 16 | S9.8 | 9.8 | Kill Switch | S9.7, S1.6 | M |  |
 | 16 | S11.2 | 11.2 | Session Board apply — Review mode | S11.1b | S | ⚠ Diego |
 | 16 | S2.5 | 2.5 | Run budgets and usage display | S2.2, S1.5, S1.7 | M |  |
 | 16 | S3.3 | 3.3 | Limited mode and capability gating | S3.2 | M |  |
@@ -144,21 +144,19 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 21 | S10.6 | 10.6 | Accessibility and cross-platform QA pass | all other slices | M |  |
 <!-- gen:waves:end -->
 
-## Approval-gated slices (Diego before merge)
+## Security-gated slices (Diego before merge)
 
-These touch auth, money, DB or security. Per the team approval policy, the orquestador must not auto-approve their plan or merge:
+*Policy change by Diego, 2026-10-05:* the human gate is now **security only**. These slices need Diego's approval before their plan is approved or they merge. So does **any new security exception** in any slice: an advisory ignore, a crypto or key change, or loosening a permission or the CSP. Everything else, including auto-apply (S9.6–S9.8), backup/restore (S10.2) and CI (S1.8), is approved by the orquestador.
 
 | Slice | Why |
 |---|---|
-| S1.2a, S1.2b | DB encryption, keychain key custody, Locked state (ADR-009) |
-| S1.7 | Audit-log integrity (security). *Added by PM.* |
-| S1.8 | `deny.toml` carries 2 RUSTSEC advisory ignores and a scoped CDLA-Permissive-2.0 licence exception (security/licensing). *Added by PM, 2026-10-05.* |
+| S1.2a | DB encryption key creation and keychain custody (crypto/key change, ADR-009). *Not in the orquestador's 2026-10-05 list; kept gated by PM as a crypto/key change. Confirm or drop.* |
+| S1.2b | Locked state, passphrase fallback, key held in memory (ADR-009) |
+| S1.7 | Audit-log integrity (hash chain, keychain anchor) |
 | S2.3a, S2.3b | Agent sandbox, `tool_lockdown` hard gate (ADR-010) |
 | S8.1, S8.2, S8.5 | OAuth (loopback, PKCE S256, single-use `state`), mail tokens |
-| S9.6, S9.7, S9.8 | Auto-apply policy, Outbox, Kill Switch |
-| S10.2 | Restore replaces the DB; reset deletes keys (DB/security). *Added by PM.* |
-| S10.5 | Release signing identity and updater keys (money/security) |
-| S11.1a, S11.1b, S11.2, S11.3 | Session-board automation, ToS/ban risk, cookies |
+| S10.5 | Release signing identity and updater keys |
+| S11.1a, S11.1b, S11.2, S11.3 | Session-board automation, cookies, ToS/ban risk |
 
 ## Slice files (exact ownership)
 

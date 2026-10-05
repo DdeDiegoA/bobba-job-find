@@ -13,7 +13,7 @@
 # ac_from: indexes into the parent story's AC list (docs/product/stories.yaml). Omitted = all parent ACs.
 # wave: N = pinned to a wave already dispatched (history is not re-planned).
 # first: true = dispatch as soon as its deps are merged (skeleton slices). last: true = runs after every other slice.
-# ac_extra: slice-specific ACs (build conventions, moved ACs). gate: diego = needs Diego before merge.
+# ac_extra: slice-specific ACs (build conventions, moved ACs). gate: diego = security gate, needs Diego before merge (policy 2026-10-05: security only).
 
 - id: S1.1
   parent: "1.1"
@@ -111,8 +111,7 @@
   title: CI pipeline
   deps: [S1.1]
   files: [.github/workflows/ci.yml, scripts/ci/**, deny.toml, Cargo.toml, src-tauri/Cargo.toml, "@c/boba-agent/Cargo.toml", "@c/boba-app/Cargo.toml", "@c/boba-browser/Cargo.toml", "@c/boba-docs/Cargo.toml", "@c/boba-domain/Cargo.toml", "@c/boba-mail/Cargo.toml", "@c/boba-mcp-proto/Cargo.toml", "@c/boba-mcp/Cargo.toml", "@c/boba-sources/Cargo.toml", "@c/boba-store/Cargo.toml"]
-  gate: diego
-  notes: Owns deny.toml, adds the one-line publish = false to src-tauri/Cargo.toml and the 10 boba-* crate manifests (cargo-deny wildcard-path rule), and changes the root workspace fastembed entry to default-features = false with the hf-hub-native-tls and ort-download-binaries-native-tls features. Gate added because deny.toml carries 2 RUSTSEC ignores and a scoped CDLA-Permissive-2.0 licence exception that need Diego.
+  notes: Owns deny.toml, adds the one-line publish = false to src-tauri/Cargo.toml and the 10 boba-* crate manifests (cargo-deny wildcard-path rule), and changes the root workspace fastembed entry to default-features = false with the hf-hub-native-tls and ort-download-binaries-native-tls features. The 2 RUSTSEC ignores and the scoped CDLA-Permissive-2.0 licence exception in deny.toml were approved by Diego on 2026-10-05; new advisory ignores still need his approval (security-only gate policy).
 
 # ---------------- E2 Agent runtime ----------------
 - id: S2.1
@@ -463,21 +462,18 @@
   parent: "9.6"
   title: Apply policy engine and Auto Rules
   deps: [S9.3, S9.4, S6.3]
-  gate: diego
   files: ["@c/boba-domain/src/apply/policy/**", "@c/boba-app/src/apply/rules/**", src/features/settings/applying/rules/**, "{loc:applying}", "{mig:auto_rules}"]
 
 - id: S9.7
   parent: "9.7"
   title: Dry run and Outbox hold
   deps: [S9.6]
-  gate: diego
   files: ["@c/boba-app/src/apply/outbox/**", src/features/today/outbox/**, "{loc:outbox}"]
 
 - id: S9.8
   parent: "9.8"
   title: Kill Switch
   deps: [S9.7, S1.6]
-  gate: diego
   files: ["@c/boba-app/src/apply/kill_switch/**", src-tauri/src/tray/kill_switch.rs, src-tauri/src/shortcuts/**, src/app/header/kill-switch/**, "{loc:kill_switch}"]
 
 - id: S9.9
@@ -497,9 +493,7 @@
   parent: "10.2"
   title: Encrypted backup, validated restore and reset
   deps: [S1.2a, S1.5]
-  gate: diego
   files: ["@c/boba-store/src/backup/**", "@c/boba-store/src/reset/**", src/features/settings/privacy/backup/**, "{loc:backup}"]
-  notes: Gate added by PM (restore replaces the DB and reset deletes keys, DB/security).
 
 - id: S10.3
   parent: "10.3"
