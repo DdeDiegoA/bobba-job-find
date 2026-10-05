@@ -1,0 +1,15 @@
+[package]
+name = "boba-fake-cli"
+description = "Fake agent CLI used by run-lifecycle tests (owned by S2.2)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "boba-fake-cli"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }

@@ -1,0 +1,29 @@
+//! Stub module tree (S1.1). Logic lands in a later slice.
+
+pub mod answers;
+pub mod applications;
+pub mod apply;
+pub mod capabilities;
+pub mod daily_search;
+pub mod digest;
+pub mod embeddings;
+pub mod error;
+pub mod fitting;
+pub mod i18n;
+pub mod ingest;
+pub mod jobs;
+pub mod narration;
+pub mod network_log;
+pub mod posting_features;
+pub mod profile;
+pub mod profile_gaps;
+pub mod profile_import;
+pub mod retention;
+pub mod review;
+pub mod scoring;
+pub mod sources;
+pub mod stats;
+pub mod status_proposals;
+pub mod system;
+pub mod tailoring;
+pub mod triage;

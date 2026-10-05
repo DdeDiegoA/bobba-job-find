@@ -1,0 +1,13 @@
+[package]
+name = "boba-domain"
+description = "Pure entities, scoring, gates and apply policy. No IO (AD-1..AD-22)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["serde-well-known"] }
+ulid = { workspace = true, features = ["serde"] }

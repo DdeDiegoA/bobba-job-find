@@ -1,0 +1,43 @@
+# cargo-deny configuration (S1.1) — supply-chain gate from tech-stack.md §6.
+# Run: cargo deny check   (installed in CI by S1.8; optional locally)
+#
+# Licence policy: MIT/Apache-2.0 compatible only. No GPL/AGPL/LGPL-static.
+
+[graph]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "OFL-1.1",
+    "CC0-1.0",
+    "CC-BY-4.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

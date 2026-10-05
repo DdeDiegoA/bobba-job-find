@@ -1,0 +1,116 @@
+/* Boba Job Find — design tokens (DESIGN.md §14). Light on :root, dark on .dark.
+ * Components reference semantic or component tokens, never raw hex (DESIGN.md §2). */
+
+:root {
+  /* primitives */
+  --caramel-600: #9a5418;
+  --caramel-700: #7e4312;
+  --cream-50: #fffbf5;
+  --neutral-150: #f5ece0;
+  --neutral-800: #2b201a;
+  --neutral-600: #6b594c;
+  --border-light: #e4d3bf;
+  --border-strong-light: #c4ae94;
+
+  /* semantic — light */
+  --bg: var(--cream-50);
+  --surface: #ffffff;
+  --surface-muted: var(--neutral-150);
+  --surface-sunken: #f0e4d5;
+  --fg: var(--neutral-800);
+  --fg-muted: var(--neutral-600);
+  --fg-subtle: #8a7866;
+  --border: var(--border-light);
+  --border-strong: var(--border-strong-light);
+  --primary: var(--caramel-600);
+  --on-primary: #ffffff;
+  --primary-hover: var(--caramel-700);
+  --primary-soft: #f7e7d3;
+  --on-primary-soft: var(--caramel-700);
+  --accent: #5b3e8a;
+  --on-accent: #ffffff;
+  --success: #2e6b3e;
+  --warning: #8a5300;
+  --danger: #a3281c;
+  --info: #5b3e8a;
+  --focus: var(--caramel-600);
+
+  /* bands */
+  --band-strong: #2e7d46;
+  --band-good: #5a7a12;
+  --band-moderate: #9e6203;
+  --band-weak: #b84e12;
+  --band-poor: #a82e24;
+  --axis-fit: #2e7d46;
+  --axis-quality: #5b3e8a;
+
+  /* radius / space / motion / elev */
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+  --space-2: 8px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --elev-1: 0 1px 2px rgba(63, 34, 12, 0.06), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  --elev-2: 0 4px 12px rgba(63, 34, 12, 0.1);
+}
+
+.dark {
+  --bg: #191210;
+  --surface: #241a16;
+  --surface-muted: #2e221c;
+  --surface-sunken: #14100e;
+  --fg: #f5ede4;
+  --fg-muted: #bdab9a;
+  --fg-subtle: #7e6b5c;
+  --border: #3e2f27;
+  --border-strong: #5a463a;
+  --primary: #e8a860;
+  --on-primary: #241a16;
+  --primary-hover: #f0b878;
+  --primary-soft: #3a2a1e;
+  --on-primary-soft: #f0b878;
+  --accent: #c4a6f0;
+  --on-accent: #241a16;
+  --success: #8fd3a0;
+  --warning: #f0c070;
+  --danger: #f2a49b;
+  --info: #c4a6f0;
+  --focus: #e8a860;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elev-2: 0 6px 16px rgba(0, 0, 0, 0.55);
+}
+
+/* Tailwind v4 bridge: semantic tokens become utilities (bg-surface, text-fg…). */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-band-strong: var(--band-strong);
+  --color-band-good: var(--band-good);
+  --color-band-moderate: var(--band-moderate);
+  --color-band-weak: var(--band-weak);
+  --color-band-poor: var(--band-poor);
+  --radius-card: var(--radius-xl);
+  --font-display: "Fredoka", ui-rounded, system-ui, sans-serif;
+  --font-sans: "Nunito", ui-rounded, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}

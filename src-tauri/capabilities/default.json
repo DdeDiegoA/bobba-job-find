@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core capability for the main Boba window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "notification:default",
+    "process:default",
+    "updater:default",
+    "log:default",
+    "global-shortcut:default",
+    "window-state:default",
+    "autostart:default"
+  ]
+}
