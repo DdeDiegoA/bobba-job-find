@@ -25,6 +25,31 @@ ignore = [
     # Pulled on Linux by gtk-rs 0.18 (glib-macros) -> tray-icon/wry -> tauri. Owned by Tauri upstream.
     # Revisit: Tauri moves to gtk-rs >= 0.19 / GTK4.
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs 0.18/tauri on Linux; compile-time proc-macro, no vuln" },
+    # --- CH2 (2026-10-05): transitive advisories via the typst stack (pulled by boba-docs). ---
+    # bincode 1.3.3 (unmaintained; upstream declared 1.3.3 final, no known vuln).
+    # Path: syntect -> two-face -> typst-library -> typst -> boba-docs (syntax highlighting).
+    # Revisit: typst drops syntect/two-face, or syntect moves off bincode.
+    { id = "RUSTSEC-2025-0141", reason = "bincode via syntect/two-face/typst-library; unmaintained, no vuln" },
+    # rustybuzz 0.20.1 (unmaintained; no known vuln).
+    # Path: krilla/typst-layout -> typst-pdf/typst -> boba-docs (font shaping).
+    # Revisit: typst migrates to harfrust.
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz via krilla/typst-layout/typst-pdf; unmaintained, no vuln" },
+    # ttf-parser 0.25.1 (unmaintained; no known vuln).
+    # Path: fontdb -> krilla-svg/typst-library -> typst -> boba-docs (font parsing).
+    # Revisit: typst migrates to skrifa (fontations).
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser via fontdb/krilla-svg/typst-library; unmaintained, no vuln" },
+    # yaml-rust 0.4.5 (unmaintained; no known vuln).
+    # Path: syntect -> two-face -> typst-library -> typst -> boba-docs (theme YAML).
+    # Revisit: syntect drops yaml-rust.
+    { id = "RUSTSEC-2024-0320", reason = "yaml-rust via syntect/two-face/typst-library; unmaintained, no vuln" },
+    # quick-xml 0.38.4 [vuln] DoS: O(N^2) duplicate-attribute check; unbounded NsReader allocation.
+    # Path: citationberg -> hayagriva -> typst-library -> typst -> boba-docs.
+    # Unreachable: only citation/CSL XML parsing; our templates (render_cv/render_cover) use no
+    # #bibliography/#cite and parse only our own templates, never untrusted XML.
+    # No fixed release: citationberg 0.7.0 (latest) pins quick-xml ^0.38.1; typst stack already latest.
+    # Revisit: citationberg allows quick-xml >=0.41, or typst bumps its citation stack.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
 ]
 
 [licenses]
