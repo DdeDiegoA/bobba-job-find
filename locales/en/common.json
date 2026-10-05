@@ -1,3 +1,4 @@
 {
-  "app.name": "Boba Job Find"
+  "errors.unknown": "Something went wrong.",
+  "errors.task.missing_id": "The task id is missing."
 }
