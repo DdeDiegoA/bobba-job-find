@@ -41,6 +41,7 @@ tauri-plugin-window-state = "2.5"
 tauri-plugin-log = "2.10"
 tauri-specta = "=2.0.0-rc.25"
 specta = "=2.0.0-rc.25"
+specta-typescript = "=0.0.12"
 
 # --- Core crates ---
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time"] }

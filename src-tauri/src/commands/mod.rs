@@ -1,14 +1,14 @@
-//! Tauri command surface. One module per area (backlog ownership convention 3).
+//! Tauri command bodies, one module per area (AD-3).
 //!
-//! The append-only list of registered command paths lives in [`registry`];
-//! `.gitattributes` marks it `merge=union` (AD-3).
+//! Registration lives in [`crate::ipc::command_list`] (`.gitattributes`
+//! `merge=union`); append your command's fn path there, never here. Each area
+//! owns `src-tauri/src/commands/<area>.rs`.
 
 pub mod agent;
 pub mod email;
 pub mod ingest;
 pub mod offers;
 pub mod profile;
-pub mod registry;
 pub mod sources;
 pub mod studio;
 pub mod tracker;
