@@ -54,7 +54,7 @@ stories:
     title: "App shell, design tokens, theme and navigation"
     phase: "MVP"
     depends_on: ["1.3", "1.4"]
-    files: ["src/app/**", "src/styles/**", "src/components/ui/**", "locales/en/shell.json", "locales/es/shell.json"]
+    files: ["src/app/**", "src/styles/**", "src/components/ui/**", "locales/en/shell.json", "locales/es/shell.json", "scripts/check-i18n.mjs"]
     covers: ["FR-1", "NFR-15", "EXPERIENCE §2.1"]
     ac:
       - "Given the shell When it loads Then the sidebar shows Today, Inbox, Studio, Tracker, Profile, Connections and Settings, with a topbar holding the command palette, Run now and run status (plus the Kill Switch when Auto is on), and placeholder empty states."
@@ -111,7 +111,7 @@ stories:
     title: "Run lifecycle, ProcessSupervisor and fake CLI"
     phase: "MVP"
     depends_on: ["2.1"]
-    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0004_agent_runs.sql", "src-tauri/crates/boba-app/src/ports/agent.rs", "src-tauri/crates/boba-app/src/ports/repo/agent.rs", "locales/en/agent.json", "locales/es/agent.json", "scripts/ci/check-i18n.mjs"]
+    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0004_agent_runs.sql", "src-tauri/crates/boba-app/src/ports/agent.rs", "src-tauri/crates/boba-app/src/ports/repo/agent.rs", "locales/en/agent.json", "locales/es/agent.json", "scripts/check-i18n.mjs", "scripts/ci/check-i18n.mjs"]
     covers: ["FR-16", "FR-21", "AD-1", "AD-4", "NFR-14"]
     ac:
       - "Given an `AgentTask` When it runs Then the events `Started | Text | ToolCall | ToolResult | Usage | Finished | Failed` are persisted and emitted, and each run is attributed to its CLI and model."

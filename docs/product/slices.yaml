@@ -95,7 +95,11 @@
   parent: "1.5"
   title: App shell, design tokens, theme and navigation
   deps: [S1.3, S1.4]
-  files: [src/app/**, src/styles/**, src/components/ui/**, "{loc:shell}"]
+  files: [src/app/**, src/styles/**, src/components/ui/**, "{loc:shell}", scripts/check-i18n.mjs]
+  notes: Review fix (docs/reviews/S1.5.md, PM ownership decision 2026-10-05) widened files to scripts/check-i18n.mjs so the gate counts i18n-key literals anywhere in production src and static template-literal prefixes, ending false unused-key errors. S2.2, its wave-4 sibling, also edits that file, so S1.5 merges after S2.2 and rebases onto it before changing the gate. HOLD the gate edit until S2.2 merges (reviewer reopened S2.2 and it is being hard-reset to 34f36df), then rebase and apply.
+  ac_extra:
+    - "Given an i18n key written as a string literal anywhere in production src (for example NAV_ITEMS labelKey or PAGE_TITLES labelKey), when scripts/check-i18n.mjs runs, then the key counts as used (review fix, docs/reviews/S1.5.md)."
+    - "Given a template literal with a static prefix such as t(`shell:sidebar.theme.${theme}`), when the gate runs, then every catalogue leaf key under that prefix counts as used, real dead keys still fail, and check-i18n reports 0 errors on S1.5 rebased onto the merged S2.2."
 
 - id: S1.6
   parent: "1.6"
@@ -134,8 +138,8 @@
   parent: "2.2"
   title: Run lifecycle, ProcessSupervisor and fake CLI
   deps: [S2.1, S1.3p, S1.4]
-  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/repo/agent.rs", "{loc:agent}", scripts/ci/check-i18n.mjs]
-  notes: Review fix (orquestador grant 2026-10-05) added locales en and es agent.json and scripts/ci/check-i18n.mjs. S1.4 is recorded as a dependency because it owns the i18n check and merged first.
+  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/repo/agent.rs", "{loc:agent}", scripts/check-i18n.mjs, scripts/ci/check-i18n.mjs]
+  notes: Review fix (orquestador grant 2026-10-05) added locales en and es agent.json and scripts/ci/check-i18n.mjs. S1.4 is recorded as a dependency because it owns the i18n check and merged first. The edit actually landed in scripts/check-i18n.mjs (the gate; scripts/ci/check-i18n.mjs is only S1.8's one-line entrypoint), so both paths are recorded. Reopened by the reviewer (loosened gate hid unresolved runtime keys). Hard-reset to 34f36df puts agent error keys back in common.json, so the agent.json and check-i18n.mjs grant may end up unused; files stay recorded until S2.2 merges.
 
 - id: S2.3a
   parent: "2.3"

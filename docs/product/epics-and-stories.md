@@ -152,7 +152,7 @@ As a bilingual user, I want the whole app in English or Spanish, switchable at r
 - **And** CI fails on missing or unused keys and on ICU syntax errors.
 
 ### Story 1.5: App shell, design tokens, theme and navigation
-**Phase:** MVP · **Depends on:** 1.3, 1.4 · **Files:** `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json` · **Covers:** FR-1 (theme), NFR-15, EXPERIENCE §2.1, DESIGN tokens
+**Phase:** MVP · **Depends on:** 1.3, 1.4 · **Files:** `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`, `scripts/check-i18n.mjs` · **Covers:** FR-1 (theme), NFR-15, EXPERIENCE §2.1, DESIGN tokens
 
 As a user, I want the calm boba-styled shell with sidebar navigation that follows my OS theme, so that the app feels friendly and familiar.
 
@@ -210,7 +210,7 @@ As a user, I want Boba to find the agent CLIs I already have and know what each 
 - **And** driver tests run against recorded probe fixtures. No real CLI is needed in CI.
 
 ### Story 2.2: Run lifecycle, ProcessSupervisor and fake CLI
-**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/ci/check-i18n.mjs` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
+**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
 
 As a developer, I want `AgentPort::run` to stream normalised events from any CLI and be cancellable, so that features never deal with CLI specifics.
 

@@ -74,7 +74,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 3 | S2.1 | 2.1 | CLI detection and capability probing | S1.3, S1.2a, S1.8 | M |  |
 | 3 | S7.1 | 7.1 | Document model and Typst templates (2) | S1.2a, S1.8 | M |  |
 | 4 | S2.2 | 2.2 | Run lifecycle, ProcessSupervisor and fake CLI | S2.1, S1.3p, S1.4 | L |  |
-| 4 | S1.5 | 1.5 | App shell, design tokens, theme and navigation | S1.3, S1.4 | M |  |
+| 4 | S1.5 | 1.5 | App shell, design tokens, theme and navigation | S1.3, S1.4 | L |  |
 | 4 | S4.1 | 4.1 | Source Adapter SDK, registry and HttpClient | S1.2a, S1.3p | M |  |
 | 4 | S1.7 | 1.7 | Settings store and hash-chained audit log | S1.2a, S1.3p | L | ⚠ Diego |
 | 5 | S2.3a | 2.3 | boba-mcp shim, MCP server and per-run sandbox | S2.2, S1.8 | M | ⚠ Diego |
@@ -169,8 +169,8 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 - **S1.4** (wave 3): `src/lib/i18n/**`, `src-tauri/crates/boba-app/src/i18n/**`, `locales/en/common.json`, `locales/es/common.json`, `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`, `src-tauri/crates/boba-app/Cargo.toml`
 - **S2.1** (wave 3): `src-tauri/crates/boba-agent/src/drivers/**`, `src-tauri/crates/boba-agent/src/detect/**`, `src-tauri/crates/boba-store/src/repos/cli_install.rs`, `src-tauri/crates/boba-store/migrations/0002_cli_install.sql`, `src-tauri/crates/boba-agent/Cargo.toml`, `src-tauri/crates/boba-store/Cargo.toml`
 - **S7.1** (wave 3): `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/typst/**`, `templates/cv/**`, `templates/cover/**`, `templates/fonts/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0003_documents.sql`, `src-tauri/crates/boba-docs/Cargo.toml`, `Cargo.toml`
-- **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/ci/check-i18n.mjs`
-- **S1.5** (wave 4): `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`
+- **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`
+- **S1.5** (wave 4): `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`, `scripts/check-i18n.mjs`
 - **S4.1** (wave 4): `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs`
 - **S1.7** (wave 4): `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`
 - **S2.3a** (wave 5): `src-tauri/crates/boba-mcp/**`, `src-tauri/crates/boba-mcp-proto/**`, `src-tauri/crates/boba-agent/src/mcp/**`
@@ -283,8 +283,9 @@ Every path in the first list exists as a compiling stub after S1.1 (convention 1
 - **S1.2b**: `docs/qa/macos-upgrade-test.md`
 - **S1.3**: `scripts/gen-bindings.mjs`
 - **S1.4**: `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`
+- **S1.5**: `scripts/check-i18n.mjs`
 - **S1.8**: `.github/workflows/ci.yml`, `scripts/ci/**`
-- **S2.2**: `scripts/ci/check-i18n.mjs`
+- **S2.2**: `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`
 - **S10.5**: `.github/workflows/release.yml`, `scripts/release/**`, `docs/install/**`
 - **S10.6**: `docs/qa/accessibility.md`, `docs/qa/platforms.md`
 - **every slice with a migration**: its own `src-tauri/crates/boba-store/migrations/NNNN_name.sql` (see Slice files)
