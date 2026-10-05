@@ -304,7 +304,7 @@ erDiagram
 | sources | source, source_run, source_optin |
 | ingestion | posting, posting_source, company, posting_features |
 | scoring | score_card, score_narration, market_benchmark |
-| documents | document, template |
+| documents | document (templates are compiled-in files identified by `template` id; no table) |
 | apply | application, apply_attempt, status_event, outbox, application_answer_bank |
 | email | email_account, email_message, status_proposal |
 | agent | agent_run, agent_event, cli_install |

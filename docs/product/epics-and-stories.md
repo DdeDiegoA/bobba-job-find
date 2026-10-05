@@ -371,7 +371,7 @@ As a user, I want the same job from three sources to show once, so that my inbox
 - **And** a golden fixture set reaches ≥ 95% duplicate merges with < 2% false merges.
 
 ### Story 4.4: Seen state, repost, staleness and expiry
-**Phase:** MVP · **Depends on:** 4.3 · **Files:** `src-tauri/crates/boba-app/src/ingest/lifecycle/**`, `src-tauri/crates/boba-store/migrations/0014_posting_lifecycle.sql` · **Covers:** FR-50, FR-51, FR-52
+**Phase:** MVP · **Depends on:** 4.3 · **Files:** `src-tauri/crates/boba-app/src/ingest/lifecycle/**`, `src-tauri/crates/boba-store/migrations/0015_posting_lifecycle.sql` · **Covers:** FR-50, FR-51, FR-52
 
 As a user, I want Boba to remember what I've seen and notice stale or closed jobs, so that I'm only alerted to real news.
 
@@ -425,7 +425,7 @@ As a user, I want one place to see, add and fix my Sources, so that I trust wher
 Goal: searches run every day from the tray, with catch-up, a report and a digest.
 
 ### Story 5.1: Scheduler and job runs
-**Phase:** MVP · **Depends on:** 1.7 · **Files:** `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0015_jobs.sql`, `src-tauri/crates/boba-app/src/ports/notifier.rs` · **Covers:** FR-41, FR-43, FR-47, AD-18
+**Phase:** MVP · **Depends on:** 1.7 · **Files:** `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0016_jobs.sql`, `src-tauri/crates/boba-app/src/ports/notifier.rs` · **Covers:** FR-41, FR-43, FR-47, AD-18
 
 As a user, I want reliable scheduled runs that catch up after sleep and never double-run, so that the search just happens.
 
@@ -481,7 +481,7 @@ As a user, I want Boba to catch jobs I'm not eligible for, with the exact quote,
 - **And** golden tests cover "US only", "EU work permit required", undeclared required language and a salary below a hard floor.
 
 ### Story 6.2: Posting features extraction (deterministic and LLM-proposed)
-**Phase:** MVP · **Depends on:** 4.2, 2.4 · **Files:** `src-tauri/crates/boba-domain/src/posting_features/**`, `src-tauri/crates/boba-app/src/posting_features/**`, `agent-pack/skills/extract_postings/**`, `src-tauri/crates/boba-store/migrations/0011_posting_features.sql` · **Covers:** FR-55, FR-56 inputs, FR-61, AD-5
+**Phase:** MVP · **Depends on:** 4.2, 2.4 · **Files:** `src-tauri/crates/boba-domain/src/posting_features/**`, `src-tauri/crates/boba-app/src/posting_features/**`, `agent-pack/skills/extract_postings/**`, `src-tauri/crates/boba-store/migrations/0012_posting_features.sql` · **Covers:** FR-55, FR-56 inputs, FR-61, AD-5
 
 As the scoring engine, I need structured requirements (skills, seniority, education, salary, red-flag phrases) for each Offer, so that factors can be computed.
 
@@ -490,7 +490,7 @@ As the scoring engine, I need structured requirements (skills, seniority, educat
 - **And** features are cached per (Offer, Profile version). Re-running with the same inputs gives identical features (FR-61).
 
 ### Story 6.3: Fit and Quality factors, Rank and Verdict, versioned ScoreCards
-**Phase:** MVP · **Depends on:** 6.1, 6.2 · **Files:** `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0013_scoring.sql`, `src-tauri/crates/boba-app/src/ports/repo/scoring.rs` · **Covers:** FR-55, FR-56, FR-57, FR-61, FR-14, AD-8
+**Phase:** MVP · **Depends on:** 6.1, 6.2 · **Files:** `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0014_scoring.sql`, `src-tauri/crates/boba-app/src/ports/repo/scoring.rs` · **Covers:** FR-55, FR-56, FR-57, FR-61, FR-14, AD-8
 
 As a user, I want every Offer scored on Fit and Quality with evidence and confidence, so that I can see both "can I get it" and "do I want it".
 
@@ -512,7 +512,7 @@ As a user, I want a ranked list in clear sections, so that the best Offers are o
 - **And** skeleton loading is used, and during a rerun the old data stays visible and dimmed.
 
 ### Story 6.5: Offer detail, score breakdown and Explanation narration
-**Phase:** MVP · **Depends on:** 6.4, 2.4 · **Files:** `src/features/offer/**`, `agent-pack/skills/narrate_scores/**`, `src-tauri/crates/boba-app/src/narration/**`, `locales/en/offer.json`, `locales/es/offer.json`, `src-tauri/crates/boba-store/migrations/0016_narration.sql` · **Covers:** FR-59, FR-65, AD-5, EXPERIENCE §9.4
+**Phase:** MVP · **Depends on:** 6.4, 2.4 · **Files:** `src/features/offer/**`, `agent-pack/skills/narrate_scores/**`, `src-tauri/crates/boba-app/src/narration/**`, `locales/en/offer.json`, `locales/es/offer.json`, `src-tauri/crates/boba-store/migrations/0017_narration.sql` · **Covers:** FR-59, FR-65, AD-5, EXPERIENCE §9.4
 
 As a user, I want to understand why an Offer scored the way it did, in plain language, so that I can decide quickly and trust the ranking.
 
@@ -565,7 +565,7 @@ As a user, I want better semantic matching if I opt in to a small model download
 Goal: truthful, verified CVs and cover letters in ES or EN in ≤ 10 min of user time (SM-3).
 
 ### Story 7.1: Document model and Typst templates (2)
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/typst/**`, `templates/cv/**`, `templates/cover/**`, `templates/fonts/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0003_documents.sql` · **Covers:** FR-71, AD-14
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/typst/**`, `templates/cv/**`, `templates/cover/**`, `templates/fonts/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0003_documents.sql`, `src-tauri/crates/boba-docs/Cargo.toml`, `Cargo.toml` · **Covers:** FR-71, AD-14
 
 As a user, I want clean ATS-safe templates rendered without LaTeX, so that my documents look good and parse well.
 
@@ -574,7 +574,7 @@ As a user, I want clean ATS-safe templates rendered without LaTeX, so that my do
 - **And** fonts are bundled under the OFL licence, and the user can set a default template.
 
 ### Story 7.2: Tailor task with fact IDs and language auto-match
-**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs`, `src-tauri/crates/boba-domain/src/documents/**`, `src-tauri/crates/boba-domain/src/lib.rs`, `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/lib.rs`, `src-tauri/crates/boba-docs/src/typst/**`, `src-tauri/crates/boba-store/src/repos/documents.rs` · **Covers:** FR-69, FR-70, AD-15, AD-17
+**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs`, `src-tauri/crates/boba-domain/src/documents/**`, `src-tauri/crates/boba-domain/src/lib.rs`, `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/lib.rs`, `src-tauri/crates/boba-docs/src/typst/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0011_document_untrusted_origin.sql` · **Covers:** FR-69, FR-70, AD-15, AD-17
 
 As a user, I want a CV and cover letter drafted for this Offer in its language, so that I start from a strong draft.
 
@@ -628,7 +628,7 @@ As a user, I want to tweak the draft, regenerate one section and export a DOCX, 
 - **Given** a verified document **When** I export DOCX **Then** the content is equivalent to the PDF, with ATS-safe formatting.
 
 ### Story 7.8: Screening answers and answer bank
-**Phase:** MVP · **Depends on:** 7.2 · **Files:** `agent-pack/skills/answer_questions/**`, `src-tauri/crates/boba-app/src/answers/**`, `src-tauri/crates/boba-store/migrations/0012_answer_bank.sql` · **Covers:** FR-80
+**Phase:** MVP · **Depends on:** 7.2 · **Files:** `agent-pack/skills/answer_questions/**`, `src-tauri/crates/boba-app/src/answers/**`, `src-tauri/crates/boba-store/migrations/0013_answer_bank.sql` · **Covers:** FR-80
 
 As a user, I want application questions drafted from my Profile and earlier approved answers, so that forms are fast and consistent.
 
@@ -663,7 +663,7 @@ As a Gmail or other-provider user, I want to send through my account and optiona
 - **Given** an IMAP/SMTP account (app password or XOAUTH2) **When** I save **Then** a connection test runs first, and IMAP access is read-only.
 
 ### Story 8.3: Scoped sync and manual .eml import
-**Phase:** MVP · **Depends on:** 8.1, 9.1 · **Files:** `src-tauri/crates/boba-mail/src/sync/**`, `src-tauri/crates/boba-mail/src/eml/**`, `src-tauri/crates/boba-store/migrations/0019_email_messages.sql` · **Covers:** FR-38, FR-104, FR-113 (mail retention)
+**Phase:** MVP · **Depends on:** 8.1, 9.1 · **Files:** `src-tauri/crates/boba-mail/src/sync/**`, `src-tauri/crates/boba-mail/src/eml/**`, `src-tauri/crates/boba-store/migrations/0020_email_messages.sql` · **Covers:** FR-38, FR-104, FR-113 (mail retention)
 
 As a privacy-minded user, I want Boba to read only mail related to my Applications, so that the rest of my inbox stays untouched.
 
@@ -672,7 +672,7 @@ As a privacy-minded user, I want Boba to read only mail related to my Applicatio
 - **Given** an .eml file dropped in or pasted text **When** I import it **Then** it enters the same pipeline.
 
 ### Story 8.4: Reply classification and Status Proposals
-**Phase:** MVP · **Depends on:** 8.3, 2.4 · **Files:** `src-tauri/crates/boba-mail/src/rules/**`, `agent-pack/skills/classify_emails/**`, `src-tauri/crates/boba-app/src/status_proposals/**`, `src/features/today/needs-you/**`, `src/features/settings/privacy/disclosures/**`, `locales/en/status_proposals.json`, `locales/es/status_proposals.json`, `src-tauri/crates/boba-store/migrations/0020_status_proposals.sql` · **Covers:** FR-100, FR-101, FR-102, FR-103, AD-5, AD-7
+**Phase:** MVP · **Depends on:** 8.3, 2.4 · **Files:** `src-tauri/crates/boba-mail/src/rules/**`, `agent-pack/skills/classify_emails/**`, `src-tauri/crates/boba-app/src/status_proposals/**`, `src/features/today/needs-you/**`, `src/features/settings/privacy/disclosures/**`, `locales/en/status_proposals.json`, `locales/es/status_proposals.json`, `src-tauri/crates/boba-store/migrations/0021_status_proposals.sql` · **Covers:** FR-100, FR-101, FR-102, FR-103, AD-5, AD-7
 
 As a user, I want recruiter replies turned into suggested status updates, each with the quote it is based on, so that my Tracker stays current with one click.
 
@@ -718,7 +718,7 @@ As a user, I want Boba to know how each job can be applied to, and give me a rea
 - **Given** Manual **When** I click Apply **Then** the original page opens with a copy-ready kit (PDFs, answers), and I mark it Applied.
 
 ### Story 9.3: Email Apply in Review mode
-**Phase:** MVP · **Depends on:** 9.2, 8.2 · **Files:** `src-tauri/crates/boba-app/src/apply/engine/**`, `src-tauri/crates/boba-app/src/apply/email/**`, `src-tauri/crates/boba-store/src/repos/outbox.rs`, `src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql` · **Covers:** FR-82, FR-88, NFR-13, AD-12, UJ-3
+**Phase:** MVP · **Depends on:** 9.2, 8.2 · **Files:** `src-tauri/crates/boba-app/src/apply/engine/**`, `src-tauri/crates/boba-app/src/apply/email/**`, `src-tauri/crates/boba-store/src/repos/outbox.rs`, `src-tauri/crates/boba-store/migrations/0018_apply_attempts.sql` · **Covers:** FR-82, FR-88, NFR-13, AD-12, UJ-3
 
 As a user, I want to review and send an email application with my verified PDFs attached, so that applying takes one click.
 
@@ -747,7 +747,7 @@ As a user, I want to avoid applying twice and be reminded to follow up, so that 
 - **Given** an Application in Applied with no reply for 10 days **When** that time passes **Then** a nudge shows. At 30 days, Boba suggests No Response, and the move happens only after I confirm.
 
 ### Story 9.6: Apply policy engine and Auto Rules ⚠
-**Phase:** MVP · **Depends on:** 9.3, 9.4, 6.3 · **Files:** `src-tauri/crates/boba-domain/src/apply/policy/**`, `src-tauri/crates/boba-app/src/apply/rules/**`, `src/features/settings/applying/rules/**`, `locales/en/applying.json`, `locales/es/applying.json`, `src-tauri/crates/boba-store/migrations/0018_auto_rules.sql` · **Covers:** FR-83, FR-87, FR-108, AD-11, EXPERIENCE §9.12
+**Phase:** MVP · **Depends on:** 9.3, 9.4, 6.3 · **Files:** `src-tauri/crates/boba-domain/src/apply/policy/**`, `src-tauri/crates/boba-app/src/apply/rules/**`, `src/features/settings/applying/rules/**`, `locales/en/applying.json`, `locales/es/applying.json`, `src-tauri/crates/boba-store/migrations/0019_auto_rules.sql` · **Covers:** FR-83, FR-87, FR-108, AD-11, EXPERIENCE §9.12
 
 As a user, I want to define exactly when Boba may send for me, so that automation stays inside my rules.
 

@@ -275,7 +275,7 @@ stories:
     title: "Seen state, repost, staleness and expiry"
     phase: "MVP"
     depends_on: ["4.3"]
-    files: ["src-tauri/crates/boba-app/src/ingest/lifecycle/**", "src-tauri/crates/boba-store/migrations/0014_posting_lifecycle.sql"]
+    files: ["src-tauri/crates/boba-app/src/ingest/lifecycle/**", "src-tauri/crates/boba-store/migrations/0015_posting_lifecycle.sql"]
     covers: ["FR-50", "FR-51", "FR-52"]
     ac:
       - "Given an Offer I've already seen or dismissed When it reappears without material change Then I am not notified again."
@@ -328,7 +328,7 @@ stories:
     title: "Scheduler and job runs"
     phase: "MVP"
     depends_on: ["1.7"]
-    files: ["src-tauri/src/scheduler/**", "src-tauri/crates/boba-app/src/jobs/**", "src-tauri/crates/boba-store/src/repos/jobs.rs", "src-tauri/crates/boba-store/migrations/0015_jobs.sql", "src-tauri/crates/boba-app/src/ports/notifier.rs"]
+    files: ["src-tauri/src/scheduler/**", "src-tauri/crates/boba-app/src/jobs/**", "src-tauri/crates/boba-store/src/repos/jobs.rs", "src-tauri/crates/boba-store/migrations/0016_jobs.sql", "src-tauri/crates/boba-app/src/ports/notifier.rs"]
     covers: ["FR-41", "FR-43", "FR-47", "AD-18"]
     ac:
       - "Given one or more run times and active days When a time arrives Then exactly one `job_run` row is created per `(job, scheduled_for)`."
@@ -383,7 +383,7 @@ stories:
     title: "Posting features extraction (deterministic and LLM-proposed)"
     phase: "MVP"
     depends_on: ["4.2", "2.4"]
-    files: ["src-tauri/crates/boba-domain/src/posting_features/**", "src-tauri/crates/boba-app/src/posting_features/**", "agent-pack/skills/extract_postings/**", "src-tauri/crates/boba-store/migrations/0011_posting_features.sql"]
+    files: ["src-tauri/crates/boba-domain/src/posting_features/**", "src-tauri/crates/boba-app/src/posting_features/**", "agent-pack/skills/extract_postings/**", "src-tauri/crates/boba-store/migrations/0012_posting_features.sql"]
     covers: ["FR-55", "FR-56", "FR-61", "AD-5"]
     ac:
       - "Given an Offer When features are extracted Then deterministic extraction (lexicon and regex) always runs, and the LLM *proposes* additional features within the run budget. Both are stored with provenance."
@@ -393,7 +393,7 @@ stories:
     title: "Fit and Quality factors, Rank and Verdict, versioned ScoreCards"
     phase: "MVP"
     depends_on: ["6.1", "6.2"]
-    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0013_scoring.sql", "src-tauri/crates/boba-app/src/ports/repo/scoring.rs"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0014_scoring.sql", "src-tauri/crates/boba-app/src/ports/repo/scoring.rs"]
     covers: ["FR-55", "FR-56", "FR-57", "FR-61", "FR-14", "AD-8"]
     ac:
       - "Given features, a Profile snapshot, Preferences and market data When `score()` runs Then factors F1–F6 and Q1–Q5 each emit `{score, weight, matched, missing, evidence, confidence}`, Rank = 0.65·Fit + 0.35·Quality, and the Verdict uses the PRD bands."
@@ -417,7 +417,7 @@ stories:
     title: "Offer detail, score breakdown and Explanation narration"
     phase: "MVP"
     depends_on: ["6.4", "2.4"]
-    files: ["src/features/offer/**", "agent-pack/skills/narrate_scores/**", "src-tauri/crates/boba-app/src/narration/**", "locales/en/offer.json", "locales/es/offer.json", "src-tauri/crates/boba-store/migrations/0016_narration.sql"]
+    files: ["src/features/offer/**", "agent-pack/skills/narrate_scores/**", "src-tauri/crates/boba-app/src/narration/**", "locales/en/offer.json", "locales/es/offer.json", "src-tauri/crates/boba-store/migrations/0017_narration.sql"]
     covers: ["FR-59", "FR-65", "AD-5", "EXPERIENCE §9.4"]
     ac:
       - "Given an Offer When I open its detail Then I see the sanitised posting (no remote content loaded), Gates at the top with their quotes, the factor breakdown (matched, missing, evidence), the duplicates and Sources, the original link and the detected Apply Channels."
@@ -469,7 +469,7 @@ stories:
     title: "Document model and Typst templates (2)"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-docs/src/model/**", "src-tauri/crates/boba-docs/src/typst/**", "templates/cv/**", "templates/cover/**", "templates/fonts/**", "src-tauri/crates/boba-store/src/repos/documents.rs", "src-tauri/crates/boba-store/migrations/0003_documents.sql"]
+    files: ["src-tauri/crates/boba-docs/src/model/**", "src-tauri/crates/boba-docs/src/typst/**", "templates/cv/**", "templates/cover/**", "templates/fonts/**", "src-tauri/crates/boba-store/src/repos/documents.rs", "src-tauri/crates/boba-store/migrations/0003_documents.sql", "src-tauri/crates/boba-docs/Cargo.toml", "Cargo.toml"]
     covers: ["FR-71", "AD-14"]
     ac:
       - "Given a `CvDocument` or `CoverLetterDocument` (schema-versioned JSON) When it is rendered with either of the 2 MVP templates in EN or ES Then a PDF is produced by embedded Typst, with real text, a single column and standard headings."
@@ -479,7 +479,7 @@ stories:
     title: "Tailor task with fact IDs and language auto-match"
     phase: "MVP"
     depends_on: ["7.1", "3.4", "2.4"]
-    files: ["agent-pack/skills/tailor_application/**", "src-tauri/crates/boba-app/src/tailoring/**", "src-tauri/crates/boba-app/src/ports/render.rs", "src-tauri/crates/boba-app/src/ports/repo/documents.rs", "src-tauri/crates/boba-domain/src/documents/**", "src-tauri/crates/boba-domain/src/lib.rs", "src-tauri/crates/boba-docs/src/model/**", "src-tauri/crates/boba-docs/src/lib.rs", "src-tauri/crates/boba-docs/src/typst/**", "src-tauri/crates/boba-store/src/repos/documents.rs"]
+    files: ["agent-pack/skills/tailor_application/**", "src-tauri/crates/boba-app/src/tailoring/**", "src-tauri/crates/boba-app/src/ports/render.rs", "src-tauri/crates/boba-app/src/ports/repo/documents.rs", "src-tauri/crates/boba-domain/src/documents/**", "src-tauri/crates/boba-domain/src/lib.rs", "src-tauri/crates/boba-docs/src/model/**", "src-tauri/crates/boba-docs/src/lib.rs", "src-tauri/crates/boba-docs/src/typst/**", "src-tauri/crates/boba-store/src/repos/documents.rs", "src-tauri/crates/boba-store/migrations/0011_document_untrusted_origin.sql"]
     covers: ["FR-69", "FR-70", "AD-15", "AD-17"]
     ac:
       - "Given an Offer in Spanish When I click Tailor Then both drafts are in Spanish (override available). For languages other than ES or EN, EN is used and a notice explains why."
@@ -539,7 +539,7 @@ stories:
     title: "Screening answers and answer bank"
     phase: "MVP"
     depends_on: ["7.2"]
-    files: ["agent-pack/skills/answer_questions/**", "src-tauri/crates/boba-app/src/answers/**", "src-tauri/crates/boba-store/migrations/0012_answer_bank.sql"]
+    files: ["agent-pack/skills/answer_questions/**", "src-tauri/crates/boba-app/src/answers/**", "src-tauri/crates/boba-store/migrations/0013_answer_bank.sql"]
     covers: ["FR-80"]
     ac:
       - "Given application questions When answers are drafted Then they follow the no-fabrication rule. Salary and eligibility answers default to Preferences and are always flagged for review."
@@ -571,7 +571,7 @@ stories:
     title: "Scoped sync and manual .eml import"
     phase: "MVP"
     depends_on: ["8.1", "9.1"]
-    files: ["src-tauri/crates/boba-mail/src/sync/**", "src-tauri/crates/boba-mail/src/eml/**", "src-tauri/crates/boba-store/migrations/0019_email_messages.sql"]
+    files: ["src-tauri/crates/boba-mail/src/sync/**", "src-tauri/crates/boba-mail/src/eml/**", "src-tauri/crates/boba-store/migrations/0020_email_messages.sql"]
     covers: ["FR-38", "FR-104", "FR-113"]
     ac:
       - "Given read mode When sync runs (incrementally, with a 60-day default lookback) Then only messages from applied-company domains, ATS senders or sent threads are stored. Everything else is discarded after matching."
@@ -581,7 +581,7 @@ stories:
     title: "Reply classification and Status Proposals"
     phase: "MVP"
     depends_on: ["8.3", "2.4"]
-    files: ["src-tauri/crates/boba-mail/src/rules/**", "agent-pack/skills/classify_emails/**", "src-tauri/crates/boba-app/src/status_proposals/**", "src/features/today/needs-you/**", "src/features/settings/privacy/disclosures/**", "locales/en/status_proposals.json", "locales/es/status_proposals.json", "src-tauri/crates/boba-store/migrations/0020_status_proposals.sql"]
+    files: ["src-tauri/crates/boba-mail/src/rules/**", "agent-pack/skills/classify_emails/**", "src-tauri/crates/boba-app/src/status_proposals/**", "src/features/today/needs-you/**", "src/features/settings/privacy/disclosures/**", "locales/en/status_proposals.json", "locales/es/status_proposals.json", "src-tauri/crates/boba-store/migrations/0021_status_proposals.sql"]
     covers: ["FR-100", "FR-101", "FR-102", "FR-103", "AD-5", "AD-7"]
     ac:
       - "Given a matched message When it is classified (deterministic EN/ES rules first, then the LLM for uncertain cases) Then it gets a class (Acknowledgement, Rejection, Interview invite, Assessment, Offer, Request for info, Other), a confidence and a quoted line."
@@ -625,7 +625,7 @@ stories:
     title: "Email Apply in Review mode"
     phase: "MVP"
     depends_on: ["9.2", "8.2"]
-    files: ["src-tauri/crates/boba-app/src/apply/engine/**", "src-tauri/crates/boba-app/src/apply/email/**", "src-tauri/crates/boba-store/src/repos/outbox.rs", "src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql"]
+    files: ["src-tauri/crates/boba-app/src/apply/engine/**", "src-tauri/crates/boba-app/src/apply/email/**", "src-tauri/crates/boba-store/src/repos/outbox.rs", "src-tauri/crates/boba-store/migrations/0018_apply_attempts.sql"]
     covers: ["FR-82", "FR-88", "NFR-13", "AD-12", "UJ-3"]
     ac:
       - "Given a verified Package and an Email Apply channel When I review the recipient, subject, body and attachments and click Send Then audit `intent` is written, the email goes from my account, audit `outcome` is written with the message ID, and the Application moves to Applied."
@@ -657,7 +657,7 @@ stories:
     title: "Apply policy engine and Auto Rules"
     phase: "MVP"
     depends_on: ["9.3", "9.4", "6.3"]
-    files: ["src-tauri/crates/boba-domain/src/apply/policy/**", "src-tauri/crates/boba-app/src/apply/rules/**", "src/features/settings/applying/rules/**", "locales/en/applying.json", "locales/es/applying.json", "src-tauri/crates/boba-store/migrations/0018_auto_rules.sql"]
+    files: ["src-tauri/crates/boba-domain/src/apply/policy/**", "src-tauri/crates/boba-app/src/apply/rules/**", "src/features/settings/applying/rules/**", "locales/en/applying.json", "locales/es/applying.json", "src-tauri/crates/boba-store/migrations/0019_auto_rules.sql"]
     covers: ["FR-83", "FR-87", "FR-108", "AD-11", "EXPERIENCE §9.12"]
     ac:
       - "Given Settings → Applying When I create an Auto Rule scoped to Sources × Apply Channels (Email Apply and ATS Form, plus Session Board for Sources with an active Auto opt-in from 11.3) Then I set the minimum Rank and Fit, minimum Confidence, whether FLAGs are allowed (default no), the Verdict, a daily cap (default 5, maximum 25) and a per-company cap (default 1 per 30 days). A global cap (default 10 a day) and active hours also apply."

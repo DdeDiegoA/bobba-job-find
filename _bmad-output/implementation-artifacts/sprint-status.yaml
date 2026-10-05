@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-05-2026 00:50
-last_updated: 10-05-2026 02:33
+last_updated: 10-05-2026 03:44
 project: boba-job-find
 project_key: NOKEY
 tracking_system: file-system
@@ -95,8 +95,8 @@ development_status:
   6-9-optional-on-device-embeddings-f3: backlog
   epic-6-retrospective: optional
 
-  epic-7: backlog
-  7-1-document-model-and-typst-templates-2: backlog
+  epic-7: in-progress
+  7-1-document-model-and-typst-templates-2: done
   7-2-tailor-task-with-fact-ids-and-language-auto-match: backlog
   7-3-fabrication-validator-and-claim-traceability: backlog
   7-4-reviewer-pass-and-revision: backlog
