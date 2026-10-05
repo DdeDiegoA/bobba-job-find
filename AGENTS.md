@@ -67,9 +67,11 @@ Build rules (Diego, 2026-10-05):
 - Extra devs: the orquestador may ONLY add helper devs to support opencode when an opencode dev is consuming too much (stuck, looping, burning context/time). Those helpers run on Claude **Sonnet or Haiku** (`hermad spawn dev --name dev-<n> --kind claude --model sonnet|haiku`), never Opus. No other new agents for build work.
 - Gated slices (S1.2a, S1.2b, S1.7, S2.3a, S2.3b, S8.1, S8.2, S8.5, S9.6–S9.8, S10.2, S10.5, S11.1a, S11.1b, S11.2, S11.3): built normally; after reviewer approval the orquestador **asks Diego before merging**.
 - Cadence: waves run back-to-back; report to Diego at walking skeleton (W2–W4) and at each completed epic. Stop only for gates, conflicts, failures.
+- IPC registration (AD-3, ruled 2026-10-05): add commands/events ONLY as one line in `src-tauri/src/ipc/command_list.rs` (union-merge); `ipc/mod.rs` is owned by S1.3 and never edited later; `registry.rs` retired.
+- `Cargo.lock` / lockfiles: never hand-merged — rebase onto main and regenerate; workspace deps append-only.
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 (S1.1 scaffold) — in progress.
+Wave log: W1 S1.1 ✅ merged (25ee138). W2 S1.2a (gated), S1.3, S1.8 — in progress (dev-1/2/3).
 
 | Area | Docs | Status |
 |---|---|---|

@@ -38,12 +38,14 @@ graph TD
   DOCS["boba-docs"] -->|implements ports| APP
   MAIL["boba-mail"] -->|implements ports| APP
   BRW["boba-browser"] -->|implements ports| APP
+  EMB["boba-embed (optional)"] -->|implements ports| APP
   STORE --> DOM
   SRC --> DOM
   AGT --> DOM
   DOCS --> DOM
   MAIL --> DOM
   BRW --> DOM
+  EMB --> DOM
   AGT --> PROTO["boba-mcp-proto: tool schemas"]
   SHIM["boba-mcp (sidecar bin)"] --> PROTO
 ```
@@ -65,7 +67,7 @@ Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never 
 ### AD-3 — Typed IPC contract
 - **Binds:** UI ↔ core
 - **Prevents:** stringly-typed `invoke` drift and UI types that disagree with Rust types.
-- **Rule:** every command and event is declared in Rust and exported to `src/lib/ipc/bindings.ts` by tauri-specta. Never edit the generated file by hand, and never call `invoke` directly in the UI. Commands return `Result<T, AppError>`. Events are past-tense facts named `<area>.<thing>.<verb-ed>`, for example `posting.scored`, `agent.run.progressed`. The UI uses commands to write and events to invalidate TanStack Query caches. It keeps no mirror of server state in Zustand.
+- **Rule:** every command and event is declared in Rust and exported to `src/lib/ipc/bindings.ts` by tauri-specta. Never edit the generated file by hand, and never call `invoke` directly in the UI. **Registration has one source:** `src-tauri/src/ipc/command_list.rs` (`.gitattributes` `merge=union`). It defines `boba_commands!` (`tauri_specta::collect_commands![…]`) and `boba_events!` (`collect_events![…]`), one fully qualified fn or type path per line, each ending in a comma. A slice that adds a command appends one line there and never edits `ipc/mod.rs`, which is the only `tauri_specta::Builder` site and only calls the two macros. A bad union merge (a duplicate line, a missing comma) fails compilation, and the bindings-up-to-date check in CI catches drift. There is no second runtime registry. Commands return `Result<T, AppError>`. Events are past-tense facts named `<area>.<thing>.<verb-ed>`, for example `posting.scored`, `agent.run.progressed`. The UI uses commands to write and events to invalidate TanStack Query caches. It keeps no mirror of server state in Zustand.
 
 ### AD-4 — Agent runtime: CLI adapters behind one port
 - **Binds:** every LLM-using capability
@@ -255,6 +257,7 @@ boba-job-find/
   templates/{cv,cover}/*.typ    # Typst templates + fonts/ (OFL)
   src-tauri/
     src/                        # tauri app: commands, events, tray, scheduler wiring, setup
+      ipc/command_list.rs       # merge=union: the ONLY command/event registration list (AD-3)
     crates/
       boba-domain/              # entities, scoring, gates, apply policy (pure)
       boba-app/                 # use cases + port traits
@@ -266,6 +269,7 @@ boba-job-find/
       boba-docs/                # Typst/DOCX renderers + verification
       boba-mail/                # Graph / Gmail-send / IMAP-SMTP adapters + classifier rules
       boba-browser/             # CDP automation (chromiumoxide)
+      boba-embed/               # optional F3 embeddings: EmbeddingPort impl over fastembed (cargo feature `embeddings`)
   .github/workflows/{ci,release}.yml
   docs/
 ```

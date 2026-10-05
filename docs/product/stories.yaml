@@ -17,7 +17,7 @@ stories:
     title: "Encrypted store, keychain key and migrations"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: ["src-tauri/crates/boba-store/src/db/**", "src-tauri/crates/boba-store/src/keys/**", "src-tauri/crates/boba-store/src/migrate/**", "src-tauri/crates/boba-store/tests/db.rs", "src-tauri/crates/boba-store/migrations/0001_init.sql", "src-tauri/crates/boba-store/src/unlock/**", "src-tauri/src/commands/unlock.rs", "src/features/unlock/**", "locales/en/unlock.json", "locales/es/unlock.json", "docs/qa/macos-upgrade-test.md"]
+    files: ["src-tauri/crates/boba-store/src/db/**", "src-tauri/crates/boba-store/src/keys/**", "src-tauri/crates/boba-store/src/migrate/**", "src-tauri/crates/boba-store/tests/db.rs", "src-tauri/crates/boba-store/migrations/0001_init.sql", "src-tauri/crates/boba-store/migrations/**", "src-tauri/crates/boba-store/build.rs", "src-tauri/crates/boba-store/Cargo.toml", "src-tauri/crates/boba-store/src/unlock/**", "src-tauri/src/commands/unlock.rs", "src/features/unlock/**", "locales/en/unlock.json", "locales/es/unlock.json", "docs/qa/macos-upgrade-test.md"]
     covers: ["FR-109", "AD-2", "AD-13", "AD-20", "NFR-2", "NFR-12", "ADR-009"]
     ac:
       - "Given the first launch When the store initialises Then a random 256-bit key is created in the keychain (`app.bobajobfind/db-key`), and the DB file cannot be opened with plain SQLite."
@@ -32,7 +32,7 @@ stories:
     title: "Typed IPC, error model and event bus"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: ["src-tauri/src/ipc/**", "src-tauri/src/events/**", "src-tauri/crates/boba-app/src/error/**", "src/lib/ipc/**", "scripts/gen-bindings.mjs"]
+    files: ["src-tauri/src/ipc/**", "src-tauri/src/events/**", "src-tauri/crates/boba-app/src/error/**", "src/lib/ipc/**", "scripts/gen-bindings.mjs", "src-tauri/src/commands/mod.rs", "src-tauri/src/commands/registry.rs", ".gitattributes", "src-tauri/crates/boba-app/src/lib.rs", "src-tauri/crates/boba-app/src/ports/mod.rs", "src-tauri/crates/boba-app/src/ports/repo/mod.rs", "src-tauri/crates/boba-app/src/ports/agent.rs", "src-tauri/crates/boba-app/src/ports/browser.rs", "src-tauri/crates/boba-app/src/ports/clock.rs", "src-tauri/crates/boba-app/src/ports/embedding.rs", "src-tauri/crates/boba-app/src/ports/mail.rs", "src-tauri/crates/boba-app/src/ports/notifier.rs", "src-tauri/crates/boba-app/src/ports/render.rs", "src-tauri/crates/boba-app/src/ports/secret.rs", "src-tauri/crates/boba-app/src/ports/source.rs", "src-tauri/crates/boba-app/src/ports/repo/profile.rs", "src-tauri/crates/boba-app/src/ports/repo/sources.rs", "src-tauri/crates/boba-app/src/ports/repo/ingestion.rs", "src-tauri/crates/boba-app/src/ports/repo/scoring.rs", "src-tauri/crates/boba-app/src/ports/repo/documents.rs", "src-tauri/crates/boba-app/src/ports/repo/apply.rs", "src-tauri/crates/boba-app/src/ports/repo/email.rs", "src-tauri/crates/boba-app/src/ports/repo/agent.rs", "src-tauri/crates/boba-app/src/ports/repo/system.rs"]
     covers: ["AD-3"]
     ac:
       - "Given a Rust command When I build Then `bindings.ts` is regenerated, and CI fails if it is stale."
@@ -89,7 +89,7 @@ stories:
     title: "CI pipeline"
     phase: "MVP"
     depends_on: ["1.1"]
-    files: [".github/workflows/ci.yml", "scripts/ci/**"]
+    files: [".github/workflows/ci.yml", "scripts/ci/**", "deny.toml", "Cargo.toml", "src-tauri/Cargo.toml", "src-tauri/crates/boba-agent/Cargo.toml", "src-tauri/crates/boba-app/Cargo.toml", "src-tauri/crates/boba-browser/Cargo.toml", "src-tauri/crates/boba-docs/Cargo.toml", "src-tauri/crates/boba-domain/Cargo.toml", "src-tauri/crates/boba-mail/Cargo.toml", "src-tauri/crates/boba-mcp-proto/Cargo.toml", "src-tauri/crates/boba-mcp/Cargo.toml", "src-tauri/crates/boba-sources/Cargo.toml", "src-tauri/crates/boba-store/Cargo.toml"]
     covers: ["NFR-6", "NFR-22"]
     ac:
       - "Given a PR When CI runs Then it executes Biome, tsc, Vitest, the i18n check and the bindings check; cargo fmt, clippy, test and deny; and a 3-OS `tauri build --no-bundle`."
@@ -111,7 +111,7 @@ stories:
     title: "Run lifecycle, ProcessSupervisor and fake CLI"
     phase: "MVP"
     depends_on: ["2.1"]
-    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0005_agent_runs.sql"]
+    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0004_agent_runs.sql"]
     covers: ["FR-16", "FR-21", "AD-1", "AD-4", "NFR-14"]
     ac:
       - "Given an `AgentTask` When it runs Then the events `Started | Text | ToolCall | ToolResult | Usage | Finished | Failed` are persisted and emitted, and each run is attributed to its CLI and model."
@@ -190,7 +190,7 @@ stories:
     title: "Profile fact model and editor with versioning"
     phase: "MVP"
     depends_on: ["1.2", "1.5"]
-    files: ["src-tauri/crates/boba-domain/src/profile/**", "src-tauri/crates/boba-app/src/profile/**", "src-tauri/crates/boba-store/src/repos/profile.rs", "src-tauri/src/commands/profile.rs", "src/features/profile/**", "locales/en/profile.json", "locales/es/profile.json", "src-tauri/crates/boba-store/migrations/0008_profile.sql"]
+    files: ["src-tauri/crates/boba-domain/src/profile/**", "src-tauri/crates/boba-app/src/profile/**", "src-tauri/crates/boba-store/src/repos/profile.rs", "src-tauri/src/commands/profile.rs", "src/features/profile/**", "locales/en/profile.json", "locales/es/profile.json", "src-tauri/crates/boba-store/migrations/0007_profile.sql"]
     covers: ["FR-11", "FR-12", "FR-13", "AD-15", "EXPERIENCE §9.10"]
     ac:
       - "Given the Profile editor When I add or edit experience, skills (with evidence), education, certifications, languages (CEFR) or eligibility Then each item is a `profile_fact` with a stable ULID."
@@ -244,7 +244,7 @@ stories:
     title: "Source Adapter SDK, registry and HttpClient"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0004_sources.sql"]
+    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0005_sources.sql"]
     covers: ["FR-32", "AD-9", "AD-10", "NFR-14"]
     ac:
       - "Given a manifest declaring access_class, legal_tier, rate limits, attribution, apply_capability and secrets When it is registered Then the registry refuses to run `html_scrape`, `session_browser` or `external_process` sources that have no recorded opt-in."
@@ -255,7 +255,7 @@ stories:
     title: "Offer normalisation and language detection"
     phase: "MVP"
     depends_on: ["4.1"]
-    files: ["src-tauri/crates/boba-domain/src/posting/**", "src-tauri/crates/boba-app/src/ingest/normalize/**", "src-tauri/crates/boba-store/src/repos/postings.rs", "src-tauri/crates/boba-store/migrations/0007_postings.sql"]
+    files: ["src-tauri/crates/boba-domain/src/posting/**", "src-tauri/crates/boba-app/src/ingest/normalize/**", "src-tauri/crates/boba-store/src/repos/postings.rs", "src-tauri/crates/boba-store/migrations/0008_postings.sql"]
     covers: ["FR-48", "AD-17"]
     ac:
       - "Given a `RawPosting` When it is normalised Then an Offer is stored with title, company, locations, work mode, money (`amount_minor`, currency, period), dates, description, requirements, `lang` (BCP-47, via lingua), apply hints and a provenance row holding the raw payload."
@@ -275,7 +275,7 @@ stories:
     title: "Seen state, repost, staleness and expiry"
     phase: "MVP"
     depends_on: ["4.3"]
-    files: ["src-tauri/crates/boba-app/src/ingest/lifecycle/**", "src-tauri/crates/boba-store/migrations/0011_posting_lifecycle.sql"]
+    files: ["src-tauri/crates/boba-app/src/ingest/lifecycle/**", "src-tauri/crates/boba-store/migrations/0014_posting_lifecycle.sql"]
     covers: ["FR-50", "FR-51", "FR-52"]
     ac:
       - "Given an Offer I've already seen or dismissed When it reappears without material change Then I am not notified again."
@@ -383,7 +383,7 @@ stories:
     title: "Posting features extraction (deterministic and LLM-proposed)"
     phase: "MVP"
     depends_on: ["4.2", "2.4"]
-    files: ["src-tauri/crates/boba-domain/src/posting_features/**", "src-tauri/crates/boba-app/src/posting_features/**", "agent-pack/skills/extract_postings/**", "src-tauri/crates/boba-store/migrations/0012_posting_features.sql"]
+    files: ["src-tauri/crates/boba-domain/src/posting_features/**", "src-tauri/crates/boba-app/src/posting_features/**", "agent-pack/skills/extract_postings/**", "src-tauri/crates/boba-store/migrations/0011_posting_features.sql"]
     covers: ["FR-55", "FR-56", "FR-61", "AD-5"]
     ac:
       - "Given an Offer When features are extracted Then deterministic extraction (lexicon and regex) always runs, and the LLM *proposes* additional features within the run budget. Both are stored with provenance."
@@ -393,7 +393,7 @@ stories:
     title: "Fit and Quality factors, Rank and Verdict, versioned ScoreCards"
     phase: "MVP"
     depends_on: ["6.1", "6.2"]
-    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0014_scoring.sql"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0013_scoring.sql"]
     covers: ["FR-55", "FR-56", "FR-57", "FR-61", "FR-14", "AD-8"]
     ac:
       - "Given features, a Profile snapshot, Preferences and market data When `score()` runs Then factors F1–F6 and Q1–Q5 each emit `{score, weight, matched, missing, evidence, confidence}`, Rank = 0.65·Fit + 0.35·Quality, and the Verdict uses the PRD bands."
@@ -459,7 +459,7 @@ stories:
     title: "Optional on-device embeddings (F3)"
     phase: "MVP"
     depends_on: ["6.3"]
-    files: ["src-tauri/crates/boba-domain/src/scoring/f3/**", "src-tauri/crates/boba-app/src/embeddings/**"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/f3/**", "src-tauri/crates/boba-app/src/embeddings/**", "src-tauri/crates/boba-app/src/ports/embedding.rs", "src-tauri/crates/boba-embed/**", "src-tauri/crates/boba-app/Cargo.toml", "src-tauri/Cargo.toml", "Cargo.toml"]
     covers: ["FR-55"]
     ac:
       - "Given I opt in (about 120 MB, multilingual-e5-small) When the download completes Then F3 is computed on-device and the download destination is listed in network activity."
@@ -539,7 +539,7 @@ stories:
     title: "Screening answers and answer bank"
     phase: "MVP"
     depends_on: ["7.2"]
-    files: ["agent-pack/skills/answer_questions/**", "src-tauri/crates/boba-app/src/answers/**", "src-tauri/crates/boba-store/migrations/0013_answer_bank.sql"]
+    files: ["agent-pack/skills/answer_questions/**", "src-tauri/crates/boba-app/src/answers/**", "src-tauri/crates/boba-store/migrations/0012_answer_bank.sql"]
     covers: ["FR-80"]
     ac:
       - "Given application questions When answers are drafted Then they follow the no-fabrication rule. Salary and eligibility answers default to Preferences and are always flagged for review."

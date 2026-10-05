@@ -137,8 +137,10 @@ def plan(slices):
         ready = [s["id"] for s in slices if s["id"] not in placed and all(d in placed for d in s["deps"])]
         if not ready:
             sys.exit("dependency cycle among: " + ", ".join(s["id"] for s in slices if s["id"] not in placed))
-        ready.sort(key=lambda n: (-tail(n), order[n]))
-        wave = []
+        ready.sort(key=lambda n: (not by_id[n].get("first"), -tail(n), order[n]))  # `first: true` = dispatch as soon as ready
+        # `wave: N` pins an already-dispatched slice to its historical wave (overlaps there are reported, not re-planned)
+        wave = [n for n in ready if by_id[n].get("wave") == len(waves) + 1]
+        ready = [n for n in ready if not by_id[n].get("wave")]
         for n in ready:
             if len(wave) >= MAX_PER_WAVE:
                 break
@@ -290,6 +292,10 @@ def main():
     cross = [(a["id"], b["id"]) for i, a in enumerate(slices) for b in slices[i + 1:]
              if a["id"] not in anc[b["id"]] and b["id"] not in anc[a["id"]] and placed[a["id"]] != placed[b["id"]]
              and any(overlap(x, y) for x in files[a["id"]] for y in files[b["id"]])]
+    pinned = [(a, b, x) for w in waves for i, a in enumerate(w) for b in w[i + 1:]
+              for x in files[a] for y in files[b] if overlap(x, y)]
+    for a, b, x in pinned:
+        print(f"warning: pinned wave shares {x} between {a} and {b} (merge one, rebase the other)")
     secs = render_backlog_sections(waves, slices, stories, mig_no, tail)
     bl = BACKLOG.read_text()
     for k, v in secs.items():
