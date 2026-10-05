@@ -71,10 +71,11 @@ Build rules (Diego, 2026-10-05):
 - IPC registration (AD-3, ruled 2026-10-05): add commands/events ONLY as one line in `src-tauri/src/ipc/command_list.rs` (union-merge); `ipc/mod.rs` is owned by S1.3 and never edited later; `registry.rs` retired.
 - `Cargo.lock` / lockfiles: never hand-merged — rebase onto main and regenerate; workspace deps append-only.
 - Port types (AD-14, ruled 2026-10-05): every type that crosses a port lives in `boba-domain` (document model moves to `boba_domain::documents` in S7.2).
+- Review gate (Diego, 2026-10-05): the reviewer runs the FULL CI gate (incl. `cargo deny check`) on every slice before approving; any new advisory ignore is a security gate.
 - Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; main verified 110 tests green; S4.1 dev-4 (last W4 slice). CH1 ✅ 32db67c (dev profile debuginfo trimmed).
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; S4.1 ✅ 4abfd61. **All Wave 4 merged.** Full-gate verify of main: 12/13 pass; cargo deny red (6 typst-transitive advisories) → CH2 chore (dev-1, Diego: upgrade quick-xml, documented ignores for the rest). STOP after CH2 merges. CH1 ✅ 32db67c (dev profile debuginfo trimmed).
 - Dispatch: orquestador creates worktrees by hand (git worktree add) + hermad spawn, max 4 live devs; plan-devs is not used (it ignores live devs and reuses names). Chore CH1 (dev-profile debuginfo) dev-1.
 
 | Area | Docs | Status |

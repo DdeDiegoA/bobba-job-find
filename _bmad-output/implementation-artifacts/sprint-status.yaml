@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-05-2026 00:50
-last_updated: 10-05-2026 05:40
+last_updated: 10-05-2026 06:34
 project: boba-job-find
 project_key: NOKEY
 tracking_system: file-system
@@ -40,15 +40,15 @@ development_status:
   1-2-encrypted-store-keychain-key-and-migrations: in-progress
   1-3-typed-ipc-error-model-and-event-bus: done
   1-4-i18n-catalogues-en-es-ui-and-core: done
-  1-5-app-shell-design-tokens-theme-and-navigation: backlog
+  1-5-app-shell-design-tokens-theme-and-navigation: done
   1-6-system-tray-single-instance-and-close-to-tray: backlog
   1-7-settings-store-and-audit-log: done
-  1-8-ci-pipeline: backlog
+  1-8-ci-pipeline: done
   epic-1-retrospective: optional
 
   epic-2: in-progress
   2-1-cli-detection-and-capability-probing: done
-  2-2-run-lifecycle-processsupervisor-and-fake-cli: backlog
+  2-2-run-lifecycle-processsupervisor-and-fake-cli: done
   2-3-boba-mcp-shim-mcp-server-and-sandbox-lockdown: backlog
   2-4-agent-pack-renderer-and-task-registry: backlog
   2-5-run-budgets-and-usage-display: backlog
@@ -65,8 +65,8 @@ development_status:
   3-8-wizard-finish-sources-email-apply-mode-and-first-run: backlog
   epic-3-retrospective: optional
 
-  epic-4: backlog
-  4-1-source-adapter-sdk-registry-and-httpclient: backlog
+  epic-4: in-progress
+  4-1-source-adapter-sdk-registry-and-httpclient: done
   4-2-offer-normalisation-and-language-detection: backlog
   4-3-deduplication-into-clusters: backlog
   4-4-seen-state-repost-staleness-and-expiry: backlog

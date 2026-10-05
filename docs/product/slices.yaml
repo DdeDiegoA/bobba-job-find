@@ -233,8 +233,34 @@
   wave: 4
   parent: "4.1"
   title: Source Adapter SDK, registry and HttpClient
-  deps: [S1.2a, S1.3p]
-  files: ["@c/boba-sources/src/sdk/**", "@c/boba-sources/src/registry/**", "@c/boba-sources/src/http/**", "@c/boba-store/src/repos/sources.rs", "{mig:sources}", "@c/boba-app/src/ports/source.rs", "@c/boba-app/src/ports/repo/sources.rs"]
+  deps: [S1.2a, S1.3p, S1.8, S7.1]
+  files: ["@c/boba-sources/src/sdk/**", "@c/boba-sources/src/registry/**", "@c/boba-sources/src/http/**", "@c/boba-store/src/repos/sources.rs", "{mig:sources}", "@c/boba-app/src/ports/source.rs", "@c/boba-app/src/ports/repo/sources.rs", "@c/boba-domain/src/source/**", "@c/boba-domain/src/lib.rs", Cargo.toml, "@c/boba-sources/Cargo.toml"]
+  notes: Merged as 4abfd61 (docs/reviews/S4.1.md, 4 non-blocking notes). Note 1 is recorded here as boba-domain/src/source plus its pub mod line in boba-domain/src/lib.rs (port types live in boba-domain per the AD-14 ruling), the root Cargo.toml reqwest feature fix and boba-sources/Cargo.toml (Cargo.lock has no owner). S1.8 and S7.1 are recorded as dependencies because they edited those manifests and merged first. Notes 2 and 3 (per-host rate bucket, redirect bypass of robots and bucket) go to follow-up slice S4.1h. Note 4, SourcesRepo is not Send plus Sync because boba_store Store is not Sync (the writer actor holds an mpsc Sender), is flagged to the architect and must be resolved before repos are wired into Tauri state.
+
+- id: S4.1c
+  parent: "4.1"
+  followup: true
+  first: true
+  title: SourcesRepo Send + Sync supertrait
+  deps: [S4.1]
+  files: ["@c/boba-app/src/ports/repo/sources.rs", "@c/boba-store/src/repos/sources.rs", "@c/boba-store/tests/send_sync.rs"]
+  notes: Chore from the architect's ruling 2026-10-05 on docs/reviews/S4.1.md note 4. The premise was outdated, since std mpsc Sender is Sync from Rust 1.72 and Store is Send plus Sync. The real gap was the missing supertrait. Lands before S3.4 (wave 5). Does not hold story 4.1 open.
+  ac_from: []
+  ac_extra:
+    - "Given boba-app ports repo sources.rs, when I read it, then the trait is declared pub trait SourcesRepo: Send + Sync like every other port, and the incorrect not-Sync doc comments in that file and in boba-store repos sources.rs are removed (spine convention: every port and repo trait is Send + Sync)."
+    - "Given boba-store, when cargo test runs, then a compile-time assertion (fn _assert taking T: Send + Sync, called for Store) passes."
+
+- id: S4.1h
+  parent: "4.1"
+  followup: true
+  title: HttpClient hardening — one bucket per host and no redirect bypass
+  deps: [S4.1]
+  files: ["@c/boba-sources/src/http/**"]
+  notes: Follow-up from docs/reviews/S4.1.md notes 2 and 3 (not in S4.1 ACs). Does not hold story 4.1 open. Every Source adapter slice that fetches over HttpClient (S4.5, S4.6, S11.1b) depends on it, so the hardening lands before them.
+  ac_from: []
+  ac_extra:
+    - "Given two Sources on the same host with different min_interval_ms, when both fetch, then they share one token bucket keyed on the origin only, using the strictest interval seen, so the host rate is never exceeded (AD-10 one bucket per host)."
+    - "Given a response that redirects to another origin, when HttpClient handles it, then it does not follow it silently. Either redirects are disabled (Policy none) and surfaced to the adapter, or the robots check and rate bucket are re-applied to the final origin before the request is sent. A recorded-fixture test covers a cross-origin redirect to a robots-disallowed path (AD-10)."
 
 - id: S4.2
   parent: "4.2"
@@ -257,13 +283,13 @@
 - id: S4.5
   parent: "4.5"
   title: ATS board adapters (Greenhouse, Lever, Ashby, Workable, SmartRecruiters)
-  deps: [S4.2]
+  deps: [S4.2, S4.1h]
   files: ["@c/boba-sources/src/ats/**", "@c/boba-sources/tests/fixtures/ats/**"]
 
 - id: S4.6
   parent: "4.6"
   title: Remote feed adapters and aggregator APIs
-  deps: [S4.2]
+  deps: [S4.2, S4.1h]
   files: ["@c/boba-sources/src/feeds/**", "@c/boba-sources/src/aggregators/**", "@c/boba-sources/tests/fixtures/feeds/**"]
 
 - id: S4.7
@@ -383,7 +409,7 @@
 - id: S7.2
   parent: "7.2"
   title: Tailor task with fact IDs and language auto-match
-  deps: [S7.1, S3.4, S2.4, S1.3p]
+  deps: [S7.1, S3.4, S2.4, S1.3p, S4.1]
   files: [agent-pack/skills/tailor_application/**, "@c/boba-app/src/tailoring/**", "@c/boba-app/src/ports/render.rs", "@c/boba-app/src/ports/repo/documents.rs", "@c/boba-domain/src/documents/**", "@c/boba-domain/src/lib.rs", "@c/boba-docs/src/model/**", "@c/boba-docs/src/lib.rs", "@c/boba-docs/src/typst/**", "@c/boba-store/src/repos/documents.rs", "{mig:document_untrusted_origin}"]
   notes: S7.1 implemented boba-store repos/documents.rs before the DocumentRepo trait existed (accepted by the architect, 2026-10-05). This slice adds the trait in ports/repo/documents.rs and conforms S7.1's impl to it. RenderPort ruling (architect 2026-10-05, AD-14 and the Design Paradigm rule that every type crossing a port lives in boba-domain). This slice moves the document model from boba-docs/src/model to boba-domain/src/documents with no re-export shim, adds RenderPort over domain types only, and makes boba-docs implement it by wrapping S7.1's render_cv, render_cover and template registry. render_docx returns a not-yet-supported error until S7.7 fills it from boba-docs/src/docx. S7.1 is not reopened.
   ac_extra:
@@ -580,7 +606,7 @@
 - id: S11.1b
   parent: "11.1"
   title: LinkedIn and Indeed session adapters
-  deps: [S11.1a]
+  deps: [S11.1a, S4.1h]
   gate: diego
   files: ["@c/boba-sources/src/session/linkedin/**", "@c/boba-sources/src/session/indeed/**", "@c/boba-sources/tests/fixtures/session/**"]
   ac_from: [5, 6]

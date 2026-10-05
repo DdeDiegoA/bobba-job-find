@@ -343,7 +343,7 @@ As a new user, I want to finish setup and immediately see my first ranked Offers
 Goal: Offers arrive from Safe Sources, normalised and deduplicated, with health shown.
 
 ### Story 4.1: Source Adapter SDK, registry and HttpClient
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs` · **Covers:** FR-32, AD-9, AD-10, NFR-14
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs`, `src-tauri/crates/boba-domain/src/source/**`, `src-tauri/crates/boba-domain/src/lib.rs`, `Cargo.toml`, `src-tauri/crates/boba-sources/Cargo.toml`, `src-tauri/crates/boba-store/tests/send_sync.rs` · **Covers:** FR-32, AD-9, AD-10, NFR-14
 
 As a developer, I want one adapter contract and one polite HTTP client, so that every source respects rate limits, robots rules and opt-in rules the same way.
 
@@ -512,7 +512,7 @@ As a user, I want a ranked list in clear sections, so that the best Offers are o
 - **And** skeleton loading is used, and during a rerun the old data stays visible and dimmed.
 
 ### Story 6.5: Offer detail, score breakdown and Explanation narration
-**Phase:** MVP · **Depends on:** 6.4, 2.4 · **Files:** `src/features/offer/**`, `agent-pack/skills/narrate_scores/**`, `src-tauri/crates/boba-app/src/narration/**`, `locales/en/offer.json`, `locales/es/offer.json`, `src-tauri/crates/boba-store/migrations/0017_narration.sql` · **Covers:** FR-59, FR-65, AD-5, EXPERIENCE §9.4
+**Phase:** MVP · **Depends on:** 6.4, 2.4 · **Files:** `src/features/offer/**`, `agent-pack/skills/narrate_scores/**`, `src-tauri/crates/boba-app/src/narration/**`, `locales/en/offer.json`, `locales/es/offer.json`, `src-tauri/crates/boba-store/migrations/0018_narration.sql` · **Covers:** FR-59, FR-65, AD-5, EXPERIENCE §9.4
 
 As a user, I want to understand why an Offer scored the way it did, in plain language, so that I can decide quickly and trust the ranking.
 
@@ -718,7 +718,7 @@ As a user, I want Boba to know how each job can be applied to, and give me a rea
 - **Given** Manual **When** I click Apply **Then** the original page opens with a copy-ready kit (PDFs, answers), and I mark it Applied.
 
 ### Story 9.3: Email Apply in Review mode
-**Phase:** MVP · **Depends on:** 9.2, 8.2 · **Files:** `src-tauri/crates/boba-app/src/apply/engine/**`, `src-tauri/crates/boba-app/src/apply/email/**`, `src-tauri/crates/boba-store/src/repos/outbox.rs`, `src-tauri/crates/boba-store/migrations/0018_apply_attempts.sql` · **Covers:** FR-82, FR-88, NFR-13, AD-12, UJ-3
+**Phase:** MVP · **Depends on:** 9.2, 8.2 · **Files:** `src-tauri/crates/boba-app/src/apply/engine/**`, `src-tauri/crates/boba-app/src/apply/email/**`, `src-tauri/crates/boba-store/src/repos/outbox.rs`, `src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql` · **Covers:** FR-82, FR-88, NFR-13, AD-12, UJ-3
 
 As a user, I want to review and send an email application with my verified PDFs attached, so that applying takes one click.
 

@@ -201,7 +201,7 @@ Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never 
 
 | Concern | Convention |
 | --- | --- |
-| Rust naming | Crates `boba-<area>`. Ports are `trait <Thing>Port` in `boba-app::ports`. Adapters are `<Impl><Thing>` (`SqlcipherPostingRepo`, `ClaudeCodeDriver`, `GreenhouseAdapter`). |
+| Rust naming | Crates `boba-<area>`. Ports are `trait <Thing>Port: Send + Sync` in `boba-app::ports` (every port and repo trait has the `Send + Sync` supertrait so it can sit in Tauri state as `Arc<dyn …>`). Adapters are `<Impl><Thing>` (`SqlcipherPostingRepo`, `ClaudeCodeDriver`, `GreenhouseAdapter`). |
 | TS naming | Feature folders `src/features/<area>/`. Components PascalCase. Hooks `use<Thing>`. Query keys `[area, ...params]`. |
 | Errors | Core: `thiserror` enums per crate, mapped to `AppError {code, message_key, details}`. `message_key` is an i18n key. The UI never shows raw error strings. |
 | Logging | `tracing` with structured fields. PII and untrusted text are never logged (only IDs and lengths). Rolling local files through tauri-plugin-log. No telemetry and no remote crash reporting. |

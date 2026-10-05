@@ -244,7 +244,7 @@ stories:
     title: "Source Adapter SDK, registry and HttpClient"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0005_sources.sql", "src-tauri/crates/boba-app/src/ports/source.rs", "src-tauri/crates/boba-app/src/ports/repo/sources.rs"]
+    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0005_sources.sql", "src-tauri/crates/boba-app/src/ports/source.rs", "src-tauri/crates/boba-app/src/ports/repo/sources.rs", "src-tauri/crates/boba-domain/src/source/**", "src-tauri/crates/boba-domain/src/lib.rs", "Cargo.toml", "src-tauri/crates/boba-sources/Cargo.toml", "src-tauri/crates/boba-store/tests/send_sync.rs"]
     covers: ["FR-32", "AD-9", "AD-10", "NFR-14"]
     ac:
       - "Given a manifest declaring access_class, legal_tier, rate limits, attribution, apply_capability and secrets When it is registered Then the registry refuses to run `html_scrape`, `session_browser` or `external_process` sources that have no recorded opt-in."
@@ -417,7 +417,7 @@ stories:
     title: "Offer detail, score breakdown and Explanation narration"
     phase: "MVP"
     depends_on: ["6.4", "2.4"]
-    files: ["src/features/offer/**", "agent-pack/skills/narrate_scores/**", "src-tauri/crates/boba-app/src/narration/**", "locales/en/offer.json", "locales/es/offer.json", "src-tauri/crates/boba-store/migrations/0017_narration.sql"]
+    files: ["src/features/offer/**", "agent-pack/skills/narrate_scores/**", "src-tauri/crates/boba-app/src/narration/**", "locales/en/offer.json", "locales/es/offer.json", "src-tauri/crates/boba-store/migrations/0018_narration.sql"]
     covers: ["FR-59", "FR-65", "AD-5", "EXPERIENCE §9.4"]
     ac:
       - "Given an Offer When I open its detail Then I see the sanitised posting (no remote content loaded), Gates at the top with their quotes, the factor breakdown (matched, missing, evidence), the duplicates and Sources, the original link and the detected Apply Channels."
@@ -625,7 +625,7 @@ stories:
     title: "Email Apply in Review mode"
     phase: "MVP"
     depends_on: ["9.2", "8.2"]
-    files: ["src-tauri/crates/boba-app/src/apply/engine/**", "src-tauri/crates/boba-app/src/apply/email/**", "src-tauri/crates/boba-store/src/repos/outbox.rs", "src-tauri/crates/boba-store/migrations/0018_apply_attempts.sql"]
+    files: ["src-tauri/crates/boba-app/src/apply/engine/**", "src-tauri/crates/boba-app/src/apply/email/**", "src-tauri/crates/boba-store/src/repos/outbox.rs", "src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql"]
     covers: ["FR-82", "FR-88", "NFR-13", "AD-12", "UJ-3"]
     ac:
       - "Given a verified Package and an Email Apply channel When I review the recipient, subject, body and attachments and click Send Then audit `intent` is written, the email goes from my account, audit `outcome` is written with the message ID, and the Application moves to Applied."
