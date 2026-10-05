@@ -210,7 +210,7 @@ As a user, I want Boba to find the agent CLIs I already have and know what each 
 - **And** driver tests run against recorded probe fixtures. No real CLI is needed in CI.
 
 ### Story 2.2: Run lifecycle, ProcessSupervisor and fake CLI
-**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
+**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `locales/en/agent.json`, `locales/es/agent.json`, `scripts/ci/check-i18n.mjs` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
 
 As a developer, I want `AgentPort::run` to stream normalised events from any CLI and be cancellable, so that features never deal with CLI specifics.
 

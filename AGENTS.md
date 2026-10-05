@@ -66,6 +66,7 @@ Build rules (Diego, 2026-10-05):
 - Devs: all `opencode` DeepSeek V4.1 Flash. Branch `hermad/<story>` in a worktree per slice.
 - Extra devs: the orquestador may ONLY add helper devs to support opencode when an opencode dev is consuming too much (stuck, looping, burning context/time). Those helpers run on Claude **Sonnet or Haiku** (`hermad spawn dev --name dev-<n> --kind claude --model sonnet|haiku`), never Opus. No other new agents for build work.
 - Human gate = SECURITY ONLY (Diego, 2026-10-05): orquestador merges every reviewer-approved slice without asking, EXCEPT security-sensitive ones, where it asks Diego first: S1.2b (unlock/passphrase), S1.7 (audit-log integrity), S2.3a/S2.3b (MCP sandbox, tool lockdown, untrusted content), S8.1/S8.2/S8.5 (OAuth/tokens), S10.5 (code signing), S11.1a/S11.1b/S11.2/S11.3 (session cookies/browser automation), and any new security exception (advisory ignores, crypto/key changes, permission/CSP loosening). Auto-apply (S9.6–9.8) and restore/reset (S10.2) are NOT gated.
+- STOP POINT (Diego, 2026-10-05): stop after Wave 4 completes (S7.1, S2.2, S1.5, S1.7, S4.1 merged). Do NOT dispatch Wave 5; report and wait.
 - Cadence: waves run back-to-back; report to Diego at walking skeleton (W2–W4) and at each completed epic. Stop only for gates, conflicts, failures.
 - IPC registration (AD-3, ruled 2026-10-05): add commands/events ONLY as one line in `src-tauri/src/ipc/command_list.rs` (union-merge); `ipc/mod.rs` is owned by S1.3 and never edited later; `registry.rs` retired.
 - `Cargo.lock` / lockfiles: never hand-merged — rebase onto main and regenerate; workspace deps append-only.
@@ -73,7 +74,7 @@ Build rules (Diego, 2026-10-05):
 - Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 dev-4 in progress. W4: S2.2 dev-2, S1.7 (gated) dev-3; S1.5, S4.1 queued for free slots.
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 dev-4 in progress. W4: S2.2 dev-2, S1.7 (gated) dev-3, S1.5 dev-1; S4.1 queued (disk). CH1 ✅ 32db67c (dev profile debuginfo trimmed).
 - Dispatch: orquestador creates worktrees by hand (git worktree add) + hermad spawn, max 4 live devs; plan-devs is not used (it ignores live devs and reuses names). Chore CH1 (dev-profile debuginfo) dev-1.
 
 | Area | Docs | Status |

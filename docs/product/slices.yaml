@@ -91,6 +91,7 @@
     - "Given locales/en/common.json and locales/es/common.json, when I look up errors.unknown and errors.task.missing_id, then both keys exist with EN and ES text, because S1.3 already emits them (src/lib/ipc/errors.ts UNKNOWN_ERROR_KEY and the AppError::invalid_input path in src-tauri/src/ipc/mod.rs), and the i18n check fails if any message_key the core emits has no catalogue entry (AD-21, Conventions: errors)."
 
 - id: S1.5
+  wave: 4
   parent: "1.5"
   title: App shell, design tokens, theme and navigation
   deps: [S1.3, S1.4]
@@ -103,6 +104,7 @@
   files: [src-tauri/src/tray/menu.rs, src-tauri/src/tray/mod.rs, src-tauri/src/lifecycle/**, "{loc:tray}"]
 
 - id: S1.7
+  wave: 4
   parent: "1.7"
   title: Settings store and hash-chained audit log
   deps: [S1.2a, S1.3p]
@@ -128,10 +130,12 @@
   notes: Merged. Also edited boba-agent/Cargo.toml and boba-store/Cargo.toml (historical). S1.8 is recorded as a dependency because it last edited the crate manifests.
 
 - id: S2.2
+  wave: 4
   parent: "2.2"
   title: Run lifecycle, ProcessSupervisor and fake CLI
-  deps: [S2.1, S1.3p]
-  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/repo/agent.rs"]
+  deps: [S2.1, S1.3p, S1.4]
+  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/repo/agent.rs", "{loc:agent}", scripts/ci/check-i18n.mjs]
+  notes: Review fix (orquestador grant 2026-10-05) added locales en and es agent.json and scripts/ci/check-i18n.mjs. S1.4 is recorded as a dependency because it owns the i18n check and merged first.
 
 - id: S2.3a
   parent: "2.3"
@@ -214,6 +218,7 @@
 
 # ---------------- E4 Sources & Ingestion ----------------
 - id: S4.1
+  wave: 4
   parent: "4.1"
   title: Source Adapter SDK, registry and HttpClient
   deps: [S1.2a, S1.3p]
