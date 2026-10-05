@@ -21,6 +21,7 @@ r2d2_sqlite = { workspace = true }
 keyring-core = { workspace = true }
 zeroize = { workspace = true }
 getrandom = { workspace = true }
+ulid = { workspace = true }
 
 # Platform credential stores (ADR-004/ADR-009). Each store crate requires a
 # feature to select its backend; the store itself is registered at startup.

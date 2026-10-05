@@ -1,0 +1,10 @@
+Usage: gemini [options] [prompt]
+
+Options:
+  -p, --prompt <prompt>            Run in non-interactive mode
+      --output-format <format>     Output format: text, json, stream-json
+  -m, --model <model>              Model to use
+      --exclude-tools <tools...>   Tools to exclude (e.g. shell)
+      --allowed-tools <tools...>   Tools to allow
+      --mcp-config <path>          MCP servers configuration file
+  -h, --help                       Display help
