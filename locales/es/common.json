@@ -1,3 +1,4 @@
 {
-  "app.name": "Boba Job Find"
+  "errors.unknown": "Algo salió mal.",
+  "errors.task.missing_id": "Falta el identificador de la tarea."
 }
