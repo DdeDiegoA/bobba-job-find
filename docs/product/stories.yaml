@@ -76,7 +76,7 @@ stories:
     title: "Settings store and audit log"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-store/src/repos/settings.rs", "src-tauri/crates/boba-store/src/repos/audit.rs", "src-tauri/crates/boba-app/src/system/**", "src-tauri/crates/boba-domain/src/audit/**", "src-tauri/crates/boba-store/migrations/0006_system.sql"]
+    files: ["src-tauri/crates/boba-store/src/repos/settings.rs", "src-tauri/crates/boba-store/src/repos/audit.rs", "src-tauri/crates/boba-app/src/system/**", "src-tauri/crates/boba-domain/src/audit/**", "src-tauri/crates/boba-store/migrations/0006_system.sql", "src-tauri/crates/boba-app/src/ports/clock.rs", "src-tauri/crates/boba-app/src/ports/repo/system.rs"]
     covers: ["AD-12", "FR-89", "FR-106"]
     ac:
       - "Given any code path that records an outbound action When it runs Then an `intent` row is written before it and an `outcome` row after it, each with `prev_hash` and a blake3 `hash` computed over the RFC 8785 (JCS) form of every column except `hash`. Rows hold metadata, IDs and blake3 hashes of payloads (Package, email body), never the payloads themselves."
@@ -111,7 +111,7 @@ stories:
     title: "Run lifecycle, ProcessSupervisor and fake CLI"
     phase: "MVP"
     depends_on: ["2.1"]
-    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0004_agent_runs.sql"]
+    files: ["src-tauri/crates/boba-agent/src/runtime/**", "src-tauri/crates/boba-agent/src/supervisor/**", "src-tauri/crates/boba-store/src/repos/agent_run.rs", "tools/fake-cli/**", "src-tauri/crates/boba-store/migrations/0004_agent_runs.sql", "src-tauri/crates/boba-app/src/ports/agent.rs", "src-tauri/crates/boba-app/src/ports/repo/agent.rs"]
     covers: ["FR-16", "FR-21", "AD-1", "AD-4", "NFR-14"]
     ac:
       - "Given an `AgentTask` When it runs Then the events `Started | Text | ToolCall | ToolResult | Usage | Finished | Failed` are persisted and emitted, and each run is attributed to its CLI and model."
@@ -190,7 +190,7 @@ stories:
     title: "Profile fact model and editor with versioning"
     phase: "MVP"
     depends_on: ["1.2", "1.5"]
-    files: ["src-tauri/crates/boba-domain/src/profile/**", "src-tauri/crates/boba-app/src/profile/**", "src-tauri/crates/boba-store/src/repos/profile.rs", "src-tauri/src/commands/profile.rs", "src/features/profile/**", "locales/en/profile.json", "locales/es/profile.json", "src-tauri/crates/boba-store/migrations/0007_profile.sql"]
+    files: ["src-tauri/crates/boba-domain/src/profile/**", "src-tauri/crates/boba-app/src/profile/**", "src-tauri/crates/boba-store/src/repos/profile.rs", "src-tauri/src/commands/profile.rs", "src/features/profile/**", "locales/en/profile.json", "locales/es/profile.json", "src-tauri/crates/boba-store/migrations/0007_profile.sql", "src-tauri/crates/boba-app/src/ports/repo/profile.rs"]
     covers: ["FR-11", "FR-12", "FR-13", "AD-15", "EXPERIENCE §9.10"]
     ac:
       - "Given the Profile editor When I add or edit experience, skills (with evidence), education, certifications, languages (CEFR) or eligibility Then each item is a `profile_fact` with a stable ULID."
@@ -244,7 +244,7 @@ stories:
     title: "Source Adapter SDK, registry and HttpClient"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0005_sources.sql"]
+    files: ["src-tauri/crates/boba-sources/src/sdk/**", "src-tauri/crates/boba-sources/src/registry/**", "src-tauri/crates/boba-sources/src/http/**", "src-tauri/crates/boba-store/src/repos/sources.rs", "src-tauri/crates/boba-store/migrations/0005_sources.sql", "src-tauri/crates/boba-app/src/ports/source.rs", "src-tauri/crates/boba-app/src/ports/repo/sources.rs"]
     covers: ["FR-32", "AD-9", "AD-10", "NFR-14"]
     ac:
       - "Given a manifest declaring access_class, legal_tier, rate limits, attribution, apply_capability and secrets When it is registered Then the registry refuses to run `html_scrape`, `session_browser` or `external_process` sources that have no recorded opt-in."
@@ -255,7 +255,7 @@ stories:
     title: "Offer normalisation and language detection"
     phase: "MVP"
     depends_on: ["4.1"]
-    files: ["src-tauri/crates/boba-domain/src/posting/**", "src-tauri/crates/boba-app/src/ingest/normalize/**", "src-tauri/crates/boba-store/src/repos/postings.rs", "src-tauri/crates/boba-store/migrations/0008_postings.sql"]
+    files: ["src-tauri/crates/boba-domain/src/posting/**", "src-tauri/crates/boba-app/src/ingest/normalize/**", "src-tauri/crates/boba-store/src/repos/postings.rs", "src-tauri/crates/boba-store/migrations/0008_postings.sql", "src-tauri/crates/boba-app/src/ports/repo/ingestion.rs"]
     covers: ["FR-48", "AD-17"]
     ac:
       - "Given a `RawPosting` When it is normalised Then an Offer is stored with title, company, locations, work mode, money (`amount_minor`, currency, period), dates, description, requirements, `lang` (BCP-47, via lingua), apply hints and a provenance row holding the raw payload."
@@ -328,7 +328,7 @@ stories:
     title: "Scheduler and job runs"
     phase: "MVP"
     depends_on: ["1.7"]
-    files: ["src-tauri/src/scheduler/**", "src-tauri/crates/boba-app/src/jobs/**", "src-tauri/crates/boba-store/src/repos/jobs.rs", "src-tauri/crates/boba-store/migrations/0015_jobs.sql"]
+    files: ["src-tauri/src/scheduler/**", "src-tauri/crates/boba-app/src/jobs/**", "src-tauri/crates/boba-store/src/repos/jobs.rs", "src-tauri/crates/boba-store/migrations/0015_jobs.sql", "src-tauri/crates/boba-app/src/ports/notifier.rs"]
     covers: ["FR-41", "FR-43", "FR-47", "AD-18"]
     ac:
       - "Given one or more run times and active days When a time arrives Then exactly one `job_run` row is created per `(job, scheduled_for)`."
@@ -393,7 +393,7 @@ stories:
     title: "Fit and Quality factors, Rank and Verdict, versioned ScoreCards"
     phase: "MVP"
     depends_on: ["6.1", "6.2"]
-    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0013_scoring.sql"]
+    files: ["src-tauri/crates/boba-domain/src/scoring/factors/**", "src-tauri/crates/boba-domain/src/scoring/rank/**", "src-tauri/crates/boba-domain/tests/golden/**", "src-tauri/crates/boba-app/src/scoring/**", "src-tauri/crates/boba-store/src/repos/scoring.rs", "src-tauri/crates/boba-store/migrations/0013_scoring.sql", "src-tauri/crates/boba-app/src/ports/repo/scoring.rs"]
     covers: ["FR-55", "FR-56", "FR-57", "FR-61", "FR-14", "AD-8"]
     ac:
       - "Given features, a Profile snapshot, Preferences and market data When `score()` runs Then factors F1–F6 and Q1–Q5 each emit `{score, weight, matched, missing, evidence, confidence}`, Rank = 0.65·Fit + 0.35·Quality, and the Verdict uses the PRD bands."
@@ -479,7 +479,7 @@ stories:
     title: "Tailor task with fact IDs and language auto-match"
     phase: "MVP"
     depends_on: ["7.1", "3.4", "2.4"]
-    files: ["agent-pack/skills/tailor_application/**", "src-tauri/crates/boba-app/src/tailoring/**"]
+    files: ["agent-pack/skills/tailor_application/**", "src-tauri/crates/boba-app/src/tailoring/**", "src-tauri/crates/boba-app/src/ports/render.rs", "src-tauri/crates/boba-app/src/ports/repo/documents.rs"]
     covers: ["FR-69", "FR-70", "AD-15", "AD-17"]
     ac:
       - "Given an Offer in Spanish When I click Tailor Then both drafts are in Spanish (override available). For languages other than ES or EN, EN is used and a notice explains why."
@@ -508,7 +508,7 @@ stories:
     title: "Layout verification and relevance-weighted cutting"
     phase: "MVP"
     depends_on: ["7.1", "7.2"]
-    files: ["src-tauri/crates/boba-docs/src/verify/layout/**", "src-tauri/crates/boba-app/src/fitting/**"]
+    files: ["src-tauri/crates/boba-docs/src/verify/layout/**", "src-tauri/crates/boba-app/src/fitting/**", "src-tauri/crates/boba-app/src/ports/verify.rs"]
     covers: ["FR-76", "AD-14"]
     ac:
       - "Given a CV over budget (default 2 pages, configurable 1–3) When it is verified Then lines are scored for relevance, uniqueness and cover-letter dependency, the lowest are cut until it fits, and what was cut is shown."
@@ -518,7 +518,7 @@ stories:
     title: "ATS text-layer verification and keyword coverage"
     phase: "MVP"
     depends_on: ["7.5"]
-    files: ["src-tauri/crates/boba-docs/src/verify/text_layer/**", "src-tauri/crates/boba-domain/src/keywords/**", "src/features/studio/coverage/**", "locales/en/studio_coverage.json", "locales/es/studio_coverage.json"]
+    files: ["src-tauri/crates/boba-docs/src/verify/text_layer/**", "src-tauri/crates/boba-domain/src/keywords/**", "src/features/studio/coverage/**", "locales/en/studio_coverage.json", "locales/es/studio_coverage.json", "src-tauri/crates/boba-app/src/ports/verify.rs"]
     covers: ["FR-75", "FR-77", "SM-8", "AD-14"]
     ac:
       - "Given a rendered PDF When it is verified Then the text layer shows literal contact details and the correct reading order, with no `(cid:` or U+FFFD characters, and every Profile-backed requirement keyword is present."
@@ -549,7 +549,7 @@ stories:
     title: "Microsoft Graph connection (read and send)"
     phase: "MVP"
     depends_on: ["1.2"]
-    files: ["src-tauri/crates/boba-mail/src/graph/**", "src-tauri/crates/boba-mail/src/oauth/**", "src-tauri/crates/boba-store/src/repos/email.rs", "src/features/connections/email/**", "src-tauri/src/commands/email.rs", "locales/en/connections_email.json", "locales/es/connections_email.json", "src-tauri/crates/boba-store/migrations/0009_email_accounts.sql"]
+    files: ["src-tauri/crates/boba-mail/src/graph/**", "src-tauri/crates/boba-mail/src/oauth/**", "src-tauri/crates/boba-store/src/repos/email.rs", "src/features/connections/email/**", "src-tauri/src/commands/email.rs", "locales/en/connections_email.json", "locales/es/connections_email.json", "src-tauri/crates/boba-store/migrations/0009_email_accounts.sql", "src-tauri/crates/boba-app/src/ports/mail.rs", "src-tauri/crates/boba-app/src/ports/secret.rs", "src-tauri/crates/boba-app/src/ports/repo/email.rs"]
     covers: ["FR-35", "FR-37", "FR-39", "FR-40", "NFR-5", "AD-13"]
     ac:
       - "Given Connect Outlook When I complete OAuth (bundled public client or my own client ID, `/common`) Then only `Mail.Read` and `Mail.Send` (delegated) are requested and listed in plain language, and the tokens are stored only in the keychain."
@@ -603,7 +603,7 @@ stories:
     title: "Application model and kanban Tracker"
     phase: "MVP"
     depends_on: ["1.7", "1.5"]
-    files: ["src-tauri/crates/boba-domain/src/application/**", "src-tauri/crates/boba-app/src/applications/**", "src-tauri/crates/boba-store/src/repos/applications.rs", "src/features/tracker/board/**", "src/features/tracker/index.tsx", "src-tauri/src/commands/tracker.rs", "locales/en/tracker.json", "locales/es/tracker.json", "src-tauri/crates/boba-store/migrations/0010_applications.sql"]
+    files: ["src-tauri/crates/boba-domain/src/application/**", "src-tauri/crates/boba-app/src/applications/**", "src-tauri/crates/boba-store/src/repos/applications.rs", "src/features/tracker/board/**", "src/features/tracker/index.tsx", "src-tauri/src/commands/tracker.rs", "locales/en/tracker.json", "locales/es/tracker.json", "src-tauri/crates/boba-store/migrations/0010_applications.sql", "src-tauri/crates/boba-app/src/ports/repo/apply.rs"]
     covers: ["FR-93", "FR-94", "AD-16", "EXPERIENCE §9.6"]
     ac:
       - "Given Applications When I open Tracker Then columns show Saved, Preparing, Applied, Interviewing, Offer, Hired, Rejected, No Response and Withdrawn, with the terminal columns collapsible. The stored `application.status` uses the upstream vocabulary plus `saved`, in one status machine with no UI-side state."
@@ -636,7 +636,7 @@ stories:
     title: "ATS Form assist via browser automation"
     phase: "MVP"
     depends_on: ["9.2", "7.8"]
-    files: ["src-tauri/crates/boba-browser/src/driver/**", "src-tauri/crates/boba-browser/src/forms/**", "src-tauri/crates/boba-app/src/apply/ats_form/**"]
+    files: ["src-tauri/crates/boba-browser/src/driver/**", "src-tauri/crates/boba-browser/src/forms/**", "src-tauri/crates/boba-app/src/apply/ats_form/**", "src-tauri/crates/boba-app/src/ports/browser.rs"]
     covers: ["FR-82", "FR-88", "AD-10"]
     ac:
       - "Given an ATS Form channel When I click Apply Then a headed browser window, using the Boba browser profile, opens the form and fills fields from the Package and the answer bank. Sensitive field values are never logged."

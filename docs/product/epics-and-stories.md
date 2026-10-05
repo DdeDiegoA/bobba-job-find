@@ -172,7 +172,7 @@ As a user, I want Boba to live in my tray, so that it can work in the background
 - **Given** a second launch **When** Boba is already running **Then** the existing window is focused and no second instance starts.
 
 ### Story 1.7: Settings store and audit log
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql` · **Covers:** AD-12, FR-89 (store), FR-106 (shell), Consistency Conventions (config)
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs` · **Covers:** AD-12, FR-89 (store), FR-106 (shell), Consistency Conventions (config)
 
 As a user, I want every automated or outbound action recorded in a log that cannot be tampered with, so that I can always see what Boba did and why.
 
@@ -210,7 +210,7 @@ As a user, I want Boba to find the agent CLIs I already have and know what each 
 - **And** driver tests run against recorded probe fixtures. No real CLI is needed in CI.
 
 ### Story 2.2: Run lifecycle, ProcessSupervisor and fake CLI
-**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
+**Phase:** MVP · **Depends on:** 2.1 · **Files:** `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs` · **Covers:** FR-16, FR-21, AD-1, AD-4, NFR-14
 
 As a developer, I want `AgentPort::run` to stream normalised events from any CLI and be cancellable, so that features never deal with CLI specifics.
 
@@ -288,7 +288,7 @@ As a user without a working CLI, I want to keep using what works without AI, so 
 - **And** the same disabled state, with a "needs a fully locked-down CLI" reason, applies to untrusted-content tasks when the selected CLI lacks `tool_lockdown` (2.3).
 
 ### Story 3.4: Profile fact model and editor with versioning
-**Phase:** MVP · **Depends on:** 1.2, 1.5 · **Files:** `src-tauri/crates/boba-domain/src/profile/**`, `src-tauri/crates/boba-app/src/profile/**`, `src-tauri/crates/boba-store/src/repos/profile.rs`, `src-tauri/src/commands/profile.rs`, `src/features/profile/**`, `locales/en/profile.json`, `locales/es/profile.json`, `src-tauri/crates/boba-store/migrations/0007_profile.sql` · **Covers:** FR-11, FR-12, FR-13, AD-15, EXPERIENCE §9.10
+**Phase:** MVP · **Depends on:** 1.2, 1.5 · **Files:** `src-tauri/crates/boba-domain/src/profile/**`, `src-tauri/crates/boba-app/src/profile/**`, `src-tauri/crates/boba-store/src/repos/profile.rs`, `src-tauri/src/commands/profile.rs`, `src/features/profile/**`, `locales/en/profile.json`, `locales/es/profile.json`, `src-tauri/crates/boba-store/migrations/0007_profile.sql`, `src-tauri/crates/boba-app/src/ports/repo/profile.rs` · **Covers:** FR-11, FR-12, FR-13, AD-15, EXPERIENCE §9.10
 
 As a user, I want my Profile stored as editable facts with EN and ES variants and a history, so that every claim Boba makes comes from something I confirmed.
 
@@ -343,7 +343,7 @@ As a new user, I want to finish setup and immediately see my first ranked Offers
 Goal: Offers arrive from Safe Sources, normalised and deduplicated, with health shown.
 
 ### Story 4.1: Source Adapter SDK, registry and HttpClient
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql` · **Covers:** FR-32, AD-9, AD-10, NFR-14
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs` · **Covers:** FR-32, AD-9, AD-10, NFR-14
 
 As a developer, I want one adapter contract and one polite HTTP client, so that every source respects rate limits, robots rules and opt-in rules the same way.
 
@@ -353,7 +353,7 @@ As a developer, I want one adapter contract and one polite HTTP client, so that 
 - **And** a failing adapter never aborts the rest of a run.
 
 ### Story 4.2: Offer normalisation and language detection
-**Phase:** MVP · **Depends on:** 4.1 · **Files:** `src-tauri/crates/boba-domain/src/posting/**`, `src-tauri/crates/boba-app/src/ingest/normalize/**`, `src-tauri/crates/boba-store/src/repos/postings.rs`, `src-tauri/crates/boba-store/migrations/0008_postings.sql` · **Covers:** FR-48, AD-17
+**Phase:** MVP · **Depends on:** 4.1 · **Files:** `src-tauri/crates/boba-domain/src/posting/**`, `src-tauri/crates/boba-app/src/ingest/normalize/**`, `src-tauri/crates/boba-store/src/repos/postings.rs`, `src-tauri/crates/boba-store/migrations/0008_postings.sql`, `src-tauri/crates/boba-app/src/ports/repo/ingestion.rs` · **Covers:** FR-48, AD-17
 
 As a user, I want every posting in one consistent shape with its language detected, so that ranking and tailoring work on any source.
 
@@ -425,7 +425,7 @@ As a user, I want one place to see, add and fix my Sources, so that I trust wher
 Goal: searches run every day from the tray, with catch-up, a report and a digest.
 
 ### Story 5.1: Scheduler and job runs
-**Phase:** MVP · **Depends on:** 1.7 · **Files:** `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0015_jobs.sql` · **Covers:** FR-41, FR-43, FR-47, AD-18
+**Phase:** MVP · **Depends on:** 1.7 · **Files:** `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0015_jobs.sql`, `src-tauri/crates/boba-app/src/ports/notifier.rs` · **Covers:** FR-41, FR-43, FR-47, AD-18
 
 As a user, I want reliable scheduled runs that catch up after sleep and never double-run, so that the search just happens.
 
@@ -490,7 +490,7 @@ As the scoring engine, I need structured requirements (skills, seniority, educat
 - **And** features are cached per (Offer, Profile version). Re-running with the same inputs gives identical features (FR-61).
 
 ### Story 6.3: Fit and Quality factors, Rank and Verdict, versioned ScoreCards
-**Phase:** MVP · **Depends on:** 6.1, 6.2 · **Files:** `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0013_scoring.sql` · **Covers:** FR-55, FR-56, FR-57, FR-61, FR-14, AD-8
+**Phase:** MVP · **Depends on:** 6.1, 6.2 · **Files:** `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0013_scoring.sql`, `src-tauri/crates/boba-app/src/ports/repo/scoring.rs` · **Covers:** FR-55, FR-56, FR-57, FR-61, FR-14, AD-8
 
 As a user, I want every Offer scored on Fit and Quality with evidence and confidence, so that I can see both "can I get it" and "do I want it".
 
@@ -574,7 +574,7 @@ As a user, I want clean ATS-safe templates rendered without LaTeX, so that my do
 - **And** fonts are bundled under the OFL licence, and the user can set a default template.
 
 ### Story 7.2: Tailor task with fact IDs and language auto-match
-**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**` · **Covers:** FR-69, FR-70, AD-15, AD-17
+**Phase:** MVP · **Depends on:** 7.1, 3.4, 2.4 · **Files:** `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs` · **Covers:** FR-69, FR-70, AD-15, AD-17
 
 As a user, I want a CV and cover letter drafted for this Offer in its language, so that I start from a strong draft.
 
@@ -600,7 +600,7 @@ As a user, I want a second, fresh-eyes critique before I see the draft, so that 
 - **Given** a draft **When** generation runs **Then** a fresh-context review task critiques it, a revision follows, and the reviewer's top findings appear in the studio.
 
 ### Story 7.5: Layout verification and relevance-weighted cutting
-**Phase:** MVP · **Depends on:** 7.1, 7.2 · **Files:** `src-tauri/crates/boba-docs/src/verify/layout/**`, `src-tauri/crates/boba-app/src/fitting/**` · **Covers:** FR-76, AD-14
+**Phase:** MVP · **Depends on:** 7.1, 7.2 · **Files:** `src-tauri/crates/boba-docs/src/verify/layout/**`, `src-tauri/crates/boba-app/src/fitting/**`, `src-tauri/crates/boba-app/src/ports/verify.rs` · **Covers:** FR-76, AD-14
 
 As a user, I want the CV to fit the page budget by cutting the least relevant lines, so that it stays tight without losing what matters.
 
@@ -609,7 +609,7 @@ As a user, I want the CV to fit the page budget by cutting the least relevant li
 - **And** the cover letter is exactly 1 page, with no orphaned headings or overflow.
 
 ### Story 7.6: ATS text-layer verification and keyword coverage
-**Phase:** MVP · **Depends on:** 7.5 · **Files:** `src-tauri/crates/boba-docs/src/verify/text_layer/**`, `src-tauri/crates/boba-domain/src/keywords/**`, `src/features/studio/coverage/**`, `locales/en/studio_coverage.json`, `locales/es/studio_coverage.json` · **Covers:** FR-75, FR-77, SM-8, AD-14
+**Phase:** MVP · **Depends on:** 7.5 · **Files:** `src-tauri/crates/boba-docs/src/verify/text_layer/**`, `src-tauri/crates/boba-domain/src/keywords/**`, `src/features/studio/coverage/**`, `locales/en/studio_coverage.json`, `locales/es/studio_coverage.json`, `src-tauri/crates/boba-app/src/ports/verify.rs` · **Covers:** FR-75, FR-77, SM-8, AD-14
 
 As a user, I want to know an ATS can read my PDF and which requirements I cover, so that I don't get filtered out by a parser.
 
@@ -643,7 +643,7 @@ As a user, I want application questions drafted from my Profile and earlier appr
 Goal: connect email for sending and for turning recruiter replies into Status Proposals, all processed locally.
 
 ### Story 8.1: Microsoft Graph connection (read and send) ⚠
-**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-mail/src/graph/**`, `src-tauri/crates/boba-mail/src/oauth/**`, `src-tauri/crates/boba-store/src/repos/email.rs`, `src/features/connections/email/**`, `src-tauri/src/commands/email.rs`, `locales/en/connections_email.json`, `locales/es/connections_email.json`, `src-tauri/crates/boba-store/migrations/0009_email_accounts.sql` · **Covers:** FR-35, FR-37, FR-39, FR-40, NFR-5, AD-13
+**Phase:** MVP · **Depends on:** 1.2 · **Files:** `src-tauri/crates/boba-mail/src/graph/**`, `src-tauri/crates/boba-mail/src/oauth/**`, `src-tauri/crates/boba-store/src/repos/email.rs`, `src/features/connections/email/**`, `src-tauri/src/commands/email.rs`, `locales/en/connections_email.json`, `locales/es/connections_email.json`, `src-tauri/crates/boba-store/migrations/0009_email_accounts.sql`, `src-tauri/crates/boba-app/src/ports/mail.rs`, `src-tauri/crates/boba-app/src/ports/secret.rs`, `src-tauri/crates/boba-app/src/ports/repo/email.rs` · **Covers:** FR-35, FR-37, FR-39, FR-40, NFR-5, AD-13
 
 As an Outlook user, I want to connect my mailbox with delegated OAuth, so that Boba can send applications and read replies.
 
@@ -698,7 +698,7 @@ As a Gmail user, I want reply parsing without setting up IMAP, so that status up
 Goal: Review mode on every channel, bounded Auto on Email and ATS Form, the Kill Switch, and the kanban board.
 
 ### Story 9.1: Application model and kanban Tracker
-**Phase:** MVP · **Depends on:** 1.7, 1.5 · **Files:** `src-tauri/crates/boba-domain/src/application/**`, `src-tauri/crates/boba-app/src/applications/**`, `src-tauri/crates/boba-store/src/repos/applications.rs`, `src/features/tracker/board/**`, `src/features/tracker/index.tsx`, `src-tauri/src/commands/tracker.rs`, `locales/en/tracker.json`, `locales/es/tracker.json`, `src-tauri/crates/boba-store/migrations/0010_applications.sql` · **Covers:** FR-93, FR-94, AD-16 (TransitionStatus), EXPERIENCE §9.6
+**Phase:** MVP · **Depends on:** 1.7, 1.5 · **Files:** `src-tauri/crates/boba-domain/src/application/**`, `src-tauri/crates/boba-app/src/applications/**`, `src-tauri/crates/boba-store/src/repos/applications.rs`, `src/features/tracker/board/**`, `src/features/tracker/index.tsx`, `src-tauri/src/commands/tracker.rs`, `locales/en/tracker.json`, `locales/es/tracker.json`, `src-tauri/crates/boba-store/migrations/0010_applications.sql`, `src-tauri/crates/boba-app/src/ports/repo/apply.rs` · **Covers:** FR-93, FR-94, AD-16 (TransitionStatus), EXPERIENCE §9.6
 
 As a user, I want all my Applications on a board, so that I see my pipeline at a glance.
 
@@ -728,7 +728,7 @@ As a user, I want to review and send an email application with my verified PDFs 
 - **And** unverified documents cannot be attached (AD-14).
 
 ### Story 9.4: ATS Form assist via browser automation
-**Phase:** MVP · **Depends on:** 9.2, 7.8 · **Files:** `src-tauri/crates/boba-browser/src/driver/**`, `src-tauri/crates/boba-browser/src/forms/**`, `src-tauri/crates/boba-app/src/apply/ats_form/**` · **Covers:** FR-82 (ATS Form), FR-88, AD-10
+**Phase:** MVP · **Depends on:** 9.2, 7.8 · **Files:** `src-tauri/crates/boba-browser/src/driver/**`, `src-tauri/crates/boba-browser/src/forms/**`, `src-tauri/crates/boba-app/src/apply/ats_form/**`, `src-tauri/crates/boba-app/src/ports/browser.rs` · **Covers:** FR-82 (ATS Form), FR-88, AD-10
 
 As a user, I want Boba to fill the employer's application form while I watch, so that I only check it and press submit.
 

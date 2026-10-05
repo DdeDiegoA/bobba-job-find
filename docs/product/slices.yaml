@@ -71,7 +71,7 @@
   deps: [S1.3]
   first: true
   files: ["@c/boba-app/src/lib.rs", "@c/boba-app/src/ports/mod.rs", "@c/boba-app/src/ports/repo/mod.rs", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/browser.rs", "@c/boba-app/src/ports/clock.rs", "@c/boba-app/src/ports/embedding.rs", "@c/boba-app/src/ports/mail.rs", "@c/boba-app/src/ports/notifier.rs", "@c/boba-app/src/ports/render.rs", "@c/boba-app/src/ports/secret.rs", "@c/boba-app/src/ports/source.rs", "@c/boba-app/src/ports/repo/profile.rs", "@c/boba-app/src/ports/repo/sources.rs", "@c/boba-app/src/ports/repo/ingestion.rs", "@c/boba-app/src/ports/repo/scoring.rs", "@c/boba-app/src/ports/repo/documents.rs", "@c/boba-app/src/ports/repo/apply.rs", "@c/boba-app/src/ports/repo/email.rs", "@c/boba-app/src/ports/repo/agent.rs", "@c/boba-app/src/ports/repo/system.rs", .gitattributes]
-  notes: Architect ruling 2026-10-05. Size XS. Pre-declares every port named in architecture.md section 4 and one repo-trait file per AD-16 owner area, as empty doc-commented stubs. After merge, each stub belongs to the slice that first gives it a trait (S6.9 owns ports/embedding.rs). A port not in the list = append one line to the union-merged mod.rs.
+  notes: Architect ruling 2026-10-05. Size XS. Trait owners after merge (first slice to give each stub a trait) are agent and repo/agent S2.2, clock and repo/system S1.7, source and repo/sources S4.1, repo/ingestion S4.2, repo/profile S3.4, repo/scoring S6.3, render and repo/documents S7.2, mail, secret and repo/email S8.1, repo/apply S9.1, notifier S5.1, browser S9.4, embedding S6.9. VerifyPort (architecture section 4.3) is not stubbed here; S7.5 appends pub mod verify to ports/mod.rs and owns ports/verify.rs, which S7.6 extends. Pre-declares every port named in architecture.md section 4 and one repo-trait file per AD-16 owner area, as empty doc-commented stubs. After merge, each stub belongs to the slice that first gives it a trait (S6.9 owns ports/embedding.rs). A port not in the list = append one line to the union-merged mod.rs.
   ac_from: []
   ac_extra:
     - "Given boba-app, when S1.3p lands, then lib.rs declares pub mod ports, and ports/mod.rs declares one pub mod per line for agent, browser, clock, embedding, mail, notifier, render, secret, source and repo, each an empty stub file with a doc comment (AD-16, spine Conventions: ports are trait ThingPort in boba-app::ports)."
@@ -102,10 +102,10 @@
 - id: S1.7
   parent: "1.7"
   title: Settings store and hash-chained audit log
-  deps: [S1.2a]
+  deps: [S1.2a, S1.3p]
   gate: diego
-  files: ["@c/boba-store/src/repos/settings.rs", "@c/boba-store/src/repos/audit.rs", "@c/boba-app/src/system/**", "@c/boba-domain/src/audit/**", "{mig:system}"]
-  notes: Gate added by PM (audit log integrity is security, approval policy).
+  files: ["@c/boba-store/src/repos/settings.rs", "@c/boba-store/src/repos/audit.rs", "@c/boba-app/src/system/**", "@c/boba-domain/src/audit/**", "{mig:system}", "@c/boba-app/src/ports/clock.rs", "@c/boba-app/src/ports/repo/system.rs"]
+  notes: Gate added by PM (audit log integrity is security, approval policy). One keychain wrapper only (architect 2026-10-05). boba-store/src/keys from S1.2a, service app.bobajobfind, is the single keyring-core wrapper. The audit-head anchor (AD-12) uses it directly inside boba-store, so no port is needed.
 
 - id: S1.8
   wave: 2
@@ -125,8 +125,8 @@
 - id: S2.2
   parent: "2.2"
   title: Run lifecycle, ProcessSupervisor and fake CLI
-  deps: [S2.1]
-  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}"]
+  deps: [S2.1, S1.3p]
+  files: ["@c/boba-agent/src/runtime/**", "@c/boba-agent/src/supervisor/**", "@c/boba-store/src/repos/agent_run.rs", tools/fake-cli/**, "{mig:agent_runs}", "@c/boba-app/src/ports/agent.rs", "@c/boba-app/src/ports/repo/agent.rs"]
 
 - id: S2.3a
   parent: "2.3"
@@ -180,8 +180,8 @@
 - id: S3.4
   parent: "3.4"
   title: Profile fact model and editor with versioning
-  deps: [S1.2a, S1.5]
-  files: ["@c/boba-domain/src/profile/**", "@c/boba-app/src/profile/**", "@c/boba-store/src/repos/profile.rs", src-tauri/src/commands/profile.rs, src/features/profile/**, "{loc:profile}", "{mig:profile}"]
+  deps: [S1.2a, S1.5, S1.3p]
+  files: ["@c/boba-domain/src/profile/**", "@c/boba-app/src/profile/**", "@c/boba-store/src/repos/profile.rs", src-tauri/src/commands/profile.rs, src/features/profile/**, "{loc:profile}", "{mig:profile}", "@c/boba-app/src/ports/repo/profile.rs"]
 
 - id: S3.5
   parent: "3.5"
@@ -211,14 +211,14 @@
 - id: S4.1
   parent: "4.1"
   title: Source Adapter SDK, registry and HttpClient
-  deps: [S1.2a]
-  files: ["@c/boba-sources/src/sdk/**", "@c/boba-sources/src/registry/**", "@c/boba-sources/src/http/**", "@c/boba-store/src/repos/sources.rs", "{mig:sources}"]
+  deps: [S1.2a, S1.3p]
+  files: ["@c/boba-sources/src/sdk/**", "@c/boba-sources/src/registry/**", "@c/boba-sources/src/http/**", "@c/boba-store/src/repos/sources.rs", "{mig:sources}", "@c/boba-app/src/ports/source.rs", "@c/boba-app/src/ports/repo/sources.rs"]
 
 - id: S4.2
   parent: "4.2"
   title: Offer normalisation and language detection
-  deps: [S4.1]
-  files: ["@c/boba-domain/src/posting/**", "@c/boba-app/src/ingest/normalize/**", "@c/boba-store/src/repos/postings.rs", "{mig:postings}"]
+  deps: [S4.1, S1.3p]
+  files: ["@c/boba-domain/src/posting/**", "@c/boba-app/src/ingest/normalize/**", "@c/boba-store/src/repos/postings.rs", "{mig:postings}", "@c/boba-app/src/ports/repo/ingestion.rs"]
 
 - id: S4.3
   parent: "4.3"
@@ -261,8 +261,8 @@
   parent: "5.1"
   title: Scheduler, job runs and locked-run skipping
   covers_extra: [ADR-009]
-  deps: [S1.7, S1.2b]
-  files: [src-tauri/src/scheduler/**, "@c/boba-app/src/jobs/**", "@c/boba-store/src/repos/jobs.rs", "{mig:jobs}"]
+  deps: [S1.7, S1.2b, S1.3p]
+  files: [src-tauri/src/scheduler/**, "@c/boba-app/src/jobs/**", "@c/boba-store/src/repos/jobs.rs", "{mig:jobs}", "@c/boba-app/src/ports/notifier.rs"]
   ac_extra:
     - "Given the Locked state, when a scheduled job is due, then it is recorded as skipped_locked in job_run (never as success) and one notification per slot says: Boba is locked. Open it to run today's search. (moved from story 1.2, ADR-009)."
 
@@ -301,8 +301,8 @@
 - id: S6.3
   parent: "6.3"
   title: Fit and Quality factors, Rank and Verdict, versioned ScoreCards
-  deps: [S6.1, S6.2]
-  files: ["@c/boba-domain/src/scoring/factors/**", "@c/boba-domain/src/scoring/rank/**", "@c/boba-domain/tests/golden/**", "@c/boba-app/src/scoring/**", "@c/boba-store/src/repos/scoring.rs", "{mig:scoring}"]
+  deps: [S6.1, S6.2, S1.3p]
+  files: ["@c/boba-domain/src/scoring/factors/**", "@c/boba-domain/src/scoring/rank/**", "@c/boba-domain/tests/golden/**", "@c/boba-app/src/scoring/**", "@c/boba-store/src/repos/scoring.rs", "{mig:scoring}", "@c/boba-app/src/ports/repo/scoring.rs"]
 
 - id: S6.4
   parent: "6.4"
@@ -355,8 +355,9 @@
 - id: S7.2
   parent: "7.2"
   title: Tailor task with fact IDs and language auto-match
-  deps: [S7.1, S3.4, S2.4]
-  files: [agent-pack/skills/tailor_application/**, "@c/boba-app/src/tailoring/**"]
+  deps: [S7.1, S3.4, S2.4, S1.3p]
+  files: [agent-pack/skills/tailor_application/**, "@c/boba-app/src/tailoring/**", "@c/boba-app/src/ports/render.rs", "@c/boba-app/src/ports/repo/documents.rs"]
+  notes: S7.1 implemented boba-store repos/documents.rs before the DocumentRepo trait existed (accepted by the architect, 2026-10-05). This slice adds the trait in ports/repo/documents.rs and conforms S7.1's impl to it.
 
 - id: S7.3
   parent: "7.3"
@@ -373,14 +374,14 @@
 - id: S7.5
   parent: "7.5"
   title: Layout verification and relevance-weighted cutting
-  deps: [S7.1, S7.2]
-  files: ["@c/boba-docs/src/verify/layout/**", "@c/boba-app/src/fitting/**"]
+  deps: [S7.1, S7.2, S1.3p]
+  files: ["@c/boba-docs/src/verify/layout/**", "@c/boba-app/src/fitting/**", "@c/boba-app/src/ports/verify.rs"]
 
 - id: S7.6
   parent: "7.6"
   title: ATS text-layer verification and keyword coverage
-  deps: [S7.5]
-  files: ["@c/boba-docs/src/verify/text_layer/**", "@c/boba-domain/src/keywords/**", src/features/studio/coverage/**, "{loc:studio_coverage}"]
+  deps: [S7.5, S1.3p]
+  files: ["@c/boba-docs/src/verify/text_layer/**", "@c/boba-domain/src/keywords/**", src/features/studio/coverage/**, "{loc:studio_coverage}", "@c/boba-app/src/ports/verify.rs"]
 
 - id: S7.7
   parent: "7.7"
@@ -398,9 +399,10 @@
 - id: S8.1
   parent: "8.1"
   title: Microsoft Graph connection (read and send) and loopback OAuth
-  deps: [S1.2a, S1.5]
+  deps: [S1.2a, S1.5, S1.3p]
   gate: diego
-  files: ["@c/boba-mail/src/graph/**", "@c/boba-mail/src/oauth/**", "@c/boba-store/src/repos/email.rs", src/features/connections/email/**, src-tauri/src/commands/email.rs, "{loc:connections_email}", "{mig:email_accounts}"]
+  files: ["@c/boba-mail/src/graph/**", "@c/boba-mail/src/oauth/**", "@c/boba-store/src/repos/email.rs", src/features/connections/email/**, src-tauri/src/commands/email.rs, "{loc:connections_email}", "{mig:email_accounts}", "@c/boba-app/src/ports/mail.rs", "@c/boba-app/src/ports/secret.rs", "@c/boba-app/src/ports/repo/email.rs"]
+  notes: One keychain wrapper only (architect 2026-10-05). boba-store/src/keys from S1.2a, service app.bobajobfind, is the single keyring-core wrapper. The SecretPort impl for OAuth and API tokens (secret_ref) must wrap that same module and must not add a second keyring-core wrapper.
 
 - id: S8.2
   parent: "8.2"
@@ -433,8 +435,8 @@
 - id: S9.1
   parent: "9.1"
   title: Application model and kanban Tracker
-  deps: [S1.7, S1.5]
-  files: ["@c/boba-domain/src/application/**", "@c/boba-app/src/applications/**", "@c/boba-store/src/repos/applications.rs", src/features/tracker/board/**, src/features/tracker/index.tsx, src-tauri/src/commands/tracker.rs, "{loc:tracker}", "{mig:applications}"]
+  deps: [S1.7, S1.5, S1.3p]
+  files: ["@c/boba-domain/src/application/**", "@c/boba-app/src/applications/**", "@c/boba-store/src/repos/applications.rs", src/features/tracker/board/**, src/features/tracker/index.tsx, src-tauri/src/commands/tracker.rs, "{loc:tracker}", "{mig:applications}", "@c/boba-app/src/ports/repo/apply.rs"]
 
 - id: S9.2
   parent: "9.2"
@@ -451,8 +453,8 @@
 - id: S9.4
   parent: "9.4"
   title: ATS Form assist via browser automation
-  deps: [S9.2, S7.8]
-  files: ["@c/boba-browser/src/driver/**", "@c/boba-browser/src/forms/**", "@c/boba-app/src/apply/ats_form/**"]
+  deps: [S9.2, S7.8, S1.3p]
+  files: ["@c/boba-browser/src/driver/**", "@c/boba-browser/src/forms/**", "@c/boba-app/src/apply/ats_form/**", "@c/boba-app/src/ports/browser.rs"]
 
 - id: S9.5
   parent: "9.5"

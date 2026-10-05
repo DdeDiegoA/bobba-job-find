@@ -73,44 +73,44 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 3 | S2.1 | 2.1 | CLI detection and capability probing | S1.3, S1.2a | M |  |
 | 3 | S1.4 | 1.4 | i18n catalogues EN/ES (UI and core) | S1.3 | M |  |
 | 3 | S7.1 | 7.1 | Document model and Typst templates (2) | S1.2a | M |  |
-| 4 | S2.2 | 2.2 | Run lifecycle, ProcessSupervisor and fake CLI | S2.1 | M |  |
+| 4 | S2.2 | 2.2 | Run lifecycle, ProcessSupervisor and fake CLI | S2.1, S1.3p | L |  |
 | 4 | S1.5 | 1.5 | App shell, design tokens, theme and navigation | S1.3, S1.4 | M |  |
-| 4 | S4.1 | 4.1 | Source Adapter SDK, registry and HttpClient | S1.2a | M |  |
-| 4 | S1.7 | 1.7 | Settings store and hash-chained audit log | S1.2a | L | ⚠ Diego |
+| 4 | S4.1 | 4.1 | Source Adapter SDK, registry and HttpClient | S1.2a, S1.3p | M |  |
+| 4 | S1.7 | 1.7 | Settings store and hash-chained audit log | S1.2a, S1.3p | L | ⚠ Diego |
 | 5 | S2.3a | 2.3 | boba-mcp shim, MCP server and per-run sandbox | S2.2, S1.8 | M | ⚠ Diego |
-| 5 | S3.4 | 3.4 | Profile fact model and editor with versioning | S1.2a, S1.5 | L |  |
+| 5 | S3.4 | 3.4 | Profile fact model and editor with versioning | S1.2a, S1.5, S1.3p | L |  |
 | 5 | S3.1 | 3.1 | Wizard framework and language step | S1.5 | M |  |
-| 5 | S4.2 | 4.2 | Offer normalisation and language detection | S4.1 | M |  |
+| 5 | S4.2 | 4.2 | Offer normalisation and language detection | S4.1, S1.3p | M |  |
 | 6 | S2.3b | 2.3 | tool_lockdown hard gate, untrusted agent output and workspace sweep | S2.3a | M | ⚠ Diego |
 | 6 | S3.7 | 3.7 | Preferences step | S3.4, S3.1 | M |  |
-| 6 | S8.1 | 8.1 | Microsoft Graph connection (read and send) and loopback OAuth | S1.2a, S1.5 | L | ⚠ Diego |
-| 6 | S9.1 | 9.1 | Application model and kanban Tracker | S1.7, S1.5 | L |  |
+| 6 | S8.1 | 8.1 | Microsoft Graph connection (read and send) and loopback OAuth | S1.2a, S1.5, S1.3p | L | ⚠ Diego |
+| 6 | S9.1 | 9.1 | Application model and kanban Tracker | S1.7, S1.5, S1.3p | L |  |
 | 7 | S2.4 | 2.4 | Agent pack renderer and task registry | S2.3b | S |  |
 | 7 | S6.1 | 6.1 | Gates | S4.2, S3.7 | S |  |
 | 7 | S8.2 | 8.2 | Gmail send-only and IMAP/SMTP | S8.1 | S | ⚠ Diego |
 | 7 | S1.2b | 1.2 | Locked state, passphrase fallback and unlock screen | S1.2a, S1.5 | L | ⚠ Diego |
-| 8 | S7.2 | 7.2 | Tailor task with fact IDs and language auto-match | S7.1, S3.4, S2.4 | S |  |
+| 8 | S7.2 | 7.2 | Tailor task with fact IDs and language auto-match | S7.1, S3.4, S2.4, S1.3p | M |  |
 | 8 | S4.7 | 4.7 | Manual Offer intake (URL and text) | S4.2, S2.4 | M |  |
 | 8 | S4.3 | 4.3 | Deduplication into clusters | S4.2 | S |  |
 | 8 | S1.6 | 1.6 | System tray, single instance and close-to-tray | S1.4 | M |  |
-| 9 | S7.5 | 7.5 | Layout verification and relevance-weighted cutting | S7.1, S7.2 | S |  |
+| 9 | S7.5 | 7.5 | Layout verification and relevance-weighted cutting | S7.1, S7.2, S1.3p | S |  |
 | 9 | S7.3 | 7.3 | Fabrication validator and claim traceability | S7.2 | M |  |
 | 9 | S7.4 | 7.4 | Reviewer pass and revision | S7.2 | S |  |
 | 9 | S6.2 | 6.2 | Posting features extraction (deterministic and LLM-proposed) | S4.2, S2.4, S4.7 | M |  |
-| 10 | S7.6 | 7.6 | ATS text-layer verification and keyword coverage | S7.5 | M |  |
+| 10 | S7.6 | 7.6 | ATS text-layer verification and keyword coverage | S7.5, S1.3p | M |  |
 | 10 | S7.8 | 7.8 | Screening answers and answer bank | S7.2 | S |  |
-| 10 | S6.3 | 6.3 | Fit and Quality factors, Rank and Verdict, versioned ScoreCards | S6.1, S6.2 | L |  |
+| 10 | S6.3 | 6.3 | Fit and Quality factors, Rank and Verdict, versioned ScoreCards | S6.1, S6.2, S1.3p | L |  |
 | 10 | S4.4 | 4.4 | Seen state, repost, staleness and expiry | S4.3 | M |  |
 | 11 | S7.7 | 7.7 | Studio UI — edit, regenerate, diff and DOCX export | S7.3, S7.4, S7.6 | M |  |
 | 11 | S6.4 | 6.4 | Today and Inbox | S6.3, S1.5 | L |  |
 | 11 | S4.5 | 4.5 | ATS board adapters (Greenhouse, Lever, Ashby, Workable, SmartRecruiters) | S4.2 | S |  |
 | 11 | S4.6 | 4.6 | Remote feed adapters and aggregator APIs | S4.2 | M |  |
 | 12 | S9.2 | 9.2 | Apply Channel detection and Manual (link-out) apply | S9.1, S7.7 | M |  |
-| 12 | S5.1 | 5.1 | Scheduler, job runs and locked-run skipping | S1.7, S1.2b | M |  |
+| 12 | S5.1 | 5.1 | Scheduler, job runs and locked-run skipping | S1.7, S1.2b, S1.3p | M |  |
 | 12 | S6.5 | 6.5 | Offer detail, score breakdown and Explanation narration | S6.4, S2.4 | M |  |
 | 12 | S3.2 | 3.2 | Engine step — pick CLI and model and run a test call | S2.4, S3.1 | M |  |
 | 13 | S9.3 | 9.3 | Email Apply in Review mode | S9.2, S8.2 | M |  |
-| 13 | S9.4 | 9.4 | ATS Form assist via browser automation | S9.2, S7.8 | M |  |
+| 13 | S9.4 | 9.4 | ATS Form assist via browser automation | S9.2, S7.8, S1.3p | M |  |
 | 13 | S3.5 | 3.5 | Master CV import with review | S2.4, S3.4, S3.1 | M |  |
 | 13 | S4.8 | 4.8 | Connections screen — catalogue, custom RSS and source health | S4.5, S4.6 | M |  |
 | 14 | S9.6 | 9.6 | Apply policy engine and Auto Rules | S9.3, S9.4, S6.3 | L |  |
@@ -169,44 +169,44 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 - **S2.1** (wave 3): `src-tauri/crates/boba-agent/src/drivers/**`, `src-tauri/crates/boba-agent/src/detect/**`, `src-tauri/crates/boba-store/src/repos/cli_install.rs`, `src-tauri/crates/boba-store/migrations/0002_cli_install.sql`
 - **S1.4** (wave 3): `src/lib/i18n/**`, `src-tauri/crates/boba-app/src/i18n/**`, `locales/en/common.json`, `locales/es/common.json`, `scripts/check-i18n.mjs`
 - **S7.1** (wave 3): `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/typst/**`, `templates/cv/**`, `templates/cover/**`, `templates/fonts/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0003_documents.sql`
-- **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`
+- **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`
 - **S1.5** (wave 4): `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`
-- **S4.1** (wave 4): `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`
-- **S1.7** (wave 4): `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`
+- **S4.1** (wave 4): `src-tauri/crates/boba-sources/src/sdk/**`, `src-tauri/crates/boba-sources/src/registry/**`, `src-tauri/crates/boba-sources/src/http/**`, `src-tauri/crates/boba-store/src/repos/sources.rs`, `src-tauri/crates/boba-store/migrations/0005_sources.sql`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs`
+- **S1.7** (wave 4): `src-tauri/crates/boba-store/src/repos/settings.rs`, `src-tauri/crates/boba-store/src/repos/audit.rs`, `src-tauri/crates/boba-app/src/system/**`, `src-tauri/crates/boba-domain/src/audit/**`, `src-tauri/crates/boba-store/migrations/0006_system.sql`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`
 - **S2.3a** (wave 5): `src-tauri/crates/boba-mcp/**`, `src-tauri/crates/boba-mcp-proto/**`, `src-tauri/crates/boba-agent/src/mcp/**`
-- **S3.4** (wave 5): `src-tauri/crates/boba-domain/src/profile/**`, `src-tauri/crates/boba-app/src/profile/**`, `src-tauri/crates/boba-store/src/repos/profile.rs`, `src-tauri/src/commands/profile.rs`, `src/features/profile/**`, `locales/en/profile.json`, `locales/es/profile.json`, `src-tauri/crates/boba-store/migrations/0007_profile.sql`
+- **S3.4** (wave 5): `src-tauri/crates/boba-domain/src/profile/**`, `src-tauri/crates/boba-app/src/profile/**`, `src-tauri/crates/boba-store/src/repos/profile.rs`, `src-tauri/src/commands/profile.rs`, `src/features/profile/**`, `locales/en/profile.json`, `locales/es/profile.json`, `src-tauri/crates/boba-store/migrations/0007_profile.sql`, `src-tauri/crates/boba-app/src/ports/repo/profile.rs`
 - **S3.1** (wave 5): `src/features/onboarding/wizard/**`, `src/features/onboarding/steps/language/**`, `locales/en/onboarding.json`, `locales/es/onboarding.json`
-- **S4.2** (wave 5): `src-tauri/crates/boba-domain/src/posting/**`, `src-tauri/crates/boba-app/src/ingest/normalize/**`, `src-tauri/crates/boba-store/src/repos/postings.rs`, `src-tauri/crates/boba-store/migrations/0008_postings.sql`
+- **S4.2** (wave 5): `src-tauri/crates/boba-domain/src/posting/**`, `src-tauri/crates/boba-app/src/ingest/normalize/**`, `src-tauri/crates/boba-store/src/repos/postings.rs`, `src-tauri/crates/boba-store/migrations/0008_postings.sql`, `src-tauri/crates/boba-app/src/ports/repo/ingestion.rs`
 - **S2.3b** (wave 6): `src-tauri/crates/boba-agent/src/lockdown/**`, `src-tauri/crates/boba-agent/src/sweep/**`, `src-tauri/crates/boba-domain/src/untrusted/**`
 - **S3.7** (wave 6): `src/features/onboarding/steps/preferences/**`, `src/features/settings/preferences/**`, `locales/en/preferences.json`, `locales/es/preferences.json`
-- **S8.1** (wave 6): `src-tauri/crates/boba-mail/src/graph/**`, `src-tauri/crates/boba-mail/src/oauth/**`, `src-tauri/crates/boba-store/src/repos/email.rs`, `src/features/connections/email/**`, `src-tauri/src/commands/email.rs`, `locales/en/connections_email.json`, `locales/es/connections_email.json`, `src-tauri/crates/boba-store/migrations/0009_email_accounts.sql`
-- **S9.1** (wave 6): `src-tauri/crates/boba-domain/src/application/**`, `src-tauri/crates/boba-app/src/applications/**`, `src-tauri/crates/boba-store/src/repos/applications.rs`, `src/features/tracker/board/**`, `src/features/tracker/index.tsx`, `src-tauri/src/commands/tracker.rs`, `locales/en/tracker.json`, `locales/es/tracker.json`, `src-tauri/crates/boba-store/migrations/0010_applications.sql`
+- **S8.1** (wave 6): `src-tauri/crates/boba-mail/src/graph/**`, `src-tauri/crates/boba-mail/src/oauth/**`, `src-tauri/crates/boba-store/src/repos/email.rs`, `src/features/connections/email/**`, `src-tauri/src/commands/email.rs`, `locales/en/connections_email.json`, `locales/es/connections_email.json`, `src-tauri/crates/boba-store/migrations/0009_email_accounts.sql`, `src-tauri/crates/boba-app/src/ports/mail.rs`, `src-tauri/crates/boba-app/src/ports/secret.rs`, `src-tauri/crates/boba-app/src/ports/repo/email.rs`
+- **S9.1** (wave 6): `src-tauri/crates/boba-domain/src/application/**`, `src-tauri/crates/boba-app/src/applications/**`, `src-tauri/crates/boba-store/src/repos/applications.rs`, `src/features/tracker/board/**`, `src/features/tracker/index.tsx`, `src-tauri/src/commands/tracker.rs`, `locales/en/tracker.json`, `locales/es/tracker.json`, `src-tauri/crates/boba-store/migrations/0010_applications.sql`, `src-tauri/crates/boba-app/src/ports/repo/apply.rs`
 - **S2.4** (wave 7): `agent-pack/system.md`, `src-tauri/crates/boba-agent/src/pack/**`, `src-tauri/crates/boba-agent/src/tasks/**`
 - **S6.1** (wave 7): `src-tauri/crates/boba-domain/src/scoring/gates/**`
 - **S8.2** (wave 7): `src-tauri/crates/boba-mail/src/gmail/**`, `src-tauri/crates/boba-mail/src/imap/**`, `src-tauri/crates/boba-mail/src/smtp/**`
 - **S1.2b** (wave 7): `src-tauri/crates/boba-store/src/unlock/**`, `src-tauri/src/commands/unlock.rs`, `src/features/unlock/**`, `locales/en/unlock.json`, `locales/es/unlock.json`, `docs/qa/macos-upgrade-test.md`
-- **S7.2** (wave 8): `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`
+- **S7.2** (wave 8): `agent-pack/skills/tailor_application/**`, `src-tauri/crates/boba-app/src/tailoring/**`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs`
 - **S4.7** (wave 8): `src-tauri/crates/boba-app/src/ingest/manual/**`, `agent-pack/skills/extract_postings/**`, `src/features/inbox/manual-add/**`, `src-tauri/src/commands/ingest.rs`, `locales/en/manual_add.json`, `locales/es/manual_add.json`
 - **S4.3** (wave 8): `src-tauri/crates/boba-domain/src/dedup/**`, `src-tauri/crates/boba-app/src/ingest/dedup/**`
 - **S1.6** (wave 8): `src-tauri/src/tray/menu.rs`, `src-tauri/src/tray/mod.rs`, `src-tauri/src/lifecycle/**`, `locales/en/tray.json`, `locales/es/tray.json`
-- **S7.5** (wave 9): `src-tauri/crates/boba-docs/src/verify/layout/**`, `src-tauri/crates/boba-app/src/fitting/**`
+- **S7.5** (wave 9): `src-tauri/crates/boba-docs/src/verify/layout/**`, `src-tauri/crates/boba-app/src/fitting/**`, `src-tauri/crates/boba-app/src/ports/verify.rs`
 - **S7.3** (wave 9): `src-tauri/crates/boba-domain/src/validator/**`, `src/features/studio/trace/**`, `locales/en/studio_trace.json`, `locales/es/studio_trace.json`
 - **S7.4** (wave 9): `agent-pack/skills/review_application/**`, `src-tauri/crates/boba-app/src/review/**`
 - **S6.2** (wave 9): `src-tauri/crates/boba-domain/src/posting_features/**`, `src-tauri/crates/boba-app/src/posting_features/**`, `agent-pack/skills/extract_postings/**`, `src-tauri/crates/boba-store/migrations/0011_posting_features.sql`
-- **S7.6** (wave 10): `src-tauri/crates/boba-docs/src/verify/text_layer/**`, `src-tauri/crates/boba-domain/src/keywords/**`, `src/features/studio/coverage/**`, `locales/en/studio_coverage.json`, `locales/es/studio_coverage.json`
+- **S7.6** (wave 10): `src-tauri/crates/boba-docs/src/verify/text_layer/**`, `src-tauri/crates/boba-domain/src/keywords/**`, `src/features/studio/coverage/**`, `locales/en/studio_coverage.json`, `locales/es/studio_coverage.json`, `src-tauri/crates/boba-app/src/ports/verify.rs`
 - **S7.8** (wave 10): `agent-pack/skills/answer_questions/**`, `src-tauri/crates/boba-app/src/answers/**`, `src-tauri/crates/boba-store/migrations/0012_answer_bank.sql`
-- **S6.3** (wave 10): `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0013_scoring.sql`
+- **S6.3** (wave 10): `src-tauri/crates/boba-domain/src/scoring/factors/**`, `src-tauri/crates/boba-domain/src/scoring/rank/**`, `src-tauri/crates/boba-domain/tests/golden/**`, `src-tauri/crates/boba-app/src/scoring/**`, `src-tauri/crates/boba-store/src/repos/scoring.rs`, `src-tauri/crates/boba-store/migrations/0013_scoring.sql`, `src-tauri/crates/boba-app/src/ports/repo/scoring.rs`
 - **S4.4** (wave 10): `src-tauri/crates/boba-app/src/ingest/lifecycle/**`, `src-tauri/crates/boba-store/migrations/0014_posting_lifecycle.sql`
 - **S7.7** (wave 11): `src/features/studio/editor/**`, `src/features/studio/index.tsx`, `src-tauri/crates/boba-docs/src/docx/**`, `src-tauri/src/commands/studio.rs`, `locales/en/studio.json`, `locales/es/studio.json`
 - **S6.4** (wave 11): `src/features/today/matches/**`, `src/features/today/index.tsx`, `src/features/inbox/list/**`, `src/features/inbox/index.tsx`, `src-tauri/src/commands/offers.rs`, `locales/en/today.json`, `locales/es/today.json`, `locales/en/inbox.json`, `locales/es/inbox.json`
 - **S4.5** (wave 11): `src-tauri/crates/boba-sources/src/ats/**`, `src-tauri/crates/boba-sources/tests/fixtures/ats/**`
 - **S4.6** (wave 11): `src-tauri/crates/boba-sources/src/feeds/**`, `src-tauri/crates/boba-sources/src/aggregators/**`, `src-tauri/crates/boba-sources/tests/fixtures/feeds/**`
 - **S9.2** (wave 12): `src-tauri/crates/boba-domain/src/apply/channel/**`, `src-tauri/crates/boba-app/src/apply/manual/**`, `src/features/studio/apply-bar/**`, `locales/en/apply_bar.json`, `locales/es/apply_bar.json`
-- **S5.1** (wave 12): `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0015_jobs.sql`
+- **S5.1** (wave 12): `src-tauri/src/scheduler/**`, `src-tauri/crates/boba-app/src/jobs/**`, `src-tauri/crates/boba-store/src/repos/jobs.rs`, `src-tauri/crates/boba-store/migrations/0015_jobs.sql`, `src-tauri/crates/boba-app/src/ports/notifier.rs`
 - **S6.5** (wave 12): `src/features/offer/**`, `agent-pack/skills/narrate_scores/**`, `src-tauri/crates/boba-app/src/narration/**`, `locales/en/offer.json`, `locales/es/offer.json`, `src-tauri/crates/boba-store/migrations/0016_narration.sql`
 - **S3.2** (wave 12): `src/features/onboarding/steps/engine/**`, `src-tauri/src/commands/agent.rs`, `locales/en/onboarding_engine.json`, `locales/es/onboarding_engine.json`
 - **S9.3** (wave 13): `src-tauri/crates/boba-app/src/apply/engine/**`, `src-tauri/crates/boba-app/src/apply/email/**`, `src-tauri/crates/boba-store/src/repos/outbox.rs`, `src-tauri/crates/boba-store/migrations/0017_apply_attempts.sql`
-- **S9.4** (wave 13): `src-tauri/crates/boba-browser/src/driver/**`, `src-tauri/crates/boba-browser/src/forms/**`, `src-tauri/crates/boba-app/src/apply/ats_form/**`
+- **S9.4** (wave 13): `src-tauri/crates/boba-browser/src/driver/**`, `src-tauri/crates/boba-browser/src/forms/**`, `src-tauri/crates/boba-app/src/apply/ats_form/**`, `src-tauri/crates/boba-app/src/ports/browser.rs`
 - **S3.5** (wave 13): `agent-pack/skills/profile_import/**`, `src-tauri/crates/boba-app/src/profile_import/**`, `src/features/onboarding/steps/cv-import/**`, `locales/en/onboarding_cv.json`, `locales/es/onboarding_cv.json`
 - **S4.8** (wave 13): `src/features/connections/sources/**`, `src-tauri/crates/boba-sources/src/rss/**`, `src-tauri/crates/boba-app/src/sources/**`, `src-tauri/src/commands/sources.rs`, `locales/en/connections_sources.json`, `locales/es/connections_sources.json`
 - **S9.6** (wave 14): `src-tauri/crates/boba-domain/src/apply/policy/**`, `src-tauri/crates/boba-app/src/apply/rules/**`, `src/features/settings/applying/rules/**`, `locales/en/applying.json`, `locales/es/applying.json`, `src-tauri/crates/boba-store/migrations/0018_auto_rules.sql`
@@ -256,7 +256,7 @@ Every path in the first list exists as a compiling stub after S1.1 (convention 1
 - `locales/es`: `ai_engine.json`, `apply_bar.json`, `applying.json`, `audit_stats.json`, `backup.json`, `common.json`, `connections_email.json`, `connections_sources.json`, `export.json`, `gated.json`, `inbox.json`, `inbox_actions.json`, `kill_switch.json`, `manual_add.json`, `network.json`, `notifications.json`, `nudges.json`, `offer.json`, `onboarding.json`, `onboarding_cv.json`, `onboarding_engine.json`, `onboarding_finish.json`, `onboarding_gaps.json`, `outbox.json`, `palette.json`, `preferences.json`, `profile.json`, `run_report.json`, `session_auto.json`, `session_optin.json`, `settings_scoring.json`, `shell.json`, `status_proposals.json`, `studio.json`, `studio_coverage.json`, `studio_trace.json`, `today.json`, `tracker.json`, `tray.json`, `unlock.json`
 - `src-tauri/Cargo.toml`: `src-tauri/Cargo.toml`
 - `src-tauri/crates/boba-agent`: `Cargo.toml`, `src/budget/**`, `src/detect/**`, `src/drivers/**`, `src/lockdown/**`, `src/mcp/**`, `src/pack/**`, `src/runtime/**`, `src/supervisor/**`, `src/sweep/**`, `src/tasks/**`
-- `src-tauri/crates/boba-app`: `Cargo.toml`, `src/answers/**`, `src/applications/**`, `src/apply/ats_form/**`, `src/apply/email/**`, `src/apply/engine/**`, `src/apply/kill_switch/**`, `src/apply/manual/**`, `src/apply/outbox/**`, `src/apply/rules/**`, `src/apply/session/**`, `src/capabilities/**`, `src/daily_search/**`, `src/digest/**`, `src/embeddings/**`, `src/error/**`, `src/fitting/**`, `src/i18n/**`, `src/ingest/dedup/**`, `src/ingest/lifecycle/**`, `src/ingest/manual/**`, `src/ingest/normalize/**`, `src/jobs/**`, `src/lib.rs`, `src/narration/**`, `src/network_log/**`, `src/ports/agent.rs`, `src/ports/browser.rs`, `src/ports/clock.rs`, `src/ports/embedding.rs`, `src/ports/mail.rs`, `src/ports/mod.rs`, `src/ports/notifier.rs`, `src/ports/render.rs`, `src/ports/repo/agent.rs`, `src/ports/repo/apply.rs`, `src/ports/repo/documents.rs`, `src/ports/repo/email.rs`, `src/ports/repo/ingestion.rs`, `src/ports/repo/mod.rs`, `src/ports/repo/profile.rs`, `src/ports/repo/scoring.rs`, `src/ports/repo/sources.rs`, `src/ports/repo/system.rs`, `src/ports/secret.rs`, `src/ports/source.rs`, `src/posting_features/**`, `src/profile/**`, `src/profile_gaps/**`, `src/profile_import/**`, `src/retention/**`, `src/review/**`, `src/scoring/**`, `src/sources/**`, `src/stats/**`, `src/status_proposals/**`, `src/system/**`, `src/tailoring/**`, `src/triage/**`
+- `src-tauri/crates/boba-app`: `Cargo.toml`, `src/answers/**`, `src/applications/**`, `src/apply/ats_form/**`, `src/apply/email/**`, `src/apply/engine/**`, `src/apply/kill_switch/**`, `src/apply/manual/**`, `src/apply/outbox/**`, `src/apply/rules/**`, `src/apply/session/**`, `src/capabilities/**`, `src/daily_search/**`, `src/digest/**`, `src/embeddings/**`, `src/error/**`, `src/fitting/**`, `src/i18n/**`, `src/ingest/dedup/**`, `src/ingest/lifecycle/**`, `src/ingest/manual/**`, `src/ingest/normalize/**`, `src/jobs/**`, `src/lib.rs`, `src/narration/**`, `src/network_log/**`, `src/ports/agent.rs`, `src/ports/browser.rs`, `src/ports/clock.rs`, `src/ports/embedding.rs`, `src/ports/mail.rs`, `src/ports/mod.rs`, `src/ports/notifier.rs`, `src/ports/render.rs`, `src/ports/repo/agent.rs`, `src/ports/repo/apply.rs`, `src/ports/repo/documents.rs`, `src/ports/repo/email.rs`, `src/ports/repo/ingestion.rs`, `src/ports/repo/mod.rs`, `src/ports/repo/profile.rs`, `src/ports/repo/scoring.rs`, `src/ports/repo/sources.rs`, `src/ports/repo/system.rs`, `src/ports/secret.rs`, `src/ports/source.rs`, `src/ports/verify.rs`, `src/posting_features/**`, `src/profile/**`, `src/profile_gaps/**`, `src/profile_import/**`, `src/retention/**`, `src/review/**`, `src/scoring/**`, `src/sources/**`, `src/stats/**`, `src/status_proposals/**`, `src/system/**`, `src/tailoring/**`, `src/triage/**`
 - `src-tauri/crates/boba-browser`: `Cargo.toml`, `src/driver/**`, `src/forms/**`, `src/session/**`, `src/session_forms/**`
 - `src-tauri/crates/boba-docs`: `Cargo.toml`, `src/docx/**`, `src/model/**`, `src/typst/**`, `src/verify/layout/**`, `src/verify/text_layer/**`
 - `src-tauri/crates/boba-domain`: `Cargo.toml`, `src/application/**`, `src/apply/channel/**`, `src/apply/guard/**`, `src/apply/policy/**`, `src/apply/session_policy/**`, `src/audit/**`, `src/dedup/**`, `src/keywords/**`, `src/posting/**`, `src/posting_features/**`, `src/profile/**`, `src/scoring/f3/**`, `src/scoring/factors/**`, `src/scoring/fraud/**`, `src/scoring/gates/**`, `src/scoring/rank/**`, `src/scoring/weights/**`, `src/untrusted/**`, `src/validator/**`, `tests/golden/**`
