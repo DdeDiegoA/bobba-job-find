@@ -5,3 +5,20 @@
 .hermad/memory/
 .hermad/state.json
 .opencode/agents/hermad-*
+
+# Node / frontend (build only, not shipped)
+node_modules/
+dist/
+.vite/
+*.local
+
+# Rust
+target/
+**/target/
+
+# Tauri generated
+src-tauri/gen/
+
+# Editor / OS
+.DS_Store
+*.log

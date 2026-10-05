@@ -1,0 +1,13 @@
+[package]
+name = "boba-browser"
+description = "CDP automation of the user's own Chrome (AD-10, AD-11)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+boba-domain = { path = "../boba-domain" }
+boba-app = { path = "../boba-app" }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }

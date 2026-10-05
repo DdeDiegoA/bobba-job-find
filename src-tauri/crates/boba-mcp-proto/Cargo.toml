@@ -1,0 +1,12 @@
+[package]
+name = "boba-mcp-proto"
+description = "MCP tool schemas shared by the core and the boba-mcp shim (AD-6)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+schemars = { workspace = true }

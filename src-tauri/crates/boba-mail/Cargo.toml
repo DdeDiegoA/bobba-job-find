@@ -1,0 +1,13 @@
+[package]
+name = "boba-mail"
+description = "Graph / Gmail / IMAP-SMTP adapters and reply classification (AD-13)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+boba-domain = { path = "../boba-domain" }
+boba-app = { path = "../boba-app" }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }

@@ -1,0 +1,18 @@
+[package]
+name = "boba-app"
+description = "Use cases and port traits (hexagonal core)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+# On-device F3 semantic score (AD-8). Opt-in download; needs no network at build.
+embeddings = ["dep:fastembed"]
+
+[dependencies]
+boba-domain = { path = "../boba-domain" }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+fastembed = { workspace = true, optional = true }
