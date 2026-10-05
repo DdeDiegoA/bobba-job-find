@@ -12,3 +12,14 @@ boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+# The shared outbound client (AD-10):
+reqwest = { workspace = true }
+governor = { workspace = true }
+texting_robots = { workspace = true }
+ammonia = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = { workspace = true }
