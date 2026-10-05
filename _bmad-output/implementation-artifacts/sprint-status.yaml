@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-05-2026 00:50
-last_updated: 10-05-2026 02:05
+last_updated: 10-05-2026 02:30
 project: boba-job-find
 project_key: NOKEY
 tracking_system: file-system
@@ -39,7 +39,7 @@ development_status:
   1-1-repo-scaffold-and-crate-workspace: done
   1-2-encrypted-store-keychain-key-and-migrations: in-progress
   1-3-typed-ipc-error-model-and-event-bus: done
-  1-4-i18n-catalogues-en-es-ui-and-core: backlog
+  1-4-i18n-catalogues-en-es-ui-and-core: done
   1-5-app-shell-design-tokens-theme-and-navigation: backlog
   1-6-system-tray-single-instance-and-close-to-tray: backlog
   1-7-settings-store-and-audit-log: backlog

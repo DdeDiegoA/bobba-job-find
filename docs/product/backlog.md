@@ -71,7 +71,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 | 2 | S1.8 | 1.8 | CI pipeline | S1.1 | L |  |
 | 3 | S1.3p | 1.3 | boba-app ports skeleton | S1.3 | L |  |
 | 3 | S2.1 | 2.1 | CLI detection and capability probing | S1.3, S1.2a | M |  |
-| 3 | S1.4 | 1.4 | i18n catalogues EN/ES (UI and core) | S1.3 | M |  |
+| 3 | S1.4 | 1.4 | i18n catalogues EN/ES (UI and core) | S1.3, S1.8 | L |  |
 | 3 | S7.1 | 7.1 | Document model and Typst templates (2) | S1.2a | M |  |
 | 4 | S2.2 | 2.2 | Run lifecycle, ProcessSupervisor and fake CLI | S2.1, S1.3p | L |  |
 | 4 | S1.5 | 1.5 | App shell, design tokens, theme and navigation | S1.3, S1.4 | M |  |
@@ -167,7 +167,7 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 - **S1.8** (wave 2): `.github/workflows/ci.yml`, `scripts/ci/**`, `deny.toml`, `Cargo.toml`, `src-tauri/Cargo.toml`, `src-tauri/crates/boba-agent/Cargo.toml`, `src-tauri/crates/boba-app/Cargo.toml`, `src-tauri/crates/boba-browser/Cargo.toml`, `src-tauri/crates/boba-docs/Cargo.toml`, `src-tauri/crates/boba-domain/Cargo.toml`, `src-tauri/crates/boba-mail/Cargo.toml`, `src-tauri/crates/boba-mcp-proto/Cargo.toml`, `src-tauri/crates/boba-mcp/Cargo.toml`, `src-tauri/crates/boba-sources/Cargo.toml`, `src-tauri/crates/boba-store/Cargo.toml`
 - **S1.3p** (wave 3): `src-tauri/crates/boba-app/src/lib.rs`, `src-tauri/crates/boba-app/src/ports/mod.rs`, `src-tauri/crates/boba-app/src/ports/repo/mod.rs`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/browser.rs`, `src-tauri/crates/boba-app/src/ports/clock.rs`, `src-tauri/crates/boba-app/src/ports/embedding.rs`, `src-tauri/crates/boba-app/src/ports/mail.rs`, `src-tauri/crates/boba-app/src/ports/notifier.rs`, `src-tauri/crates/boba-app/src/ports/render.rs`, `src-tauri/crates/boba-app/src/ports/secret.rs`, `src-tauri/crates/boba-app/src/ports/source.rs`, `src-tauri/crates/boba-app/src/ports/repo/profile.rs`, `src-tauri/crates/boba-app/src/ports/repo/sources.rs`, `src-tauri/crates/boba-app/src/ports/repo/ingestion.rs`, `src-tauri/crates/boba-app/src/ports/repo/scoring.rs`, `src-tauri/crates/boba-app/src/ports/repo/documents.rs`, `src-tauri/crates/boba-app/src/ports/repo/apply.rs`, `src-tauri/crates/boba-app/src/ports/repo/email.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/system.rs`, `.gitattributes`
 - **S2.1** (wave 3): `src-tauri/crates/boba-agent/src/drivers/**`, `src-tauri/crates/boba-agent/src/detect/**`, `src-tauri/crates/boba-store/src/repos/cli_install.rs`, `src-tauri/crates/boba-store/migrations/0002_cli_install.sql`
-- **S1.4** (wave 3): `src/lib/i18n/**`, `src-tauri/crates/boba-app/src/i18n/**`, `locales/en/common.json`, `locales/es/common.json`, `scripts/check-i18n.mjs`
+- **S1.4** (wave 3): `src/lib/i18n/**`, `src-tauri/crates/boba-app/src/i18n/**`, `locales/en/common.json`, `locales/es/common.json`, `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`, `src-tauri/crates/boba-app/Cargo.toml`
 - **S7.1** (wave 3): `src-tauri/crates/boba-docs/src/model/**`, `src-tauri/crates/boba-docs/src/typst/**`, `templates/cv/**`, `templates/cover/**`, `templates/fonts/**`, `src-tauri/crates/boba-store/src/repos/documents.rs`, `src-tauri/crates/boba-store/migrations/0003_documents.sql`
 - **S2.2** (wave 4): `src-tauri/crates/boba-agent/src/runtime/**`, `src-tauri/crates/boba-agent/src/supervisor/**`, `src-tauri/crates/boba-store/src/repos/agent_run.rs`, `tools/fake-cli/**`, `src-tauri/crates/boba-store/migrations/0004_agent_runs.sql`, `src-tauri/crates/boba-app/src/ports/agent.rs`, `src-tauri/crates/boba-app/src/ports/repo/agent.rs`
 - **S1.5** (wave 4): `src/app/**`, `src/styles/**`, `src/components/ui/**`, `locales/en/shell.json`, `locales/es/shell.json`
@@ -282,7 +282,7 @@ Every path in the first list exists as a compiling stub after S1.1 (convention 1
 
 - **S1.2b**: `docs/qa/macos-upgrade-test.md`
 - **S1.3**: `scripts/gen-bindings.mjs`
-- **S1.4**: `scripts/check-i18n.mjs`
+- **S1.4**: `scripts/check-i18n.mjs`, `scripts/ci/check-i18n.mjs`
 - **S1.8**: `.github/workflows/ci.yml`, `scripts/ci/**`
 - **S10.5**: `.github/workflows/release.yml`, `scripts/release/**`, `docs/install/**`
 - **S10.6**: `docs/qa/accessibility.md`, `docs/qa/platforms.md`

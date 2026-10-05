@@ -72,7 +72,7 @@ Build rules (Diego, 2026-10-05):
 - Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3 in progress: S1.3p dev-1, S2.1 dev-2, S1.4 dev-3, S7.1 dev-4.
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 dev-2, S7.1 dev-4 in progress. Chore CH1 (dev-profile debuginfo) dev-1.
 
 | Area | Docs | Status |
 |---|---|---|
