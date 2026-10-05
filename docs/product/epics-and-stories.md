@@ -200,7 +200,7 @@ As a maintainer, I want CI that lints, tests and builds on all three OSes withou
 Goal: any supported agent CLI can run a Boba task. The task gets structured output, the tight sandbox from AD-6, and budgets. Every LLM feature depends on this epic.
 
 ### Story 2.1: CLI detection and capability probing
-**Phase:** MVP · **Depends on:** 1.3 · **Files:** `src-tauri/crates/boba-agent/src/drivers/**`, `src-tauri/crates/boba-agent/src/detect/**`, `src-tauri/crates/boba-store/src/repos/cli_install.rs`, `src-tauri/crates/boba-store/migrations/0002_cli_install.sql` · **Covers:** FR-2, AD-4, addendum A.1
+**Phase:** MVP · **Depends on:** 1.3 · **Files:** `src-tauri/crates/boba-agent/src/drivers/**`, `src-tauri/crates/boba-agent/src/detect/**`, `src-tauri/crates/boba-store/src/repos/cli_install.rs`, `src-tauri/crates/boba-store/migrations/0002_cli_install.sql`, `src-tauri/crates/boba-agent/Cargo.toml`, `src-tauri/crates/boba-store/Cargo.toml` · **Covers:** FR-2, AD-4, addendum A.1
 
 As a user, I want Boba to find the agent CLIs I already have and know what each can do, so that I can choose one without configuring anything.
 

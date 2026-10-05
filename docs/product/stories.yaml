@@ -100,7 +100,7 @@ stories:
     title: "CLI detection and capability probing"
     phase: "MVP"
     depends_on: ["1.3"]
-    files: ["src-tauri/crates/boba-agent/src/drivers/**", "src-tauri/crates/boba-agent/src/detect/**", "src-tauri/crates/boba-store/src/repos/cli_install.rs", "src-tauri/crates/boba-store/migrations/0002_cli_install.sql"]
+    files: ["src-tauri/crates/boba-agent/src/drivers/**", "src-tauri/crates/boba-agent/src/detect/**", "src-tauri/crates/boba-store/src/repos/cli_install.rs", "src-tauri/crates/boba-store/migrations/0002_cli_install.sql", "src-tauri/crates/boba-agent/Cargo.toml", "src-tauri/crates/boba-store/Cargo.toml"]
     covers: ["FR-2", "AD-4"]
     ac:
       - "Given Claude Code, Codex, OpenCode, Gemini CLI or Aider on PATH or in a known location When detection runs Then each is listed with version, path, auth/health status and its probed capabilities (`stream_json`, `mcp`, `tool_allowlist`, `budget_flag`, `turn_flag`, `structured_output`) within ≤ 10 s."

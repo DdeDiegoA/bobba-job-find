@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-05-2026 00:50
-last_updated: 10-05-2026 02:30
+last_updated: 10-05-2026 02:33
 project: boba-job-find
 project_key: NOKEY
 tracking_system: file-system
@@ -46,8 +46,8 @@ development_status:
   1-8-ci-pipeline: backlog
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-cli-detection-and-capability-probing: backlog
+  epic-2: in-progress
+  2-1-cli-detection-and-capability-probing: done
   2-2-run-lifecycle-processsupervisor-and-fake-cli: backlog
   2-3-boba-mcp-shim-mcp-server-and-sandbox-lockdown: backlog
   2-4-agent-pack-renderer-and-task-registry: backlog

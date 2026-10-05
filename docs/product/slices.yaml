@@ -123,8 +123,9 @@
   wave: 3
   parent: "2.1"
   title: CLI detection and capability probing
-  deps: [S1.3, S1.2a]
-  files: ["@c/boba-agent/src/drivers/**", "@c/boba-agent/src/detect/**", "@c/boba-store/src/repos/cli_install.rs", "{mig:cli_install}"]
+  deps: [S1.3, S1.2a, S1.8]
+  files: ["@c/boba-agent/src/drivers/**", "@c/boba-agent/src/detect/**", "@c/boba-store/src/repos/cli_install.rs", "{mig:cli_install}", "@c/boba-agent/Cargo.toml", "@c/boba-store/Cargo.toml"]
+  notes: Merged. Also edited boba-agent/Cargo.toml and boba-store/Cargo.toml (historical). S1.8 is recorded as a dependency because it last edited the crate manifests.
 
 - id: S2.2
   parent: "2.2"
