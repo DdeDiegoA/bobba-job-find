@@ -77,7 +77,8 @@ nix = { version = "0.31", default-features = false, features = ["fs"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 # --- Network / sources ---
-reqwest = { version = "0.13", features = ["rustls-tls", "json"] }
+# reqwest 0.13 renamed the rustls feature from `rustls-tls` to `rustls`.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 governor = "0.10"
 texting_robots = "0.2"
 feed-rs = "3.0"
