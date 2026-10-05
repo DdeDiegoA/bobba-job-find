@@ -119,3 +119,13 @@ wiremock = "0.6"
 insta = "1.49"
 tempfile = "3"
 toml = "0.9"
+
+# --- Build profiles ---
+# Dev builds: keep line tables only in our own crates and no debuginfo for
+# dependencies. Backtraces still show file:line, but target/ is far smaller
+# (disk was the incident). Release profile and split-debuginfo are untouched.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
