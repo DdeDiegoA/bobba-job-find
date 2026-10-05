@@ -60,7 +60,7 @@ Communication: talk to Diego and write all documents in **English**.
 - `ux` — tab **diseño**
 
 ## Current phase
-**BUILD PHASE — MVP (started 2026-10-05).** Human gate passed. Backlog: `docs/product/backlog.md` (76 slices, 21 waves, ≤4 parallel devs; source `docs/product/slices.yaml`). Root `./stories.yaml` = current wave only (`python3 scripts/gen_backlog.py --wave N`). Sprint status: `_bmad-output/implementation-artifacts/sprint-status.yaml`.
+**BUILD PHASE — MVP (started 2026-10-05) — PAUSED after Wave 4.** Human gate passed. Backlog: `docs/product/backlog.md` (76 slices, 21 waves, ≤4 parallel devs; source `docs/product/slices.yaml`). Root `./stories.yaml` = current wave only (`python3 scripts/gen_backlog.py --wave N`). Sprint status: `_bmad-output/implementation-artifacts/sprint-status.yaml`.
 
 Build rules (Diego, 2026-10-05):
 - Devs: all `opencode` DeepSeek V4.1 Flash. Branch `hermad/<story>` in a worktree per slice.
@@ -75,7 +75,7 @@ Build rules (Diego, 2026-10-05):
 - Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; S4.1 ✅ 4abfd61. **All Wave 4 merged.** Full-gate verify of main: 12/13 pass; cargo deny red (6 typst-transitive advisories) → CH2 chore (dev-1, Diego: upgrade quick-xml, documented ignores for the rest). STOP after CH2 merges. CH1 ✅ 32db67c (dev profile debuginfo trimmed).
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; S4.1 ✅ 4abfd61. **All Wave 4 merged.** Full-gate verify of main: 12/13 pass; cargo deny red (6 typst-transitive advisories) → CH2 chore (dev-1, Diego: upgrade quick-xml, documented ignores for the rest). CH2 ✅ 9999bd8 (Diego OK: documented ignores, quick-xml upgrade blocked upstream). **WAVE 4 COMPLETE — STOPPED 2026-10-05 per Diego. Resume = generate Wave 5 (starts with S4.1c Send+Sync chore, S4.1h HttpClient hardening, S3.4…).** CH1 ✅ 32db67c (dev profile debuginfo trimmed).
 - Dispatch: orquestador creates worktrees by hand (git worktree add) + hermad spawn, max 4 live devs; plan-devs is not used (it ignores live devs and reuses names). Chore CH1 (dev-profile debuginfo) dev-1.
 
 | Area | Docs | Status |
