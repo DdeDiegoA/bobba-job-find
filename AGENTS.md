@@ -71,7 +71,7 @@ Build rules (Diego, 2026-10-05):
 - `Cargo.lock` / lockfiles: never hand-merged — rebase onto main and regenerate; workspace deps append-only.
 - Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ merged c0b301e (gated, Diego OK); S1.3, S1.8 (gated) in progress. W3 planned: S1.3p, S2.1, S1.4, S7.1.
+Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 approved, rebasing. W3 dispatched: S1.3p dev-1, S2.1 dev-2, S7.1 dev-4; S1.4 → dev-3 after S1.8 merges.
 
 | Area | Docs | Status |
 |---|---|---|
