@@ -105,6 +105,8 @@ rmcp = "3.5"
 typst = "0.15"
 typst-pdf = "0.15"
 typst-as-lib = "0.16"
+# Typst layout engine types (S7.1): PagedDocument for layout introspection.
+typst-layout = "0.15"
 pdf-extract = "0.12"
 lopdf = "0.45"
 docx-rs = "0.4.22"

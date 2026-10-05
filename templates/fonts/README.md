@@ -1,3 +1,7 @@
 # Bundled fonts (OFL-1.1)
 
-Lato / Source Sans 3 / Noto Sans land here (S7.1). Placeholder (S1.1).
+Owned by S7.1. Lato (Regular, Bold, Italic) by Łukasz Dziedzic / tyPoland, loaded
+from memory by the embedded Typst renderer so output is identical on every OS.
+Lato covers Latin Extended, including Spanish diacritics. See `OFL.txt`.
+
+Source: https://github.com/google/fonts/tree/main/ofl/lato

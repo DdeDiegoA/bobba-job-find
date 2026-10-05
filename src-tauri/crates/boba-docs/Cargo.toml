@@ -11,4 +11,15 @@ publish = false
 boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+# Embedded Typst renderer (ADR-006): no TeX toolchain, deterministic output.
+typst = { workspace = true }
+typst-as-lib = { workspace = true }
+typst-layout = { workspace = true }
+typst-pdf = { workspace = true }
+
+[dev-dependencies]
+# Extracts the PDF text layer so tests can assert real text (S7.1, AD-14).
+pdf-extract = { workspace = true }
