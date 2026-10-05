@@ -227,7 +227,7 @@ Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never 
 | Zustand | 5.0 |
 | react-hook-form / zod | 7.89 / 4.6 |
 | i18next / react-i18next | 26.4 / 17.0 |
-| tauri-specta / specta | =2.0.0-rc.25 |
+| tauri-specta / specta / specta-typescript | =2.0.0-rc.25 / =2.0.0-rc.25 / =0.0.12 |
 | rusqlite (bundled-sqlcipher-vendored-openssl) | 0.40 |
 | rusqlite_migration | 2.6 |
 | keyring-core + platform stores | 1.0 |

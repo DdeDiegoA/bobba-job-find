@@ -93,6 +93,7 @@
 | OS locale | **sys-locale** | 0.3 | MIT/Apache | Default UI language | — |
 | MCP | **rmcp** (official Rust MCP SDK) | 3.5 | MIT/Apache | Server side in boba-mcp, stdio transport | TS MCP SDK (would need Node at runtime) |
 | Typed IPC | **tauri-specta** / **specta** | =2.0.0-rc.25 | MIT | See UI table | — |
+| TS exporter | **specta-typescript** | =0.0.12 | MIT | The TypeScript backend tauri-specta rc.25 uses to write `src/lib/ipc/bindings.ts` (AD-3). Pinned exactly alongside tauri-specta, and upgraded only together with it. | — |
 | PDF render | **typst** + **typst-pdf** (+ **typst-as-lib** for the World impl) | 0.15 / 0.15 / 0.16 | Apache-2.0 / MIT | Embedded, no external TeX, fast, deterministic, introspectable layout. See ADR-006. | LaTeX (GB install, upstream pain); headless Chrome print (needs a browser); wkhtmltopdf (dead); printpdf (too low-level) |
 | PDF text (ATS check) | **pdf-extract** (+ **lopdf**) | 0.12 / 0.45 | MIT | Text-layer extraction to verify ATS readability | pypdf / Poppler (Python or native deps) |
 | DOCX | **docx-rs** | 0.4.22 | MIT | Pure Rust writer | `docx` npm (would run in the UI and duplicate logic); pandoc (external binary, GPL) |
