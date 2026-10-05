@@ -87,7 +87,10 @@ html2text = "0.17"
 jsonpath-rust = "1.0"
 lingua = "1.8"
 simhash = "0.3"
-fastembed = "7.1" # optional feature on boba-app (`embeddings`); AD-8 F3
+# Optional feature on boba-app (`embeddings`); AD-8 F3. Pinned to the same two
+# TLS features as fastembed's `default` (minus `image-models`, unused here) so
+# the dependency set does not drift when the default feature resets.
+fastembed = { version = "7.1", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 
 # --- Agent runtime / process ---
 cron = "0.17"

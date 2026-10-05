@@ -1,10 +1,7 @@
-# cargo-deny configuration (S1.1; S1.8 supply-chain gate) — from tech-stack.md §6.
+# cargo-deny configuration (S1.1) — supply-chain gate from tech-stack.md §6.
 # Run: cargo deny check   (installed in CI by S1.8; optional locally)
 #
 # Licence policy: MIT/Apache-2.0 compatible only. No GPL/AGPL/LGPL-static.
-# The Mozilla CA data crates (webpki-roots, webpki-root-certs) ship under
-# CDLA-Permissive-2.0; that licence is granted as a targeted exception below,
-# NOT added to the global allow list.
 
 [graph]
 targets = [
@@ -17,10 +14,18 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-ignore = []
-# Fail only when one of *our* direct dependencies is unmaintained; transitive
-# unmaintained crates (e.g. paste, proc-macro-error) do not fail the build.
-unmaintained = "workspace"
+# Every ignore is a security decision approved by Diego (orquestador policy).
+# Format: id + crate + why it can't be removed + revisit trigger.
+ignore = [
+    # paste 1.0.15 (unmaintained, archived; proc-macro, compile-time only, no known vuln).
+    # Pulled by tokenizers -> fastembed (optional `embeddings` feature, AD-8 F3). No alternative
+    # tokenizer for fastembed. Revisit: tokenizers drops paste, or switch to pastey.
+    { id = "RUSTSEC-2024-0436", reason = "paste via tokenizers/fastembed; compile-time proc-macro, no vuln" },
+    # proc-macro-error 1.0.4 (unmaintained; proc-macro, compile-time only, no known vuln).
+    # Pulled on Linux by gtk-rs 0.18 (glib-macros) -> tray-icon/wry -> tauri. Owned by Tauri upstream.
+    # Revisit: Tauri moves to gtk-rs >= 0.19 / GTK4.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs 0.18/tauri on Linux; compile-time proc-macro, no vuln" },
+]
 
 [licenses]
 allow = [
@@ -40,20 +45,21 @@ allow = [
 ]
 confidence-threshold = 0.9
 
-# Mozilla CA root data (Apache-2.0 project, CDLA-Permissive-2.0 licence).
+# CDLA-Permissive-2.0 (Mozilla CA root data, not code). Scoped to the two root-store crates only.
+# webpki-root-certs: reqwest 0.13 -> rustls-platform-verifier (tauri + our HttpClient).
+# webpki-roots: ureq -> hf-hub -> fastembed model download.
 [[licenses.exceptions]]
-crate = "webpki-roots"
+crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
 
 [[licenses.exceptions]]
-crate = "webpki-root-certs"
+crate = "webpki-roots"
 allow = ["CDLA-Permissive-2.0"]
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
-# Our workspace crates are all `publish = false`, so their path dependencies are
-# internal and exempt from the wildcard ban (which still applies to crates.io).
+# Our path deps are private (publish = false on every workspace crate).
 allow-wildcard-paths = true
 
 [sources]
