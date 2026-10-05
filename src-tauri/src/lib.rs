@@ -30,15 +30,30 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build());
 
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_process::init()).setup(|app| {
-        app.handle()
-            .plugin(tauri_plugin_updater::Builder::new().build())?;
-        // Registry is the single source of command paths (AD-3).
-        let _ = commands::registry::COMMANDS;
-        Ok(())
-    });
+    let builder = builder.plugin(tauri_plugin_process::init());
 
     builder
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                use tauri::tray::TrayIconBuilder;
+
+                // One in-core tray (AD-18). The icon is created here so later
+                // slices extend tray behavior without editing lib.rs (AC8);
+                // menu and behavior belong to S1.6.
+                let mut tray = TrayIconBuilder::with_id("boba-tray");
+                if let Some(icon) = app.default_window_icon() {
+                    tray = tray.icon(icon.clone());
+                }
+                tray.build(app)?;
+
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+            // Registry is the single source of command paths (AD-3).
+            let _ = commands::registry::COMMANDS;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Boba Job Find");
 }

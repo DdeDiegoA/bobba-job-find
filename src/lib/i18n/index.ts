@@ -8,10 +8,9 @@ import { initReactI18next } from "react-i18next";
  * registration edit is needed. S1.4 layers ICU extraction and the core-side
  * embed on top of this.
  */
-const catalogs = import.meta.glob<{ default: Record<string, unknown> }>(
-  "/locales/*/*.json",
-  { eager: true },
-);
+const catalogs = import.meta.glob<{ default: Record<string, unknown> }>("/locales/*/*.json", {
+  eager: true,
+});
 
 const resources: Record<string, Record<string, Record<string, unknown>>> = {};
 for (const [path, mod] of Object.entries(catalogs)) {
