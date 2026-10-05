@@ -130,18 +130,35 @@ for (const file of walk(join(ROOT, "src-tauri"), [".rs"])) {
   }
 }
 
+const splitKey = (raw) => (raw.includes(":") ? raw.split(":", 2) : [DEFAULT_NS, raw]);
+
 // Keys referenced in the UI. Test files are skipped so a key used only in tests
 // counts as unused.
 const UI_KEY =
   /\bt\(\s*["']([^"']+)["']|i18nKey:\s*["']([^"']+)["']|message_key:\s*["']([^"']+)["']|UNKNOWN_ERROR_KEY\s*=\s*["']([^"']+)["']/g;
+// A namespaced key written as a plain string literal, wherever it appears in
+// production `src/**` (labels live in data: `labelKey: "shell:nav.today"`,
+// consumed later as `t(item.labelKey)`). Mirrors the Rust literal scan.
+const LITERAL_KEY = new RegExp(
+  `["'\`]((?:${[...enNs].join("|")}):[A-Za-z0-9_.-]+)["'\`]`,
+  "g",
+);
+// A template literal's static prefix uses its whole subtree:
+// t(`shell:sidebar.theme.${theme}`) → every `sidebar.theme.*` leaf.
+const TEMPLATE_KEY = /\bt\(\s*`([^`$]*?)\$\{/g;
 const usedKeys = new Set(coreKeys);
 for (const file of walk(join(ROOT, "src"), [".ts", ".tsx"])) {
   if (/\.(test|spec)\.|\.d\.ts$|bindings\.ts$/.test(file)) continue;
   const code = readFileSync(file, "utf8");
   for (const m of code.matchAll(UI_KEY)) usedKeys.add(m[1] ?? m[2] ?? m[3] ?? m[4]);
+  for (const m of code.matchAll(LITERAL_KEY)) usedKeys.add(m[1]);
+  for (const m of code.matchAll(TEMPLATE_KEY)) {
+    const [ns, prefix] = splitKey(m[1]);
+    for (const lang of LANGS)
+      for (const key of catalog[lang]?.[ns]?.keys() ?? [])
+        if (key.startsWith(prefix)) usedKeys.add(`${ns}:${key}`);
+  }
 }
-
-const splitKey = (raw) => (raw.includes(":") ? raw.split(":", 2) : [DEFAULT_NS, raw]);
 
 // AC4: every emitted `message_key` resolves in every language.
 for (const raw of coreKeys) {
