@@ -135,28 +135,31 @@ impl<R: SystemRepo, C: ClockPort> AuditService<R, C> {
     /// Startup check (AC-2, AC-3): verify the chain and the keychain anchor,
     /// then resolve crashed intents and refresh the anchor.
     ///
-    /// On tamper, nothing is appended and the anchor is left untouched, so the
-    /// evidence survives for inspection.
+    /// The anchor names the head after every append, so on a clean run it equals
+    /// the head. After a crash between an append and its anchor write it may lag
+    /// to an earlier row; such an anchor names a row that is still in the chain,
+    /// so it is accepted and re-synced. An anchor that names **no** row means the
+    /// tail it pinned was removed — truncation or a re-minted log — and is
+    /// reported as tamper. On tamper nothing is appended and the anchor is left
+    /// untouched, so the evidence survives for inspection.
     pub fn startup(&self) -> Result<StartupReport, SystemError> {
         let status = self.repo.audit_verify_chain()?;
-        let anchor = self.repo.audit_anchor_get()?;
 
-        let tamper_warning = if !status.is_intact() {
-            Some(TamperWarning::ChainBroken {
-                seq: status.broken_at,
-            })
-        } else if anchor
-            .as_deref()
-            .is_some_and(|stored| status.head.as_deref() != Some(stored))
-        {
-            Some(TamperWarning::AnchorMismatch)
-        } else {
-            None
-        };
-
-        if tamper_warning.is_some() {
+        if !status.is_intact() {
             return Ok(StartupReport {
-                tamper_warning,
+                tamper_warning: Some(TamperWarning::ChainBroken {
+                    seq: status.broken_at,
+                }),
+                recovered_intents: 0,
+                anchor_updated: false,
+            });
+        }
+
+        if let Some(stored) = self.repo.audit_anchor_get()?
+            && !self.repo.audit_anchor_is_known(&stored)?
+        {
+            return Ok(StartupReport {
+                tamper_warning: Some(TamperWarning::AnchorMismatch),
                 recovered_intents: 0,
                 anchor_updated: false,
             });
@@ -244,5 +247,60 @@ mod tests {
             Some(TamperWarning::ChainBroken { seq: Some(2) })
         );
         assert!(!report.anchor_updated);
+    }
+
+    // P1 regression: an append after startup must not make the next startup a
+    // false AnchorMismatch — the anchor advances with the head on every append.
+    #[test]
+    fn restart_after_appends_reports_no_anchor_mismatch() {
+        let svc = service(FakeSystemRepo::default());
+        let i = svc.record_intent(&request()).unwrap();
+        svc.record_outcome(&i, AuditOutcome::Ok, "{}").unwrap();
+        assert_eq!(svc.startup().unwrap().tamper_warning, None);
+
+        // Normal activity after the first startup.
+        let i2 = svc.record_intent(&request()).unwrap();
+        svc.record_outcome(&i2, AuditOutcome::Ok, "{}").unwrap();
+
+        let report = svc.startup().unwrap();
+        assert_eq!(report.tamper_warning, None);
+        assert_eq!(report.recovered_intents, 0);
+        assert!(report.anchor_updated);
+    }
+
+    // P1 regression: truncating rows appended after the anchor is detected.
+    #[test]
+    fn truncating_rows_appended_after_the_anchor_is_detected() {
+        let svc = service(FakeSystemRepo::default());
+        let i = svc.record_intent(&request()).unwrap();
+        svc.record_outcome(&i, AuditOutcome::Ok, "{}").unwrap();
+        svc.startup().unwrap();
+
+        let i2 = svc.record_intent(&request()).unwrap();
+        svc.record_outcome(&i2, AuditOutcome::Ok, "{}").unwrap();
+        svc.repo.truncate_last();
+
+        let report = svc.startup().unwrap();
+        assert_eq!(report.tamper_warning, Some(TamperWarning::AnchorMismatch));
+        assert!(!report.anchor_updated, "evidence must not be overwritten");
+    }
+
+    // P1 crash-safety: an anchor left lagging behind the head (as after a crash
+    // between the append and its anchor write) is a known prefix, not tamper,
+    // and startup re-syncs it to the head.
+    #[test]
+    fn lagging_anchor_that_is_a_known_prefix_is_resynced_not_flagged() {
+        let svc = service(FakeSystemRepo::default());
+        let i = svc.record_intent(&request()).unwrap();
+        let o = svc.record_outcome(&i, AuditOutcome::Ok, "{}").unwrap();
+        svc.repo.set_anchor(&i.hash); // crash: anchor lags at the intent row
+
+        let report = svc.startup().unwrap();
+        assert_eq!(report.tamper_warning, None);
+        assert!(report.anchor_updated);
+        assert_eq!(
+            svc.repo.audit_anchor_get().unwrap().as_deref(),
+            Some(o.hash.as_str())
+        );
     }
 }

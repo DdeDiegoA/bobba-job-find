@@ -38,6 +38,11 @@ impl FakeSystemRepo {
         *self.anchor.lock().unwrap() = Some(hash.to_string());
     }
 
+    /// Drop the last row, simulating a tail truncation by an attacker.
+    pub fn truncate_last(&self) {
+        self.rows.lock().unwrap().pop();
+    }
+
     /// Change the last row without re-hashing it, to simulate tampering.
     pub fn corrupt_last(&self) {
         if let Some(last) = self.rows.lock().unwrap().last_mut() {
@@ -54,6 +59,8 @@ impl FakeSystemRepo {
             .unwrap_or_else(|| GENESIS_HASH.to_string());
         row.hash = fake_hash(&row.canonical_json());
         rows.push(row.clone());
+        // AD-12: the keychain anchor tracks the head on every append.
+        *self.anchor.lock().unwrap() = Some(row.hash.clone());
         row
     }
 
@@ -192,6 +199,10 @@ impl SystemRepo for FakeSystemRepo {
 
     fn audit_anchor_get(&self) -> Result<Option<String>, SystemRepoError> {
         Ok(self.anchor.lock().unwrap().clone())
+    }
+
+    fn audit_anchor_is_known(&self, hash: &str) -> Result<bool, SystemRepoError> {
+        Ok(self.rows.lock().unwrap().iter().any(|r| r.hash == hash))
     }
 
     fn audit_anchor_set(&self, hash: &str) -> Result<(), SystemRepoError> {

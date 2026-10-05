@@ -58,10 +58,12 @@ pub trait SystemRepo: Send + Sync {
 
     // ---- audit_event (AD-12) ----------------------------------------------
 
-    /// Append an `intent` row, chaining it to the current head.
+    /// Append an `intent` row, chaining it to the current head and advancing the
+    /// keychain `audit-head` anchor to the new head (AD-12).
     fn audit_append_intent(&self, intent: &NewIntent) -> Result<AuditRow, SystemRepoError>;
 
-    /// Append an `outcome` row completing `intent`.
+    /// Append an `outcome` row completing `intent`, advancing the keychain
+    /// `audit-head` anchor to the new head (AD-12).
     fn audit_append_outcome(
         &self,
         intent: &AuditRow,
@@ -81,6 +83,10 @@ pub trait SystemRepo: Send + Sync {
 
     /// Read the keychain `audit-head` anchor, `None` when never written.
     fn audit_anchor_get(&self) -> Result<Option<String>, SystemRepoError>;
+
+    /// Whether `hash` names a row in the chain (a known prefix head). Startup
+    /// uses it to tell a crash-lagged anchor from a truncated one (AD-12).
+    fn audit_anchor_is_known(&self, hash: &str) -> Result<bool, SystemRepoError>;
 
     /// Mirror the latest hash to the keychain `audit-head` anchor.
     fn audit_anchor_set(&self, hash: &str) -> Result<(), SystemRepoError>;

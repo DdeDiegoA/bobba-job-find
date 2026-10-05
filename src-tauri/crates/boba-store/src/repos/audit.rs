@@ -17,6 +17,7 @@ use keyring_core::Entry;
 use rusqlite::{Connection, OptionalExtension as _, params};
 
 use crate::db::{Store, StoreError};
+use crate::keys::KeyError;
 use crate::repos::settings;
 
 /// Keychain entry name for the latest-hash anchor (AD-12).
@@ -64,6 +65,17 @@ fn head_hash(conn: &Connection) -> Result<Option<String>, AuditError> {
         )
         .optional()?;
     Ok(hash)
+}
+
+/// Whether `hash` names a row in the chain (a known prefix head). Startup uses
+/// it to tell a crash-lagged anchor from a truncated one (AD-12).
+fn is_known_hash(conn: &Connection, hash: &str) -> Result<bool, AuditError> {
+    let exists: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM audit_event WHERE hash = ?1)",
+        [hash],
+        |row| row.get(0),
+    )?;
+    Ok(exists != 0)
 }
 
 fn insert(conn: &Connection, row: &AuditRow) -> Result<(), AuditError> {
@@ -322,9 +334,14 @@ impl SystemRepo for SqliteSystemRepo {
 
     fn audit_append_intent(&self, intent: &NewIntent) -> Result<AuditRow, SystemRepoError> {
         let intent = intent.clone();
+        let service = self.service.clone();
         self.store
             .execute(move |conn| {
-                append_intent(conn, &intent).map_err(|e| StoreError::Sqlite(e.to_string()))
+                let row =
+                    append_intent(conn, &intent).map_err(|e| StoreError::Sqlite(e.to_string()))?;
+                anchor_set(&service, &row.hash)
+                    .map_err(|e| StoreError::Key(KeyError::Keychain(e.to_string())))?;
+                Ok(row)
             })
             .map_err(store_err)
     }
@@ -341,10 +358,14 @@ impl SystemRepo for SqliteSystemRepo {
             detail_json.to_string(),
             created_at.to_string(),
         );
+        let service = self.service.clone();
         self.store
             .execute(move |conn| {
-                append_outcome(conn, &intent, outcome, &detail_json, &created_at)
-                    .map_err(|e| StoreError::Sqlite(e.to_string()))
+                let row = append_outcome(conn, &intent, outcome, &detail_json, &created_at)
+                    .map_err(|e| StoreError::Sqlite(e.to_string()))?;
+                anchor_set(&service, &row.hash)
+                    .map_err(|e| StoreError::Key(KeyError::Keychain(e.to_string())))?;
+                Ok(row)
             })
             .map_err(store_err)
     }
@@ -369,6 +390,15 @@ impl SystemRepo for SqliteSystemRepo {
 
     fn audit_anchor_get(&self) -> Result<Option<String>, SystemRepoError> {
         anchor_get(&self.service).map_err(Into::into)
+    }
+
+    fn audit_anchor_is_known(&self, hash: &str) -> Result<bool, SystemRepoError> {
+        let hash = hash.to_string();
+        self.store
+            .read(move |conn| {
+                is_known_hash(conn, &hash).map_err(|e| StoreError::Sqlite(e.to_string()))
+            })
+            .map_err(store_err)
     }
 
     fn audit_anchor_set(&self, hash: &str) -> Result<(), SystemRepoError> {
@@ -617,5 +647,96 @@ mod tests {
             repo.audit_anchor_get().unwrap().as_deref(),
             Some(o.hash.as_str())
         );
+    }
+
+    fn temp_repo(service: &str) -> (TempDir, SqliteSystemRepo) {
+        mock_keychain();
+        let dir = TempDir::new().unwrap();
+        let key = crate::keys::DbKey::from_hex(KEY_HEX).unwrap();
+        let store = Arc::new(
+            Store::open_with_key(
+                StoreConfig::new(dir.path().join("boba.db"), dir.path().join("snapshots")),
+                key,
+            )
+            .expect("store opens"),
+        );
+        (dir, SqliteSystemRepo::new(store, service))
+    }
+
+    // P1 regression (real store): the anchor tracks the head across normal
+    // appends, so a restart never sees a false AnchorMismatch.
+    #[test]
+    fn anchor_tracks_head_across_appends() {
+        let (_dir, repo) = temp_repo("test.audit.anchor.track");
+        let i = repo
+            .audit_append_intent(&intent("email.sent", "att_a"))
+            .unwrap();
+        assert_eq!(
+            repo.audit_anchor_get().unwrap().as_deref(),
+            Some(i.hash.as_str())
+        );
+
+        let o = repo
+            .audit_append_outcome(&i, AuditOutcome::Ok, "{}", "2026-10-05T01:00:07.000Z")
+            .unwrap();
+        assert_eq!(
+            repo.audit_anchor_get().unwrap(),
+            repo.audit_head_hash().unwrap()
+        );
+        assert_eq!(
+            repo.audit_anchor_get().unwrap().as_deref(),
+            Some(o.hash.as_str())
+        );
+    }
+
+    // P1 regression (real store): after an append the anchor names the last row;
+    // a tail truncation leaves the anchor naming no row — the tamper signal.
+    #[test]
+    fn truncated_appended_tail_is_no_longer_a_known_anchor() {
+        let (_dir, repo) = temp_repo("test.audit.anchor.truncate");
+        let i = repo
+            .audit_append_intent(&intent("email.sent", "att_b"))
+            .unwrap();
+        let o = repo
+            .audit_append_outcome(&i, AuditOutcome::Ok, "{}", "2026-10-05T01:00:08.000Z")
+            .unwrap();
+        assert!(repo.audit_anchor_is_known(&o.hash).unwrap());
+
+        // Attacker drops the append-only trigger and removes the tail row.
+        repo.store
+            .execute(move |conn| {
+                conn.execute_batch("DROP TRIGGER audit_event_no_delete;")
+                    .map_err(|e| StoreError::Sqlite(e.to_string()))?;
+                conn.execute("DELETE FROM audit_event WHERE seq = ?1", [o.seq])
+                    .map_err(|e| StoreError::Sqlite(e.to_string()))?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(
+            !repo.audit_anchor_is_known(&o.hash).unwrap(),
+            "the pinned tail is gone, so the anchor names no row"
+        );
+        assert_ne!(
+            repo.audit_head_hash().unwrap().as_deref(),
+            Some(o.hash.as_str())
+        );
+    }
+
+    // A crash can leave the anchor one append behind; that anchor still names a
+    // real row, so it is a known prefix rather than a tamper signal.
+    #[test]
+    fn lagging_anchor_still_names_a_known_row() {
+        let (_dir, repo) = temp_repo("test.audit.anchor.lag");
+        let i = repo
+            .audit_append_intent(&intent("email.sent", "att_c"))
+            .unwrap();
+        let o = repo
+            .audit_append_outcome(&i, AuditOutcome::Ok, "{}", "2026-10-05T01:00:09.000Z")
+            .unwrap();
+
+        assert!(repo.audit_anchor_is_known(&i.hash).unwrap());
+        assert!(repo.audit_anchor_is_known(&o.hash).unwrap());
+        assert!(!repo.audit_anchor_is_known("nope").unwrap());
     }
 }
