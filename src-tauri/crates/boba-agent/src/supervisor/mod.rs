@@ -1,1 +1,261 @@
-//! Stub module tree (S1.1). Logic lands in a later slice.
+//! Process supervision (AD-1): every child gets its own process group on Unix
+//! or Job Object on Windows, so cancelling kills the whole tree. stdout is
+//! streamed line by line; stderr is collected for error classification. The
+//! wall-clock limit is enforced by the caller's loop, not here.
+
+use std::io::{BufRead, BufReader, Read};
+use std::path::PathBuf;
+use std::process::{ExitStatus, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+#[cfg(windows)]
+use process_wrap::std::JobObject;
+use process_wrap::std::{ChildWrapper, CommandWrap, ProcessGroup};
+use thiserror::Error;
+
+/// How to launch a child. `env` carries per-run values (MCP token, workspace).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub cwd: Option<PathBuf>,
+    pub env: Vec<(String, String)>,
+}
+
+#[derive(Debug, Error)]
+pub enum SupervisorError {
+    #[error("failed to spawn `{program}`: {message}")]
+    Spawn { program: String, message: String },
+    #[error("the child has no captured stdout")]
+    NoStdout,
+}
+
+/// One item from the child's stdout stream.
+#[derive(Debug)]
+pub enum Stream {
+    Line(String),
+    /// No line arrived within the timeout; re-check cancellation/limits.
+    Idle,
+    /// stdout closed; the process is finishing.
+    Eof,
+}
+
+/// A spawned child in its own process group / Job Object.
+pub struct SupervisedProcess {
+    child: Box<dyn ChildWrapper>,
+    lines: Receiver<String>,
+    reader: Option<JoinHandle<()>>,
+    stderr: Arc<Mutex<String>>,
+    reaped: bool,
+}
+
+impl SupervisedProcess {
+    pub fn spawn(spec: &CommandSpec) -> Result<Self, SupervisorError> {
+        let program = spec.program.clone();
+        let display = program.display().to_string();
+        let mut wrap = CommandWrap::with_new(program, |command| {
+            command.args(&spec.args);
+            command.stdin(Stdio::null());
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
+            if let Some(cwd) = &spec.cwd {
+                command.current_dir(cwd);
+            }
+            for (key, value) in &spec.env {
+                command.env(key, value);
+            }
+        });
+        #[cfg(unix)]
+        wrap.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        wrap.wrap(JobObject);
+
+        let mut child = wrap.spawn().map_err(|e| SupervisorError::Spawn {
+            program: display,
+            message: e.to_string(),
+        })?;
+
+        let stdout = child.stdout().take().ok_or(SupervisorError::NoStdout)?;
+        let stderr_pipe = child.stderr().take();
+        let (tx, lines) = channel();
+        let reader = thread::Builder::new()
+            .name("boba-agent-stdout".to_string())
+            .spawn(move || {
+                let mut reader = BufReader::new(stdout);
+                let mut buf = String::new();
+                loop {
+                    buf.clear();
+                    match reader.read_line(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            let line = buf.trim_end_matches(['\n', '\r']).to_string();
+                            if tx.send(line).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|e| SupervisorError::Spawn {
+                program: "boba-agent-stdout".to_string(),
+                message: e.to_string(),
+            })?;
+
+        let stderr = Arc::new(Mutex::new(String::new()));
+        if let Some(pipe) = stderr_pipe {
+            let sink = Arc::clone(&stderr);
+            let _ = thread::Builder::new()
+                .name("boba-agent-stderr".to_string())
+                .spawn(move || {
+                    let mut text = String::new();
+                    let mut reader = BufReader::new(pipe);
+                    let _ = reader.read_to_string(&mut text);
+                    if let Ok(mut guard) = sink.lock() {
+                        guard.push_str(&text);
+                    }
+                });
+        }
+
+        Ok(Self {
+            child,
+            lines,
+            reader: Some(reader),
+            stderr,
+            reaped: false,
+        })
+    }
+
+    /// Wait up to `timeout` for the next stdout line.
+    pub fn recv_line(&self, timeout: Duration) -> Stream {
+        match self.lines.recv_timeout(timeout) {
+            Ok(line) => Stream::Line(line),
+            Err(RecvTimeoutError::Timeout) => Stream::Idle,
+            Err(RecvTimeoutError::Disconnected) => Stream::Eof,
+        }
+    }
+
+    /// Everything the child has written to stderr so far.
+    pub fn stderr_so_far(&self) -> String {
+        self.stderr.lock().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    /// Kill the whole process tree and reap it.
+    pub fn kill(&mut self) {
+        let _ = self.child.start_kill();
+        self.reap();
+    }
+
+    /// Wait for the child to exit (and reap any remaining group members).
+    pub fn wait(&mut self) -> Option<ExitStatus> {
+        let status = self.child.wait().ok();
+        self.reap();
+        status
+    }
+
+    fn reap(&mut self) {
+        if self.reaped {
+            return;
+        }
+        self.reaped = true;
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+impl Drop for SupervisedProcess {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.start_kill();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    /// The fake CLI built by `cargo build`/`cargo test` in the workspace.
+    fn fake_cli() -> PathBuf {
+        if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
+            return PathBuf::from(path);
+        }
+        let exe = std::env::current_exe().expect("current exe");
+        let dir = exe
+            .parent()
+            .and_then(Path::parent)
+            .expect("target dir")
+            .to_path_buf();
+        let name = if cfg!(windows) {
+            "boba-fake-cli.exe"
+        } else {
+            "boba-fake-cli"
+        };
+        let candidate = dir.join(name);
+        assert!(
+            candidate.exists(),
+            "build the workspace first: cargo build -p boba-fake-cli ({})",
+            candidate.display()
+        );
+        candidate
+    }
+
+    fn spec(env: &[(&str, &str)]) -> CommandSpec {
+        CommandSpec {
+            program: fake_cli(),
+            args: vec![],
+            cwd: None,
+            env: env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn streams_stdout_lines_then_eof() {
+        let mut proc =
+            SupervisedProcess::spawn(&spec(&[("BOBA_FAKE_MODE", "echo")])).expect("spawn");
+        let mut lines = Vec::new();
+        loop {
+            match proc.recv_line(Duration::from_secs(5)) {
+                Stream::Line(line) => lines.push(line),
+                Stream::Eof => break,
+                Stream::Idle => continue,
+            }
+        }
+        assert_eq!(lines, vec!["one".to_string(), "two".to_string()]);
+        assert!(proc.wait().expect("exit").success());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_tears_down_the_whole_process_tree() {
+        let dir = std::env::temp_dir().join(format!("boba-tree-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("mkdir");
+        let marker = dir.join("grandchild-ran");
+
+        let mut proc = SupervisedProcess::spawn(&spec(&[
+            ("BOBA_FAKE_MODE", "spawn-child"),
+            ("BOBA_FAKE_MARKER", marker.to_str().unwrap()),
+            ("BOBA_FAKE_DELAY_MS", "400"),
+        ]))
+        .expect("spawn");
+
+        // Let the child start, then kill the group while the grandchild sleeps.
+        std::thread::sleep(Duration::from_millis(100));
+        proc.kill();
+
+        // The grandchild would touch the marker at 400ms; it must never run.
+        std::thread::sleep(Duration::from_millis(600));
+        assert!(!marker.exists(), "grandchild survived the group kill");
+        fs::remove_dir_all(&dir).ok();
+    }
+}
