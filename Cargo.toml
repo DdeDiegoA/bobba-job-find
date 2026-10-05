@@ -67,8 +67,13 @@ windows-native-keyring-store = "1.1"
 dbus-secret-service-keyring-store = "1.0"
 secrecy = "0.10"
 zeroize = "1.9"
+getrandom = "0.4"
 argon2 = "0.6"
 blake3 = "1.8"
+
+# --- Platform utilities ---
+nix = { version = "0.31", default-features = false, features = ["fs"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 # --- Network / sources ---
 reqwest = { version = "0.13", features = ["rustls-tls", "json"] }

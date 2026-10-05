@@ -11,3 +11,33 @@ boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+
+# Storage / crypto — versions pinned once in the workspace manifest (S1.1).
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+keyring-core = { workspace = true }
+zeroize = { workspace = true }
+getrandom = { workspace = true }
+
+# Platform credential stores (ADR-004/ADR-009). Each store crate requires a
+# feature to select its backend; the store itself is registered at startup.
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { workspace = true, features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus-secret-service-keyring-store = { workspace = true, features = ["crypto-rust"] }
+
+# Free-disk check before a pre-migration snapshot (AD-20).
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
