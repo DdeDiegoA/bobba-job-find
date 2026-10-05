@@ -409,6 +409,7 @@ dependencies = [
  "boba-domain",
  "boba-mcp-proto",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 
@@ -544,6 +545,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.21",
+ "ulid",
  "windows-native-keyring-store",
  "windows-sys 0.61.2",
  "zeroize",

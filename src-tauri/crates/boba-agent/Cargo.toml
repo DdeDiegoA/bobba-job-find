@@ -12,4 +12,5 @@ boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 boba-mcp-proto = { path = "../boba-mcp-proto" }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -1,0 +1,8 @@
+Usage: aider [options] [files...]
+
+Options:
+  --message <msg>        Specify a single message to send
+  --yes-always           Always say yes to every confirmation
+  --no-git               Disable git integration
+  --model <model>        Specify the model to use
+  -h, --help             Display help

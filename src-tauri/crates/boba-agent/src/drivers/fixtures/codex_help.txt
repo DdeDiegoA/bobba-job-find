@@ -1,0 +1,15 @@
+Codex CLI
+
+Usage: codex [OPTIONS] [PROMPT]
+       codex exec [OPTIONS] [PROMPT]
+
+Options:
+      --json                    Print events as JSONL
+      --output-schema <file>    JSON Schema for the final response
+      --ephemeral               Run without persisting session files
+      --skip-git-repo-check     Allow running outside a git repository
+      --sandbox <mode>          Sandbox policy: read-only, workspace-write, danger-full-access
+  -c, --config <key=value>      Override a config value (e.g. mcp_servers.boba.command)
+  -m, --model <model>           Model to use
+      --ignore-user-config      Do not load the user config
+  -h, --help                    Display help
