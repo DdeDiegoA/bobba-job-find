@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Boba Job Find — app icon (macOS/Windows/Linux, rounded square). 512x512.
+     Ships as SVG; the Tauri bundler rasterizes to .icns/.ico/.png per platform. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="Boba Job Find app icon">
+  <title>Boba Job Find</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7E7D3"/>
+      <stop offset="1" stop-color="#EFCFA8"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <g transform="translate(128 128) scale(4)">
+    <path d="M38 21 L46 7" fill="none" stroke="#C07430" stroke-width="6.5" stroke-linecap="round"/>
+    <circle cx="27" cy="31" r="15.5" fill="#FFFBF5" stroke="#9A5418" stroke-width="4"/>
+    <path d="M38.5 42.5 L51 55" fill="none" stroke="#9A5418" stroke-width="5.5" stroke-linecap="round"/>
+    <circle cx="21.5" cy="28" r="4" fill="#2E7D46"/>
+    <circle cx="30.5" cy="25.5" r="4" fill="#5B3E8A"/>
+    <circle cx="26.5" cy="34.5" r="4" fill="#B87A46"/>
+  </g>
+</svg>

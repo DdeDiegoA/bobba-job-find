@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boba Job Find Plan</title>
+<meta name="description" content="Planning overview for Boba Job Find — a local-first, cross-platform desktop job-search app.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:ital,wght@0,300;0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   Boba Job Find — design tokens (from docs/design/DESIGN.md §14)
+   Three-layer: primitive → semantic → component.
+   Light on :root. Dark via @media (prefers-color-scheme: dark)
+   guarded by :root:not([data-theme=light]), plus :root[data-theme=dark].
+   ============================================================ */
+:root {
+  /* primitives */
+  --caramel-100:#F7E7D3; --caramel-300:#E3B27A; --caramel-500:#C07430;
+  --caramel-600:#9A5418; --caramel-700:#7E4312; --caramel-800:#5E3210; --caramel-900:#3F220C;
+  --neutral-50:#FFFBF5; --neutral-100:#F7F0E6; --neutral-150:#F5ECE0; --neutral-200:#EEE3D5;
+  --neutral-300:#DDCBB6; --neutral-400:#E4D3BF; --neutral-500:#8A7866; --neutral-600:#6B594C;
+  --neutral-700:#4E4038; --neutral-800:#2B201A; --neutral-900:#191210;
+  --espresso-800:#2E221C; --espresso-850:#241A16; --espresso-900:#191210; --espresso-950:#14100E;
+  --matcha-100:#E3F2E7; --matcha-300:#8FD3A0; --matcha-600:#2E7D46; --matcha-700:#2E6B3E;
+  --leaf-300:#B6D46A; --leaf-600:#5A7A12; --leaf-700:#4C660C;
+  --mango-300:#F0C070; --mango-600:#9E6203; --mango-700:#8A5300;
+  --tangerine-300:#F0A578; --tangerine-600:#B84E12; --tangerine-700:#9A3E10;
+  --lychee-100:#FBE0DC; --lychee-300:#F2A49B; --lychee-600:#A82E24; --lychee-700:#A3281C;
+  --taro-100:#EFE6FA; --taro-300:#C4A6F0; --taro-600:#7A5AA6; --taro-700:#5B3E8A;
+  --border-strong-light:#C4AE94; --border-strong-dark:#5A463A;
+
+  /* semantic — light */
+  --bg:var(--neutral-50); --surface:#FFFFFF; --surface-muted:var(--neutral-150);
+  --surface-sunken:#F0E4D5; --fg:var(--neutral-800); --fg-muted:var(--neutral-600);
+  --fg-subtle:#8A7866; --border:var(--neutral-400); --border-strong:var(--border-strong-light);
+  --primary:var(--caramel-600); --on-primary:#FFFFFF; --primary-hover:var(--caramel-700);
+  --primary-soft:var(--caramel-100); --on-primary-soft:var(--caramel-700);
+  --accent:var(--taro-700); --on-accent:#FFFFFF;
+  --success:var(--matcha-700); --warning:var(--mango-700); --danger:var(--lychee-700); --info:var(--taro-700);
+  --focus:var(--caramel-600);
+
+  /* bands + axes */
+  --band-strong:#2E7D46; --band-good:#5A7A12; --band-moderate:#9E6203; --band-weak:#B84E12; --band-poor:#A82E24;
+  --axis-fit:#2E7D46; --axis-quality:#5B3E8A;
+
+  /* type */
+  --font-display:"Fredoka", ui-rounded, "Segoe UI", system-ui, sans-serif;
+  --font-body:"Nunito", ui-rounded, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* radius / space / motion / elevation */
+  --radius-xs:6px; --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:20px; --radius-2xl:28px; --radius-pill:999px;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px;
+  --dur-fast:150ms; --dur-base:220ms; --ease-standard:cubic-bezier(.2,0,0,1);
+  --elev-1:0 1px 2px rgba(63,34,12,.06), 0 1px 0 rgba(255,255,255,.6) inset;
+  --elev-2:0 4px 12px rgba(63,34,12,.10);
+  --elev-3:0 12px 28px rgba(63,34,12,.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:var(--espresso-900); --surface:var(--espresso-850); --surface-muted:var(--espresso-800);
+    --surface-sunken:var(--espresso-950); --fg:#F5EDE4; --fg-muted:#BDAB9A; --fg-subtle:#7E6B5C;
+    --border:#3E2F27; --border-strong:var(--border-strong-dark);
+    --primary:#E8A860; --on-primary:#241A16; --primary-hover:#F0B878;
+    --primary-soft:#3A2A1E; --on-primary-soft:#F0B878;
+    --accent:var(--taro-300); --on-accent:#241A16;
+    --success:var(--matcha-300); --warning:var(--mango-300); --danger:var(--lychee-300); --info:var(--taro-300);
+    --focus:#E8A860;
+    --elev-1:0 1px 2px rgba(0,0,0,.5);
+    --elev-2:0 6px 16px rgba(0,0,0,.55);
+    --elev-3:0 16px 36px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --bg:var(--espresso-900); --surface:var(--espresso-850); --surface-muted:var(--espresso-800);
+  --surface-sunken:var(--espresso-950); --fg:#F5EDE4; --fg-muted:#BDAB9A; --fg-subtle:#7E6B5C;
+  --border:#3E2F27; --border-strong:var(--border-strong-dark);
+  --primary:#E8A860; --on-primary:#241A16; --primary-hover:#F0B878;
+  --primary-soft:#3A2A1E; --on-primary-soft:#F0B878;
+  --accent:var(--taro-300); --on-accent:#241A16;
+  --success:var(--matcha-300); --warning:var(--mango-300); --danger:var(--lychee-300); --info:var(--taro-300);
+  --focus:#E8A860;
+  --elev-1:0 1px 2px rgba(0,0,0,.5);
+  --elev-2:0 6px 16px rgba(0,0,0,.55);
+  --elev-3:0 16px 36px rgba(0,0,0,.6);
+}
+
+*,*::before,*::after { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; scroll-behavior:smooth; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:var(--font-body); font-size:16px; line-height:1.55;
+  overflow-x:clip; overflow-wrap:anywhere;
+  transition:background-color var(--dur-base) var(--ease-standard), color var(--dur-base) var(--ease-standard);
+}
+a { color:var(--primary); text-decoration:none; }
+a:hover { text-decoration:underline; }
+:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:var(--radius-xs); }
+
+.wrap { width:100%; max-width:1120px; margin:0 auto; padding:0 16px; }
+.mono { font-family:var(--font-mono); }
+.display { font-family:var(--font-display); font-weight:600; letter-spacing:-.01em; }
+
+/* ---------- top bar ---------- */
+.topbar {
+  position:sticky; top:0; z-index:20;
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:saturate(1.4) blur(10px);
+  border-bottom:1px solid var(--border);
+}
+.topbar .wrap { display:flex; align-items:center; gap:var(--space-3); min-height:56px; padding-top:6px; padding-bottom:6px; }
+.brand { display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-weight:600; font-size:17px; white-space:nowrap; }
+.pearl { width:26px; height:26px; flex:0 0 26px; }
+.brand small { color:var(--fg-muted); font-size:12px; font-weight:600; letter-spacing:.02em; }
+.navlinks { display:flex; flex-wrap:wrap; gap:2px 4px; margin-left:auto; }
+.navlinks a { font-size:13px; font-weight:600; color:var(--fg-muted); padding:4px 8px; border-radius:var(--radius-pill); }
+.navlinks a:hover { color:var(--fg); background:var(--surface-muted); text-decoration:none; }
+.theme-btn {
+  flex:0 0 auto; margin-left:var(--space-2); width:36px; height:36px; display:grid; place-items:center;
+  border:1px solid var(--border); background:var(--surface); color:var(--fg-muted);
+  border-radius:var(--radius-pill); cursor:pointer; transition:background var(--dur-fast), color var(--dur-fast);
+}
+.theme-btn:hover { background:var(--surface-muted); color:var(--fg); }
+
+/* ---------- hero ---------- */
+.hero { padding:clamp(28px,6vw,64px) 0 clamp(20px,4vw,32px); }
+.hero h1 { font-family:var(--font-display); font-weight:600; font-size:clamp(32px,5.4vw,48px); line-height:1.08; margin:0 0 10px; letter-spacing:-.02em; }
+.hero .tagline { font-family:var(--font-display); font-weight:500; font-size:clamp(17px,2.4vw,22px); color:var(--primary); margin:0 0 14px; }
+.hero p.lede { font-size:clamp(16px,1.9vw,19px); color:var(--fg-muted); max-width:72ch; margin:0 0 18px; }
+.metarow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; color:var(--fg-muted); }
+
+.badge { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:var(--radius-pill); font-size:12px; font-weight:700; letter-spacing:.02em; border:1px solid var(--border); background:var(--surface); color:var(--fg-muted); }
+.badge.primary { background:var(--primary-soft); color:var(--on-primary-soft); border-color:transparent; }
+.badge.success { background:color-mix(in srgb,var(--success) 14%,transparent); color:var(--success); border-color:transparent; }
+.badge.warn { background:color-mix(in srgb,var(--warning) 16%,transparent); color:var(--warning); border-color:transparent; }
+.badge.danger { background:color-mix(in srgb,var(--danger) 14%,transparent); color:var(--danger); border-color:transparent; }
+.badge.accent { background:var(--taro-100); color:var(--accent); border-color:transparent; }
+.badge.fit { background:var(--matcha-100); color:var(--matcha-700); border-color:transparent; }
+:root[data-theme="dark"] .badge.accent, :root:not([data-theme="light"]) .badge.accent { background:color-mix(in srgb,var(--accent) 18%,transparent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .badge.fit { background:color-mix(in srgb,var(--matcha-300) 18%,transparent); } }
+
+/* ---------- sections ---------- */
+main { padding-bottom:64px; }
+section.card {
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-xl);
+  padding:clamp(18px,3.4vw,32px); margin:0 0 clamp(18px,3vw,28px);
+  box-shadow:var(--elev-1); scroll-margin-top:72px;
+}
+section.card:target { border-color:var(--primary); box-shadow:var(--elev-2); }
+.sec-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 14px; margin-bottom:6px; }
+.sec-head h2 { font-family:var(--font-display); font-weight:600; font-size:clamp(22px,3.2vw,28px); margin:0; letter-spacing:-.01em; }
+.sec-head .num { font-family:var(--font-mono); font-size:14px; font-weight:600; color:var(--primary); }
+.srcline { font-family:var(--font-mono); font-size:12px; color:var(--fg-subtle); margin:0 0 20px; overflow-wrap:anywhere; }
+h3 { font-family:var(--font-display); font-weight:600; font-size:18px; margin:26px 0 10px; }
+h4 { font-family:var(--font-display); font-weight:600; font-size:15px; margin:18px 0 8px; color:var(--fg); }
+p { margin:0 0 12px; max-width:74ch; }
+ul,ol { margin:0 0 14px; padding-left:1.25em; }
+li { margin:0 0 5px; max-width:74ch; }
+.lead { font-size:17px; color:var(--fg-muted); }
+.muted { color:var(--fg-muted); }
+.small { font-size:13.5px; }
+.tiny { font-size:12px; }
+strong { font-weight:700; }
+mark { background:var(--primary-soft); color:var(--on-primary-soft); padding:0 4px; border-radius:4px; }
+
+/* grids */
+.grid { display:grid; gap:14px; }
+.cols-2 { grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+.cols-3 { grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); }
+.cols-4 { grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr)); }
+
+/* mini cards */
+.mini { border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px 15px; background:var(--surface); }
+.mini h4 { margin:0 0 6px; }
+.mini p { margin:0; font-size:14px; color:var(--fg-muted); }
+.mini .k { font-family:var(--font-mono); font-weight:600; color:var(--primary); }
+
+/* tables: scroll inside, never the page */
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--border); border-radius:var(--radius-lg); margin:0 0 16px; }
+table { border-collapse:collapse; width:100%; min-width:520px; font-size:13.5px; }
+caption { caption-side:top; text-align:left; font-size:12px; color:var(--fg-subtle); padding:8px 12px 0; }
+th,td { text-align:left; vertical-align:top; padding:9px 12px; border-bottom:1px solid var(--border); }
+thead th { font-family:var(--font-display); font-weight:600; font-size:12.5px; letter-spacing:.02em; text-transform:uppercase; color:var(--fg-muted); background:var(--surface-muted); position:sticky; top:0; }
+tbody tr:last-child td { border-bottom:0; }
+tbody tr:hover td { background:color-mix(in srgb,var(--surface-muted) 55%,transparent); }
+td code, .path { font-family:var(--font-mono); font-size:12px; background:var(--surface-muted); padding:1px 5px; border-radius:var(--radius-xs); }
+.t-ok { color:var(--success); font-weight:700; }
+.t-no { color:var(--danger); font-weight:700; }
+.t-warn { color:var(--warning); font-weight:700; }
+
+/* callout */
+.callout { border-left:3px solid var(--primary); background:var(--primary-soft); color:var(--on-primary-soft); padding:12px 16px; border-radius:0 var(--radius-md) var(--radius-md) 0; margin:0 0 16px; font-size:14.5px; }
+.callout.warn { border-color:var(--warning); background:color-mix(in srgb,var(--warning) 12%,transparent); color:var(--fg); }
+.callout.danger { border-color:var(--danger); background:color-mix(in srgb,var(--danger) 10%,transparent); color:var(--fg); }
+
+/* swatches */
+.swatches { display:grid; grid-template-columns:repeat(auto-fill,minmax(88px,1fr)); gap:10px; }
+.sw { border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden; }
+.sw .chip { height:52px; }
+.sw .lbl { padding:6px 8px; font-size:11px; line-height:1.35; }
+.sw .lbl b { display:block; font-family:var(--font-mono); font-weight:600; font-size:11px; }
+.sw .lbl span { color:var(--fg-subtle); font-family:var(--font-mono); font-size:10.5px; }
+
+/* specimen */
+.spec { border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px; background:var(--surface-muted); }
+.spec .sample { color:var(--fg); margin:0 0 4px; }
+.spec .name { font-size:11px; color:var(--fg-subtle); font-family:var(--font-mono); }
+.spec + .spec { margin-top:10px; }
+
+/* meters / scores */
+.score-row { display:flex; flex-wrap:wrap; gap:14px; align-items:stretch; }
+.score { flex:1 1 200px; border:1px solid var(--border); border-radius:var(--radius-lg); padding:14px; background:var(--surface); }
+.score .ring { width:64px; height:64px; border-radius:50%; display:grid; place-items:center; font-family:var(--font-mono); font-weight:600; font-size:20px; color:var(--fg); background:conic-gradient(var(--axis-fit) calc(var(--v)*1%), var(--surface-sunken) 0); }
+.score.q .ring { background:conic-gradient(var(--axis-quality) calc(var(--v)*1%), var(--surface-sunken) 0); }
+.score .ring span { width:48px; height:48px; border-radius:50%; background:var(--surface); display:grid; place-items:center; }
+.score .axis { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
+.score.fit .axis { color:var(--matcha-700); }
+.score.q .axis { color:var(--accent); }
+.score .why { font-size:13px; color:var(--fg-muted); margin-top:8px; }
+.bar { height:4px; border-radius:var(--radius-pill); background:var(--surface-sunken); overflow:hidden; margin-top:6px; }
+.bar > i { display:block; height:100%; border-radius:var(--radius-pill); }
+.verdict { display:inline-flex; align-items:center; gap:7px; padding:3px 11px; border-radius:var(--radius-pill); font-weight:700; font-size:13px; color:#fff; }
+.v-strong { background:var(--band-strong); } .v-good { background:var(--band-good); } .v-mod { background:var(--band-moderate); } .v-weak { background:var(--band-weak); } .v-poor { background:var(--band-poor); }
+
+/* flow steps */
+.steps { list-style:none; padding:0; margin:0; counter-reset:s; }
+.steps > li { position:relative; padding:0 0 14px 40px; margin:0; max-width:none; }
+.steps > li::before { counter-increment:s; content:counter(s); position:absolute; left:0; top:0; width:26px; height:26px; border-radius:50%; background:var(--primary-soft); color:var(--on-primary-soft); font-family:var(--font-mono); font-size:12px; font-weight:600; display:grid; place-items:center; }
+.steps > li:not(:last-child)::after { content:""; position:absolute; left:13px; top:28px; bottom:2px; width:1px; background:var(--border); }
+
+/* voice examples */
+.voice { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr)); }
+.bubble { border:1px solid var(--border); border-radius:var(--radius-lg); padding:12px 14px; background:var(--surface); font-size:14px; }
+.bubble .lang { font-size:11px; font-weight:700; letter-spacing:.05em; color:var(--fg-subtle); text-transform:uppercase; display:block; margin-bottom:4px; }
+.bubble.en { border-left:3px solid var(--primary); }
+.bubble.es { border-left:3px solid var(--accent); }
+
+/* diagram */
+.diagram { width:100%; height:auto; display:block; border:1px solid var(--border); border-radius:var(--radius-lg); background:var(--surface-muted); }
+.svg-box { fill:var(--surface); stroke:var(--border); stroke-width:1.5; }
+.svg-box.core { fill:var(--primary-soft); stroke:var(--primary); }
+.svg-box.ext { fill:var(--surface-muted); stroke:var(--border-strong); stroke-dasharray:4 3; }
+.svg-label { font-family:var(--font-body); font-size:11.5px; fill:var(--fg); font-weight:600; }
+.svg-sub { font-family:var(--font-mono); font-size:9.5px; fill:var(--fg-muted); }
+.svg-line { stroke:var(--fg-subtle); stroke-width:1.5; fill:none; }
+.svg-arrow { fill:var(--fg-subtle); }
+
+/* ADR list */
+.adr { display:grid; gap:10px; }
+.adr .row { display:flex; gap:12px; padding:11px 13px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface); }
+.adr .id { font-family:var(--font-mono); font-size:12px; font-weight:600; color:var(--primary); flex:0 0 auto; min-width:62px; }
+.adr .txt { font-size:14px; }
+.adr .txt b { font-family:var(--font-display); font-weight:600; }
+
+/* footer */
+footer { border-top:1px solid var(--border); padding:24px 0 48px; color:var(--fg-muted); font-size:13px; }
+footer .wrap { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:center; }
+.toTop { margin-left:auto; }
+
+@media (max-width:640px) {
+  .navlinks { display:none; }
+  .topbar .wrap { justify-content:space-between; }
+  .brand { margin-right:auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { transition-duration:1ms !important; animation-duration:1ms !important; }
+}
+@media print {
+  .topbar,.theme-btn,.toTop { display:none; }
+  section.card { break-inside:avoid; box-shadow:none; }
+}
+</style>
+</head>
+<body>
+
+<header class="topbar" id="top">
+  <div class="wrap">
+    <span class="brand" aria-label="Boba Job Find">
+      <svg class="pearl" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="17" r="11" fill="#9A5418"/>
+        <circle cx="12.5" cy="13.5" r="3.2" fill="#C07430" opacity=".85"/>
+        <path d="M16 6c0 3 2 3 2 6" stroke="#2E7D46" stroke-width="2" fill="none" stroke-linecap="round"/>
+        <circle cx="12.5" cy="18" r="1.5" fill="#191210"/>
+        <circle cx="19.5" cy="18" r="1.5" fill="#191210"/>
+        <path d="M13.5 21.5c1.6 1.4 3.4 1.4 5 0" stroke="#191210" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      </svg>
+      Boba Job Find <small>Plan</small>
+    </span>
+    <nav class="navlinks" aria-label="Sections">
+      <a href="#vision">Vision</a>
+      <a href="#decisions">Decisions</a>
+      <a href="#experience">Experience</a>
+      <a href="#integrations">Integrations</a>
+      <a href="#design">Design</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#security">Security</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#next">Next</a>
+    </nav>
+    <button class="theme-btn" id="themeToggle" type="button" aria-label="Toggle light and dark theme" title="Toggle theme">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="hero wrap">
+  <span class="badge primary">Planning · full track</span>
+  <h1>Boba Job Find</h1>
+  <p class="tagline">Steep your search. Sip the good offers.</p>
+  <p class="lede">A free, open-source, <strong>local-first desktop app</strong> (Windows / macOS / Linux) that finds job offers every day, tells you which are worth your time and why, writes truthful tailored applications, and sends them only as far as you allow. It productizes the <span class="path">MadsLorentzen/ai-job-search</span> methodology.</p>
+  <div class="metarow">
+    <span>Runs on your machine · no account · no Boba server · no Boba bill</span>
+    <span>·</span>
+    <span>2026-10-04</span>
+    <span>·</span>
+    <span>Summary of <span class="path">docs/</span> — source docs are the source of truth</span>
+  </div>
+</div>
+
+<main class="wrap">
+
+<!-- ============ 1 VISION ============ -->
+<section class="card" id="vision">
+  <div class="sec-head"><span class="num">01</span><h2>Vision &amp; positioning</h2></div>
+  <p class="srcline">docs/product/product-brief.md · docs/research/competitors.md</p>
+
+  <p class="lead">Job seekers applying across borders lose hours a week to the same loop: scrolling boards, guessing which posts are real and winnable, rewriting a CV from scratch, losing track of replies. The tools that automate this are cloud SaaS with weekly billing and generic output.</p>
+
+  <h3>What Boba keeps from the upstream methodology</h3>
+  <div class="grid cols-4">
+    <div class="mini"><h4>Hard eligibility gates</h4><p>Work eligibility, language, location, salary floor — checked before scoring, with quoted evidence.</p></div>
+    <div class="mini"><h4>Transparent fit scoring</h4><p>Two axes and a weighted Rank, every factor explainable.</p></div>
+    <div class="mini"><h4>No-fabrication rule</h4><p>Claims come only from the Profile; gaps are declared, never stuffed.</p></div>
+    <div class="mini"><h4>Verified documents</h4><p>ATS-safe PDF/DOCX, mechanically checked for text layer and page budget.</p></div>
+  </div>
+
+  <h3>What Boba adds</h3>
+  <ul>
+    <li><strong>First-run wizard</strong> (≤ 15 min install → first ranked list).</li>
+    <li><strong>Daily search from the system tray</strong> with native digest notifications.</li>
+    <li><strong>Ranked inbox</strong> showing two scores — Fit and Quality — with evidence.</li>
+    <li><strong>Per-application tailoring studio</strong> (ATS PDF + DOCX, ES/EN).</li>
+    <li><strong>Self-updating tracker</strong> fed by locally-read recruiter replies.</li>
+  </ul>
+
+  <h3>Differentiators (honestly)</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Every incumbent</th><th>Boba Job Find</th></tr></thead>
+      <tbody>
+        <tr><td>Cloud SaaS holds your CV and history</td><td>Local-only, encrypted store; export anytime</td></tr>
+        <tr><td>Bundled AI, weekly/credit billing</td><td>Free &amp; open source; uses the agent CLI + model you already have</td></tr>
+        <tr><td>Black-box match %</td><td>Two transparent scores with evidence, gaps, confidence; editable weights</td></tr>
+        <tr><td>Volume auto-apply that reads identically</td><td>Quality-gated: tailored per offer, thresholds and caps, human-in-control by default</td></tr>
+        <tr><td>Fabricated / keyword-stuffed CV lines</td><td>No-fabrication guardrail; gaps declared, not stuffed</td></tr>
+        <tr><td>English-first, US-first</td><td>Bilingual ES/EN UI and documents; LATAM + Europe + global remote</td></tr>
+        <tr><td>Web + Chrome only</td><td>Native Windows, macOS and Linux</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Competitive field</h3>
+  <p class="small muted">11 incumbents teardown (Teal, Huntr, Simplify, Jobscan, LazyApply, Sonara, AIApply, Careerflow, Kickresume, Rezi, Jobright). Two clusters: <strong>(A) tailoring/ATS</strong> with high doc quality and no auto-submit, and <strong>(B) volume/auto-apply</strong>. Every one is cloud SaaS; none is local/offline; none keeps your data on your machine; autopilot output reads identically and gets rejected at scale.</p>
+  <div class="grid cols-2">
+    <div class="mini"><h4>Where a local-first desktop app wins</h4><p>Data residency by default · BYO model · consent-gated pipeline · native cross-OS incl. Linux/offline · no billing traps · explainable scoring · truthfulness guardrails.</p></div>
+    <div class="mini"><h4>What we won't beat them on</h4><p>Breadth of ATS autofill coverage, aggregator-scale freshness, turnkey zero-setup UX. Winning move: own the private, judgement-heavy layer; interoperate with free autofill extensions.</p></div>
+  </div>
+
+  <h3>Success criteria (Diego's outcomes — no telemetry)</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Metric</th><th>Target</th></tr></thead>
+      <tbody>
+        <tr><td>S1</td><td>Install → first ranked list</td><td>≤ 15 min</td></tr>
+        <tr><td>S2</td><td>Daily triage time</td><td>≤ 10 min/day</td></tr>
+        <tr><td>S3</td><td>Reviewed, tailored application</td><td>≤ 10 min (vs ~60 min baseline)</td></tr>
+        <tr><td>S4</td><td>Reply rate on Boba applications</td><td>≥ 2× pre-Boba baseline over 30 applications</td></tr>
+        <tr><td>S6</td><td>Fabricated claims in sent documents</td><td>0 — every claim traces to the Profile</td></tr>
+        <tr><td>S7</td><td>Unintended submissions</td><td>0</td></tr>
+        <tr><td>S8</td><td>Generated PDFs passing ATS text-layer check</td><td>100%</td></tr>
+        <tr><td>S9</td><td>Diego still runs the daily search after 30 days</td><td>Yes</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tiny muted">Counter-metrics (never optimise): number of applications sent · time spent in the app · average score.</p>
+</section>
+
+<!-- ============ 2 DECISIONS ============ -->
+<section class="card" id="decisions">
+  <div class="sec-head"><span class="num">02</span><h2>Locked product decisions</h2></div>
+  <p class="srcline">AGENTS.md — “Locked product decisions” (from user grilling, 2026-10-04)</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Topic</th><th>Decision</th></tr></thead>
+      <tbody>
+        <tr><td>Audience / model</td><td>Personal use first, <strong>free &amp; open source</strong>. No accounts, no billing.</td></tr>
+        <tr><td>AI engine</td><td>Detect every agent CLI installed (Claude Code, Codex, OpenCode, Gemini CLI, Aider…); user picks CLI + model. Ship a specialized <strong>ai-job-search agent</strong> (prompts/skills/tools) that runs on the chosen CLI.</td></tr>
+        <tr><td>Apply automation</td><td><strong>Both modes</strong>, configurable per source / score threshold: human-in-the-loop (review → send) and full auto-apply.</td></tr>
+        <tr><td>Markets (MVP)</td><td>Global remote (EN), LATAM (ES), US/Canada, Europe + <strong>user-defined custom sources</strong> (RSS/URL/ATS board/custom adapter) where feasible.</td></tr>
+        <tr><td>Non-API boards (LinkedIn, Indeed…)</td><td><strong>Both, per-source opt-in:</strong> official/aggregator APIs + RSS + public ATS JSON by default; user-session browser automation behind explicit opt-in with ToS-risk warning.</td></tr>
+        <tr><td>Data</td><td><strong>Local-only, encrypted:</strong> SQLite (encrypted) + OS keychain for secrets; manual export/backup. No cloud.</td></tr>
+        <tr><td>CV output</td><td>ATS-friendly PDF, DOCX export, multiple templates/themes, <strong>bilingual ES/EN</strong> auto-matched to offer language.</td></tr>
+        <tr><td>Scheduler</td><td>In-app + <strong>system tray</strong> background run while logged in; native notifications with top matches.</td></tr>
+        <tr><td>UI language</td><td><strong>EN + ES from day 1</strong> (i18n built in).</td></tr>
+        <tr><td>Brand</td><td>Name <strong>Boba Job Find</strong>; UX proposes logo, palette, fonts. Aesthetic: <strong>playful-warm (boba)</strong>. Tone: <strong>encouraging coach</strong>. Light + dark, follow OS.</td></tr>
+        <tr><td>Shell</td><td><strong>Tauri v2</strong> (architect-validated). User strengths: TS/React, Python, Rust.</td></tr>
+        <tr><td>Deliverable</td><td>Repo docs under <span class="path">docs/</span> + a published visual overview page linking it all.</td></tr>
+        <tr><td>Signing</td><td>Free OSS path first: macOS = one persistent self-signed cert (no ad-hoc, ADR-009) + documented Gatekeeper bypass; Windows = SignPath Foundation; Apple Developer later.</td></tr>
+        <tr><td>OAuth redirect</td><td>Loopback-only + PKCE S256 + single-use state; deep-link fallback removed.</td></tr>
+        <tr><td>OAuth</td><td>Bundled public desktop clients (PKCE, loopback) + BYO client-ID fallback.</td></tr>
+        <tr><td>Gmail</td><td>MVP <code>gmail.send</code> only; reply parsing via MS Graph / IMAP / BYO client; CASA deferred.</td></tr>
+        <tr><td>Embeddings</td><td>Optional opt-in local model download; deterministic scoring by default.</td></tr>
+        <tr><td>Session-board auto-apply</td><td><strong>In MVP</strong>, per-source opt-in with ToS/ban warning, caps, kill switch, audit log; executed by core, never by LLM tools.</td></tr>
+        <tr><td>DB / Security</td><td>SQLCipher + keychain + boba-mcp shim; audit fixes approved.</td></tr>
+        <tr><td>macOS key safety</td><td>Every macOS build signed with ONE persistent self-signed cert (pinned DR) so Keychain survives updates.</td></tr>
+        <tr><td>Prompt injection</td><td>Hard gate: untrusted-content tasks only on CLIs with verified tool lockdown; no override.</td></tr>
+        <tr><td>Passphrase fallback</td><td>Unlock once per login, zeroized memory + idle timeout; locked → run skipped + notification.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 3 EXPERIENCE ============ -->
+<section class="card" id="experience">
+  <div class="sec-head"><span class="num">03</span><h2>Core experience</h2></div>
+  <p class="srcline">docs/product/PRD.md · docs/design/EXPERIENCE.md · docs/research/offer-scoring.md</p>
+
+  <h3>Onboarding wizard — 10 steps</h3>
+  <ol class="steps small">
+    <li><strong>Language &amp; theme</strong> — EN/ES; theme follows OS.</li>
+    <li><strong>Agent CLI</strong> — detect installed CLIs with version/path/health; pick one + model; test call. None works → Limited mode.</li>
+    <li><strong>Profile import</strong> — Master CV (PDF/DOCX/LinkedIn export); every field reviewed with its source excerpt; nothing saved until confirmed.</li>
+    <li><strong>Profile gaps</strong> — work eligibility, CEFR level, notice period; skippable (lowers Confidence).</li>
+    <li><strong>Preferences</strong> — roles, seniority, Salary Floor, locations/timezones, work mode, languages, deal-breakers, excluded companies.</li>
+    <li><strong>Sources</strong> — recommended Safe Sources pre-selected; Risk Tier shown; add custom RSS/URL/ATS board.</li>
+    <li><strong>Email</strong> (optional) — Gmail send-only default; Outlook/Graph and IMAP/SMTP read+send. Explains exactly what Boba reads vs sends.</li>
+    <li><strong>Apply Mode &amp; schedule</strong> — default <strong>Review</strong> (Auto cannot be enabled here); daily run time (default 08:00); launch-at-login off.</li>
+    <li><strong>Recovery backup</strong> — mandatory on unsigned builds: save the one-time recovery key + backup file.</li>
+    <li><strong>First run</strong> — start a Search Run and open the Inbox with live progress.</li>
+  </ol>
+
+  <h3>The daily loop</h3>
+  <div class="grid cols-2">
+    <div class="mini">
+      <h4>1 · Steep (background)</h4>
+      <p>Tray scheduler runs the daily search → fetch sources (rate-limited) → normalize → deduplicate/cluster → hard gates → deterministic scoring → digest notification.</p>
+    </div>
+    <div class="mini">
+      <h4>2 · Sip (triage)</h4>
+      <p>Today + Inbox show a ranked list. Each offer explains the score: what matched, what is missing, what looks off (stale post, no salary, layoffs). One obvious next step.</p>
+    </div>
+    <div class="mini">
+      <h4>3 · Tailor</h4>
+      <p>Studio produces a tailored CV + cover letter in the offer's language, using only Profile facts. Changed lines highlighted; claim traceability; ATS checks.</p>
+    </div>
+    <div class="mini">
+      <h4>4 · Apply &amp; track</h4>
+      <p>Review mode (approve each send) or opt-in Auto. Tracker kanban updates itself from locally-read recruiter replies, proposed as status changes.</p>
+    </div>
+  </div>
+
+  <h3>Offer ranking — Fit + Quality</h3>
+  <p class="small muted">Deterministic, offline, versioned. <span class="mono">Rank = 0.65·Fit + 0.35·Quality</span> (weights user-adjustable). A role you'd easily get at a bad company must not outrank a stretch at a great one — hence two axes, always shown.</p>
+  <div class="score-row" style="margin:0 0 14px">
+    <div class="score fit">
+      <span class="axis">Fit — can I get it?</span>
+      <div class="ring" style="--v:81"><span>81</span></div>
+      <div class="why">F1 Skills · F2 Experience · F3 Domain · F4 Location · F5 Education · F6 Language</div>
+    </div>
+    <div class="score q">
+      <span class="axis">Quality — do I want it?</span>
+      <div class="ring q" style="--v:64"><span>64</span></div>
+      <div class="why">Q1 Comp vs market · Q2 Company signals · Q3 Terms · Q4 Legitimacy (anti-ghost) · Q5 Alignment</div>
+    </div>
+    <div class="score">
+      <span class="axis">Rank — verdict</span>
+      <p style="margin:10px 0 0"><span class="verdict v-strong">● Strong · 75</span></p>
+      <div class="bar"><i style="width:75%;background:linear-gradient(90deg,var(--band-moderate),var(--band-strong))"></i></div>
+      <div class="why">Verdict bands: Strong ≥75 · Good 60–74 · Moderate 45–59 · Weak 30–44 · Poor &lt;30</div>
+    </div>
+  </div>
+  <div class="grid cols-3 small">
+    <div class="mini"><h4>Hard gates first</h4><p>Work eligibility, language, location/work mode, comp floor, deadline, right-to-work. Each returns <strong>PASS / FLAG / VETO</strong> with the exact quoted evidence. A VETO is never a silent drop — shown in “Excluded” with an override.</p></div>
+    <div class="mini"><h4>Confidence, not just score</h4><p>Every factor carries {score, weight, matched[], missing[], evidence[], confidence}. Missing data renormalizes weights and lowers Confidence — never imputed to neutral. A high score at low Confidence is a <strong>Lead</strong>, not a verdict.</p></div>
+    <div class="mini"><h4>Anti-ghost signals (Q4)</h4><p>Posting age &gt; 90 days (27.6% of openings), repost within 30 days, stale by ATS, layoffs/freezes, vague description, no salary. Deprioritized, not deleted. Scam patterns get a hard-red badge.</p></div>
+  </div>
+  <p class="tiny muted" style="margin-top:10px">The LLM may extract features and <em>narrate</em> the score, but never sets or changes a number (AD-5, AD-8). Weights are calibrated from the user's real outcomes, and never changed silently.</p>
+
+  <h3>Apply modes</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Mode</th><th>Behaviour</th><th>Where available</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Review</strong> (default)</td><td>Boba prepares everything; the user approves each send. <code>Cmd/Ctrl+Enter</code> to confirm.</td><td>All channels</td></tr>
+        <tr><td><strong>Auto</strong> (opt-in)</td><td>Rule-bound automatic sending, scoped to Source × Apply Channel.</td><td>Email, public ATS forms, sanctioned APIs — by default</td></tr>
+        <tr><td><strong>Auto on session boards</strong></td><td>Needs a <em>second</em>, per-source opt-in: account-ban/ToS warning, typed confirmation, 30-day re-confirmation. Conservative caps (default 3/day, ≥10 min pacing, ≥60 min Outbox hold), auto-pause on a challenge, kill switch, audit log. Executed by the core only.</td><td>LinkedIn Easy Apply, Indeed (MVP) · LATAM boards (v1.1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout warn"><strong>Guardrails.</strong> Auto-send requires: threshold met, confidence met, no FLAG or VETO, verified documents, caps not exhausted, kill switch off — re-checked immediately before every irreversible step. Every action is written to a hash-chained audit log. A dry run shows “what we would send” before a rule activates.</div>
+
+  <h3>Tracker</h3>
+  <p class="small">Kanban stages (binding vocabulary, not renameable): <span class="mono">Saved → Preparing → Applied → Interviewing → Offer · Hired · Rejected · No Response · Withdrawn</span>. Terminal stages collapse. Moving to Applied requires a submission-evidence record; Recruiter email replies become <strong>Status Proposals</strong> the user approves (the quoted line is always shown).</p>
+</section>
+
+<!-- ============ 4 INTEGRATIONS ============ -->
+<section class="card" id="integrations">
+  <div class="sec-head"><span class="num">04</span><h2>Integrations — tiers &amp; risk</h2></div>
+  <p class="srcline">docs/research/integrations.md</p>
+
+  <div class="grid cols-3">
+    <div class="mini"><h4>Tier 0 — MVP <span class="badge success">safe</span></h4><p>ATS public boards (Greenhouse, Lever, Ashby, Workable, SmartRecruiters) · free remote feeds (Arbeitnow, RemoteOK, Remotive, Himalayas, WWR-RSS, HN via Algolia) · Adzuna + Jooble APIs · manual URL/text paste · email send-only · optional local IMAP read.</p></div>
+    <div class="mini"><h4>Tier 1 — post-MVP <span class="badge accent">sanctioned / opt-in</span></h4><p>InfoJobs candidate OAuth (search <em>and</em> sanctioned apply) · MS Graph read+send · Gmail restricted-scope read (CASA) · SerpApi/JSearch (opt-in) · Computrabajo / OCC / Bumeran (user-session cookie, warned).</p></div>
+    <div class="mini"><h4>Tier 2 — later <span class="badge warn">partner-only</span></h4><p>Indeed, LinkedIn (partner/Apply Connect), Glassdoor, ZipRecruiter, StepStone, Xing, Otta/WTTJ, Wellfound — closed partner agreements, employer-side, or prohibited.</p></div>
+  </div>
+
+  <h4>Risk matrix</h4>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Integration</th><th>Legal risk</th><th>Breakage</th><th>Cost</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>ATS boards (public JSON)</td><td class="t-ok">Low</td><td>Low–med</td><td>Free</td><td><strong>MVP</strong></td></tr>
+        <tr><td>Remote feeds (Arbeitnow/RemoteOK/Remotive/Himalayas/WWR/HN)</td><td class="t-ok">Low</td><td>Med (no SLA)</td><td>Free</td><td><strong>MVP</strong></td></tr>
+        <tr><td>Adzuna / Jooble APIs</td><td class="t-ok">Low</td><td>Low</td><td>Free/low</td><td><strong>MVP</strong></td></tr>
+        <tr><td>Manual paste / URL fetch</td><td class="t-ok">Lowest</td><td>Low</td><td>Free</td><td><strong>MVP</strong></td></tr>
+        <tr><td>Email send-only (SMTP/Graph/Gmail)</td><td class="t-ok">Low</td><td>Low</td><td>Free</td><td><strong>MVP</strong></td></tr>
+        <tr><td>Email read (local IMAP)</td><td class="t-warn">Low–med (3rd-party data)</td><td>Med</td><td>Free</td><td><strong>MVP-optional</strong></td></tr>
+        <tr><td>Gmail restricted read</td><td class="t-no">Med–high (CASA)</td><td>Med</td><td>Assessor $$</td><td>Tier 1</td></tr>
+        <tr><td>InfoJobs OAuth apply</td><td class="t-ok">Low (sanctioned)</td><td>Low</td><td>Free</td><td>Tier 1</td></tr>
+        <tr><td>SerpApi / JSearch</td><td class="t-no">High (Google ToS/ litigation)</td><td>High</td><td>$25–150/mo</td><td>Tier 1, opt-in</td></tr>
+        <tr><td>Computrabajo / OCC / Bumeran scrape</td><td class="t-no">High</td><td>High</td><td>Apify $$</td><td>Tier 1, warned, opt-in</td></tr>
+        <tr><td>LinkedIn automation</td><td class="t-no">Prohibited (UA §8.2)</td><td>Ban risk</td><td>—</td><td class="t-warn">MVP, per-source opt-in, user-accepted risk</td></tr>
+        <tr><td>Indeed automation</td><td class="t-no">Prohibited (ToS §5)</td><td>Ban risk</td><td>—</td><td class="t-warn">MVP, per-source opt-in, user-accepted risk</td></tr>
+        <tr><td>Glassdoor / ZipRecruiter automation</td><td class="t-no">Prohibited</td><td>Ban risk</td><td>—</td><td>Do not build</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Email</h4>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Gmail API</th><th>Microsoft Graph</th><th>IMAP/SMTP</th></tr></thead>
+      <tbody>
+        <tr><td>Auth</td><td>OAuth desktop loopback + PKCE</td><td>OAuth delegated + PKCE/loopback (no admin consent)</td><td>XOAUTH2 / app password</td></tr>
+        <tr><td>Send</td><td><code>gmail.send</code> (Sensitive, no CASA)</td><td><code>Mail.Send</code></td><td>provider SMTP</td></tr>
+        <tr><td>Read</td><td><span class="t-no">Restricted → CASA</span> (deferred)</td><td><code>Mail.Read</code> ✓</td><td>Gmail restricted; app-password path</td></tr>
+        <tr><td>Desktop fit</td><td>Loopback OK; CASA ambiguous for reading</td><td class="t-ok">Best for Outlook/M365</td><td>Good with XOAUTH2</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn"><strong>Policy override (2026-10-04).</strong> LinkedIn and Indeed session-board auto-apply ships <strong>in MVP</strong>, opt-in per Source, executed only by the core with caps, pacing, Outbox hold, Kill Switch and Audit Log. This deviates from the research recommendation (“do not build”); the residual account-ban/ToS risk is user-accepted, shown at opt-in, and re-confirmed every 30 days. The research risk facts remain accurate.</div>
+  <p class="small muted"><strong>Bottom line:</strong> a read layer from ATS boards + free remote/aggregator APIs + manual paste; a consent-gated email layer that defaults to send-only; every authenticated or scraping integration reserved for opt-in with explicit ToS warnings.</p>
+</section>
+
+<!-- ============ 5 DESIGN ============ -->
+<section class="card" id="design">
+  <div class="sec-head"><span class="num">05</span><h2>Design system</h2></div>
+  <p class="srcline">docs/design/brand.md · docs/design/DESIGN.md · docs/design/voice-and-tone.md</p>
+
+  <h3>Palette</h3>
+  <h4>Light — semantic tokens</h4>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#FFFBF5"></div><div class="lbl"><b>--bg</b><span>#FFFBF5</span></div></div>
+    <div class="sw"><div class="chip" style="background:#FFFFFF"></div><div class="lbl"><b>--surface</b><span>#FFFFFF</span></div></div>
+    <div class="sw"><div class="chip" style="background:#F5ECE0"></div><div class="lbl"><b>--surface-muted</b><span>#F5ECE0</span></div></div>
+    <div class="sw"><div class="chip" style="background:#2B201A"></div><div class="lbl"><b>--fg</b><span>#2B201A</span></div></div>
+    <div class="sw"><div class="chip" style="background:#6B594C"></div><div class="lbl"><b>--fg-muted</b><span>#6B594C</span></div></div>
+    <div class="sw"><div class="chip" style="background:#E4D3BF"></div><div class="lbl"><b>--border</b><span>#E4D3BF</span></div></div>
+    <div class="sw"><div class="chip" style="background:#9A5418"></div><div class="lbl"><b>--primary</b><span>#9A5418</span></div></div>
+    <div class="sw"><div class="chip" style="background:#5B3E8A"></div><div class="lbl"><b>--accent</b><span>#5B3E8A</span></div></div>
+    <div class="sw"><div class="chip" style="background:#2E6B3E"></div><div class="lbl"><b>--success</b><span>#2E6B3E</span></div></div>
+    <div class="sw"><div class="chip" style="background:#8A5300"></div><div class="lbl"><b>--warning</b><span>#8A5300</span></div></div>
+    <div class="sw"><div class="chip" style="background:#A3281C"></div><div class="lbl"><b>--danger</b><span>#A3281C</span></div></div>
+  </div>
+  <h4 style="margin-top:18px">Dark — semantic tokens</h4>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:#191210"></div><div class="lbl"><b>--bg</b><span>#191210</span></div></div>
+    <div class="sw"><div class="chip" style="background:#241A16"></div><div class="lbl"><b>--surface</b><span>#241A16</span></div></div>
+    <div class="sw"><div class="chip" style="background:#2E221C"></div><div class="lbl"><b>--surface-muted</b><span>#2E221C</span></div></div>
+    <div class="sw"><div class="chip" style="background:#F5EDE4"></div><div class="lbl"><b>--fg</b><span>#F5EDE4</span></div></div>
+    <div class="sw"><div class="chip" style="background:#BDAB9A"></div><div class="lbl"><b>--fg-muted</b><span>#BDAB9A</span></div></div>
+    <div class="sw"><div class="chip" style="background:#3E2F27"></div><div class="lbl"><b>--border</b><span>#3E2F27</span></div></div>
+    <div class="sw"><div class="chip" style="background:#E8A860"></div><div class="lbl"><b>--primary</b><span>#E8A860</span></div></div>
+    <div class="sw"><div class="chip" style="background:#C4A6F0"></div><div class="lbl"><b>--accent</b><span>#C4A6F0</span></div></div>
+    <div class="sw"><div class="chip" style="background:#8FD3A0"></div><div class="lbl"><b>--success</b><span>#8FD3A0</span></div></div>
+    <div class="sw"><div class="chip" style="background:#F0C070"></div><div class="lbl"><b>--warning</b><span>#F0C070</span></div></div>
+    <div class="sw"><div class="chip" style="background:#F2A49B"></div><div class="lbl"><b>--danger</b><span>#F2A49B</span></div></div>
+  </div>
+  <p class="tiny muted" style="margin-top:10px">Score bands: Strong <span style="color:var(--band-strong)">#2E7D46</span> · Good <span style="color:var(--band-good)">#5A7A12</span> · Moderate <span style="color:var(--band-moderate)">#9E6203</span> · Weak <span style="color:var(--band-weak)">#B84E12</span> · Poor <span style="color:var(--band-poor)">#A82E24</span>. Fit = matcha, Quality = taro. Every score carries colour + number + word + glyph — never colour alone. All pairs verified ≥ 4.5:1 (light &amp; dark).</p>
+
+  <h3>Type specimens</h3>
+  <div class="spec">
+    <p class="sample display" style="font-size:34px;line-height:1.05">Fredoka — display &amp; headings</p>
+    <span class="name">font-display · 600 · onboarding hero, page titles, offer titles</span>
+  </div>
+  <div class="spec">
+    <p class="sample" style="font-size:16px">Nunito — body &amp; UI. Warm, plain-spoken, comfortable to read at 16px with ES accents (á é í ó ú ñ ¿ ¡).</p>
+    <span class="name">font-body · 400/600 · dense body 15px, caption 13px, micro 12px</span>
+  </div>
+  <div class="spec">
+    <p class="sample mono" style="font-size:28px;font-variant-numeric:tabular-nums">82 · 64 · 75</p>
+    <span class="name">font-mono · 600 · Fit / Quality / Rank scores, comp, meters — tabular numerals</span>
+  </div>
+  <p class="tiny muted">Generated CVs/letters are <strong>not</strong> brand type: neutral ATS-safe fonts by default (brand faces optional, never default).</p>
+
+  <h3>Shape, space &amp; motion</h3>
+  <div class="grid cols-2">
+    <div class="mini"><h4>Radius</h4><p class="mono small">xs 6 · sm 8 · md 12 · lg 16 · xl 20 · 2xl 28 · pill 999</p><p class="small muted">Claymorphism-adjacent: chunky radii, 1px borders, never pure-black lines.</p></div>
+    <div class="mini"><h4>Spacing (4px base)</h4><p class="mono small">0·4·8·12·16·20·24·32·40·48·64·80</p><p class="small muted">16px default control padding; 20–24 card padding; 32–48 section rhythm.</p></div>
+    <div class="mini"><h4>Elevation</h4><p class="small">Soft, warm, layered — never hard black. Depth = elevation + border + surface tone together.</p></div>
+    <div class="mini"><h4>Motion</h4><p class="small">fast 150ms · base 220ms · slow 320ms. Exit faster than enter. New-match pearl pop: once, ≤480ms, sparingly. Reduced-motion collapses all to ≤120ms crossfade.</p></div>
+  </div>
+
+  <h3>Brand concept</h3>
+  <div class="grid cols-2">
+    <div class="mini"><h4>The boba metaphor</h4><p>Loose tea = raw postings · steeping = the daily search · the cup = your pipeline · <strong>tapioca pearls = opportunities</strong> · sweetness = your weights · matcha = Fit, taro = Quality · the straw = a deliberate send. Not a casino: no streaks, no slot-machine rewards.</p></div>
+    <div class="mini"><h4>Mascot — Tapi</h4><p>A single glossy tapioca pearl with dot eyes, a small smile, a tea-leaf sprout. Expressive through eyes + pose only (idle, peeking, cheering, thinking, sleepy, pointing, umbrella, determined). Appears at emotional beats only — never on data-dense screens, never in errors.</p></div>
+  </div>
+  <p class="small muted"><strong>Logo — “The Pearl Lens”:</strong> a magnifying glass whose lens is a boba cup holding three glossy pearls, with a straw rising from the top-right. Fuses finding + choosing. The wordmark styles <strong>boba</strong> (lowercase display) over <strong>Job Find</strong>; “Boba” is the short name.</p>
+
+  <h3>Voice &amp; tone — warm, honest coach</h3>
+  <p class="small muted">EN is the source string; ES is a first-class translation (tú form, neutral ES/LATAM), not a literal gloss. ES runs 15–30% longer; no string depends on a fixed width.</p>
+  <div class="voice">
+    <div class="bubble en"><span class="lang">EN · welcome</span>Let's find work worth applying to.</div>
+    <div class="bubble es"><span class="lang">ES · bienvenida</span>Busquemos trabajos que valgan la pena.</div>
+    <div class="bubble en"><span class="lang">EN · digest</span>{strong} Strong, {good} Good today — Top: {job} · {company} — Fit {fit}, Quality {quality}</div>
+    <div class="bubble es"><span class="lang">ES · resumen</span>{strong} altas, {good} buenas hoy — Top: {puesto} · {empresa} — Encaje {fit}, Calidad {calidad}</div>
+    <div class="bubble en"><span class="lang">EN · a reach</span>This one's a reach — and here's why. Fit 38, Verdict Weak. You're mid-level against a senior role, and 2 of 5 must-haves aren't in your Profile yet. Quality is strong (78) — the company and pay are worth it.</div>
+    <div class="bubble es"><span class="lang">ES · ambiciosa</span>Esta es un reto, y te decimos por qué. Encaje 38, Veredicto Bajo. Eres nivel medio para un puesto senior y faltan 2 de 5 requisitos. La calidad es alta (78): la empresa y el sueldo valen la pena.</div>
+    <div class="bubble en"><span class="lang">EN · empty state</span>Nothing new today. That's normal — new roles post all week. We'll keep watch.</div>
+    <div class="bubble es"><span class="lang">ES · vacío</span>Hoy no hay novedades. Es normal: se publican ofertas toda la semana. Seguimos atentos.</div>
+  </div>
+  <p class="tiny muted" style="margin-top:12px"><strong>Do:</strong> warmth in the surface, honesty in the data · one obvious next step · show both scores with the why · local-first language (“on your machine”). <strong>Don't:</strong> infantilize, gamify applications, hide a bad fit behind a friendly colour, use emoji as icons, promise outcomes.</p>
+</section>
+
+<!-- ============ 6 ARCHITECTURE ============ -->
+<section class="card" id="architecture">
+  <div class="sec-head"><span class="num">06</span><h2>Architecture</h2></div>
+  <p class="srcline">docs/architecture/architecture.md · ARCHITECTURE-SPINE.md · tech-stack.md · adr/</p>
+
+  <h3>Container diagram</h3>
+  <svg class="diagram" viewBox="0 0 720 430" role="img" aria-label="Container diagram: React UI talks over typed IPC to the Rust core, which owns the SQLCipher database and OS keychain, spawns the boba-mcp shim and agent CLI, and drives the user's Chrome.">
+    <rect x="10" y="10" width="700" height="200" rx="16" class="svg-box" style="fill:var(--surface-muted)"/>
+    <text x="24" y="32" class="svg-sub">USER MACHINE</text>
+    <rect x="30" y="46" width="300" height="140" rx="14" class="svg-box core"/>
+    <text x="44" y="68" class="svg-label">Boba Job Find process (Tauri v2)</text>
+    <rect x="46" y="80" width="268" height="38" rx="10" class="svg-box"/>
+    <text x="58" y="104" class="svg-label">React UI (system webview)</text>
+    <rect x="46" y="128" width="268" height="44" rx="10" class="svg-box"/>
+    <text x="58" y="148" class="svg-label">Rust core</text>
+    <text x="58" y="163" class="svg-sub">commands · events · scheduler · use cases · domain · adapters</text>
+    <line x1="180" y1="118" x2="180" y2="128" class="svg-line" marker-end="url(#a)"/>
+    <text x="190" y="127" class="svg-sub">typed IPC</text>
+
+    <rect x="370" y="46" width="150" height="52" rx="10" class="svg-box ext"/>
+    <text x="382" y="68" class="svg-label">SQLCipher DB</text>
+    <text x="382" y="83" class="svg-sub">boba.db</text>
+    <rect x="370" y="112" width="150" height="46" rx="10" class="svg-box ext"/>
+    <text x="382" y="132" class="svg-label">OS keychain</text>
+    <text x="382" y="147" class="svg-sub">db-key · secrets</text>
+    <rect x="540" y="46" width="150" height="52" rx="10" class="svg-box ext"/>
+    <text x="552" y="66" class="svg-label">Agent CLI process</text>
+    <text x="552" y="81" class="svg-sub">Claude/Codex/OpenCode…</text>
+    <rect x="540" y="112" width="150" height="46" rx="10" class="svg-box ext"/>
+    <text x="552" y="132" class="svg-label">boba-mcp shim</text>
+    <text x="552" y="147" class="svg-sub">stdio MCP → local socket</text>
+    <line x1="330" y1="90" x2="370" y2="72" class="svg-line" marker-end="url(#a)"/>
+    <line x1="330" y1="120" x2="370" y2="132" class="svg-line" marker-end="url(#a)"/>
+    <line x1="330" y1="100" x2="540" y2="72" class="svg-line" marker-end="url(#a)"/>
+    <line x1="540" y1="135" x2="330" y2="140" class="svg-line" marker-end="url(#a)"/>
+    <text x="352" y="112" class="svg-sub">single writer</text>
+    <text x="430" y="120" class="svg-sub" text-anchor="middle">spawn / stdio</text>
+
+    <rect x="30" y="250" width="660" height="150" rx="14" class="svg-box ext"/>
+    <text x="44" y="272" class="svg-sub">EXTERNAL (network / opt-in)</text>
+    <rect x="46" y="286" width="150" height="46" rx="10" class="svg-box"/>
+    <text x="58" y="306" class="svg-label">Job sources</text>
+    <text x="58" y="321" class="svg-sub">ATS · RSS · APIs · opt-in session</text>
+    <rect x="212" y="286" width="150" height="46" rx="10" class="svg-box"/>
+    <text x="224" y="306" class="svg-label">Email provider</text>
+    <text x="224" y="321" class="svg-sub">Graph · Gmail send · IMAP</text>
+    <rect x="378" y="286" width="150" height="46" rx="10" class="svg-box"/>
+    <text x="390" y="306" class="svg-label">User's Chrome</text>
+    <text x="390" y="321" class="svg-sub">CDP, Boba profile</text>
+    <rect x="544" y="286" width="132" height="46" rx="10" class="svg-box"/>
+    <text x="556" y="306" class="svg-label">GitHub Releases</text>
+    <text x="556" y="321" class="svg-sub">signed updates</text>
+    <line x1="130" y1="218" x2="130" y2="286" class="svg-line" marker-end="url(#a)"/>
+    <line x1="287" y1="218" x2="287" y2="286" class="svg-line" marker-end="url(#a)"/>
+    <line x1="453" y1="218" x2="453" y2="286" class="svg-line" marker-end="url(#a)"/>
+    <line x1="610" y1="218" x2="610" y2="286" class="svg-line" marker-end="url(#a)"/>
+    <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="svg-arrow"/></marker></defs>
+  </svg>
+  <p class="tiny muted" style="margin-top:8px">The app never talks to an LLM API directly and never sees the user's LLM credentials — the CLI owns them. The agent's only tools come from <span class="mono">boba-mcp</span>. The LLM proposes; the core disposes.</p>
+
+  <h3>Module boundaries</h3>
+  <p class="small muted">Hexagonal: <span class="mono">domain ← app (use cases &amp; ports) ← adapters</span>. <span class="mono">src-tauri/src</span> is the composition root.</p>
+  <div class="grid cols-3">
+    <div class="mini"><h4>boba-domain</h4><p>Pure. Entities, value objects, scoring, gates, apply policy <span class="mono">decide()</span>, dedup key, status machine. No IO, testable with golden files.</p></div>
+    <div class="mini"><h4>boba-app</h4><p>Use cases + ports: RunDailySearch, ScorePosting, StartTailoring, ApproveAndSend, SyncEmail, ImportProfileFromCv, ExportAll.</p></div>
+    <div class="mini"><h4>Adapters</h4><p>boba-store (Repos, secrets, migrations) · boba-sources (HttpClient) · boba-agent (MCP handlers) · boba-docs (render/verify) · boba-mail · boba-browser.</p></div>
+  </div>
+  <div class="mini" style="margin-top:12px"><h4>Composition root</h4><p>commands · events (<span class="mono">posting.scored</span>, <span class="mono">apply.attempt.finished</span>…) · tray/menu · scheduler (cron: daily_search 08:00, email_sync 30m, rescore, retention_sweep) · ProcessSupervisor (process groups / Job Objects, kill-tree) · local IPC server (owner-only socket).</p></div>
+
+  <h3>Tech stack (key picks)</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Layer</th><th>Choice</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Shell</td><td>Tauri v2 (Rust core + React webview)</td><td>Tray, notifications, ~10–20 MB installers, one systems language</td></tr>
+        <tr><td>UI</td><td>React 19 · Tailwind 4 · shadcn/ui (Radix) · TanStack Query · Zustand (UI only)</td><td>Three-layer tokens, typed contract, thin client</td></tr>
+        <tr><td>IPC</td><td>tauri-specta / specta</td><td>Rust structs → typed <span class="mono">bindings.ts</span>; no stringly-typed invoke</td></tr>
+        <tr><td>Storage</td><td>rusqlite <span class="mono">bundled-sqlcipher-vendored-openssl</span> · rusqlite_migration · r2d2</td><td>Encrypted SQLite, identical build on all OSes, hand-written SQL</td></tr>
+        <tr><td>Keychain</td><td>keyring-core + platform stores · argon2 (fallback) · secrecy/zeroize</td><td>Key never in a plaintext file</td></tr>
+        <tr><td>Agent runtime</td><td>AgentPort + one CliDriver per CLI · rmcp (MCP SDK)</td><td>Many CLIs behind one port; capabilities probed at runtime</td></tr>
+        <tr><td>Documents</td><td>typst + typst-pdf (PDF) · docx-rs (DOCX) · pdf-extract (ATS text layer)</td><td>Embedded, no TeX, deterministic, introspectable layout</td></tr>
+        <tr><td>Sources</td><td>reqwest (rustls) · governor · texting_robots · feed-rs · scraper/ammonia · lingua · simhash</td><td>One HttpClient: rate limits, robots, honest UA, sanitization</td></tr>
+        <tr><td>Browser</td><td>chromiumoxide (CDP)</td><td>Drives the user's own Chrome/Edge; no bundled browser</td></tr>
+        <tr><td>Email</td><td>lettre (SMTP/XOAUTH2) · async-imap + mail-parser · oauth2 (PKCE loopback)</td><td>Send + read + RFC 8252 native OAuth</td></tr>
+        <tr><td>Embeddings (opt-in)</td><td>fastembed (ONNX) — MultilingualE5Small</td><td>On-device F3 semantic score, CPU-only</td></tr>
+        <tr><td>Python sidecar</td><td><strong>None</strong> (ADR-007)</td><td>One toolchain to build, sign and notarize</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Architecture decisions (ADR list)</h3>
+  <div class="adr">
+    <div class="row"><span class="id">ADR-001</span><span class="txt"><b>Desktop shell: Tauri v2.</b> Rust core holds logic/IO; React in the system webview; minimal capabilities; CSP <span class="mono">default-src 'self'</span>.</span></div>
+    <div class="row"><span class="id">ADR-002</span><span class="txt"><b>AI engine via user-installed agent CLIs + boba MCP.</b> One CliDriver per CLI; the agent only uses boba-mcp tools; the LLM proposes, the core disposes.</span></div>
+    <div class="row"><span class="id">ADR-003</span><span class="txt"><b>Upstream reuse: re-implement the methodology, don't vendor.</b> Port gates/rubric/verification to Rust; keep upstream-compatible export formats; keep the MIT notice.</span></div>
+    <div class="row"><span class="id">ADR-004</span><span class="txt"><b>Storage: SQLCipher-encrypted SQLite + OS keychain.</b> 32 random bytes in the keychain; Argon2id passphrase fallback; blobs inside the DB; forward-only migrations.</span></div>
+    <div class="row"><span class="id">ADR-005</span><span class="txt"><b>Source access classes, scraping and auto-apply policy.</b> Manifest declares access class, legal tier, apply capability. Default-on public JSON/RSS; opt-in scrape/session. No evasion, ever.</span></div>
+    <div class="row"><span class="id">ADR-006</span><span class="txt"><b>Document rendering: Typst (PDF) + docx-rs (DOCX) from one model.</b> One <span class="mono">CvDocument</span> JSON; layout + ATS text-layer + fabrication checks before any send.</span></div>
+    <div class="row"><span class="id">ADR-007</span><span class="txt"><b>No Python sidecar; boba-mcp is the only sidecar.</b> Upstream tools ported to Rust/ONNX; Python only for dev-time scripts.</span></div>
+    <div class="row"><span class="id">ADR-008</span><span class="txt"><b>UI stack: React 19 + Tailwind v4 + shadcn/ui + TanStack Query + tauri-specta.</b> Self-hosted @fontsource fonts; i18next + ICU catalogs shared with the core.</span></div>
+    <div class="row"><span class="id">ADR-009</span><span class="txt"><b>DB key custody across unsigned builds, and the Locked state.</b> One persistent self-signed macOS cert; never mint a key over existing data; passphrase unlock per login; forced recovery backup. (See §07.)</span></div>
+    <div class="row"><span class="id">ADR-010</span><span class="txt"><b>Untrusted-content tasks require verified tool lockdown; agent output is untrusted.</b> Hard gate, no user override; agent text rendered plain/sanitized and re-enveloped. (See §07.)</span></div>
+  </div>
+</section>
+
+<!-- ============ 7 SECURITY ============ -->
+<section class="card" id="security">
+  <div class="sec-head"><span class="num">07</span><h2>Security &amp; privacy highlights</h2></div>
+  <p class="srcline">docs/architecture/architecture.md §13 · ADR-009 · ADR-010 · docs/reviews/planning-audit.md</p>
+
+  <div class="grid cols-2">
+    <div class="mini"><h4>Threat model (STRIDE highlights)</h4>
+      <ul class="small" style="margin:6px 0 0">
+        <li><strong>Prompt injection → unwanted action:</strong> no action tools, MCP only, untrusted envelopes, policy gate before any outbound step.</li>
+        <li><strong>Exfiltration via the agent:</strong> untrusted-input tasks run only on CLIs with verified <span class="mono">tool_lockdown</span>; otherwise unavailable.</li>
+        <li><strong>Stored injection / XSS:</strong> <span class="mono">untrusted_origin</span>, sanitized render, Typst receives strings as data.</li>
+        <li><strong>OAuth code interception:</strong> loopback only, PKCE S256, single-use 256-bit state.</li>
+        <li><strong>Local DB theft:</strong> SQLCipher, key in keychain, blobs in DB, <span class="mono">secure_delete</span>.</li>
+        <li><strong>Supply chain / update hijack:</strong> lockfiles, cargo-deny, pinned Actions SHAs, signed updater (minisign).</li>
+      </ul>
+    </div>
+    <div class="mini"><h4>Privacy posture</h4>
+      <ul class="small" style="margin:6px 0 0">
+        <li>No telemetry, no analytics, no remote crash reports.</li>
+        <li>Logs stay local and are redacted; secrets never logged.</li>
+        <li>Every network destination listed in Settings → Privacy.</li>
+        <li>No backend — the vendor never becomes a data processor.</li>
+        <li>The LLM provider does see task inputs (including recruiter-email text for <span class="mono">classify_emails</span>), disclosed at onboarding, with a deterministic-only option.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Audit rulings (approved by Diego, 2026-10-05)</h3>
+  <div class="grid cols-2">
+    <div class="mini"><h4>ADR-009 — key custody, signing &amp; Locked state</h4><p class="small">Every macOS build signed with <strong>one persistent self-signed certificate</strong> (pinned DR; CI blocks ad-hoc) so Keychain survives updates. <strong>Never mint a key over existing data</strong> — if the key can't be read, enter the <strong>Locked state</strong>. Passphrase path: unlock once per login, <span class="mono">zeroize</span>d memory, idle timeout (default 8h). Scheduled jobs while locked record <span class="mono">skipped_locked</span> + one notification — never a silent success. <strong>Forced recovery backup</strong> before first run on unsigned builds.</p></div>
+    <div class="mini"><h4>ADR-010 — untrusted content requires tool lockdown</h4><p class="small">Untrusted-input tasks (<span class="mono">extract_postings</span>, <span class="mono">narrate_scores</span>, <span class="mono">tailor_application</span>, <span class="mono">review_application</span>, <span class="mono">classify_emails</span>) require a CLI proven to have <strong>no native web/fetch, no networked shell, no writes outside the workspace</strong>. Otherwise the task is <strong>unsupported — hard gate, no override</strong>. Agent output is itself untrusted: plain/sanitized render, Typst as data only.</p></div>
+    <div class="mini"><h4>OAuth — loopback + PKCE</h4><p class="small">RFC 8252 loopback only + PKCE S256 + single-use 256-bit <span class="mono">state</span>, one-shot listener. The deep-link fallback is <strong>removed</strong> (eliminates scheme-squatting). Bundled public desktop clients plus a BYO client-ID fallback; no client secret treated as confidential.</p></div>
+    <div class="mini"><h4>Gmail — send-only in MVP</h4><p class="small">The bundled Google client requests <strong><span class="mono">gmail.send</span> only</strong>. Reading recruiter replies uses a <strong>BYO Google client</strong> (<span class="mono">gmail.readonly</span>), IMAP, or <span class="mono">.eml</span> import; MS Graph covers Outlook read+send. Restricted scope on the project client and CASA are deferred.</p></div>
+  </div>
+
+  <h3>Enforcing the guarantees</h3>
+  <div class="grid cols-3">
+    <div class="mini"><h4>Hash-chained audit log (AD-12)</h4><p class="small">Every outbound action writes <span class="mono">intent</span> before and <span class="mono">outcome</span> after, with <span class="mono">blake3</span> over RFC 8785 canonical JSON. UPDATE/DELETE rejected by triggers; latest hash anchored in the keychain; crash intents resolved at startup.</p></div>
+    <div class="mini"><h4>Apply policy engine (AD-11)</h4><p class="small">Single core function <span class="mono">decide()</span>. UI never decides. Kill switch re-checked immediately before every irreversible step; caps/pacing/holds are scheduler-owned so closing the UI can't bypass them.</p></div>
+    <div class="mini"><h4>Fabrication guardrail (AD-15)</h4><p class="small">Every claim-bearing item carries <span class="mono">fact_ids[]</span>. Validator rejects items with no/unknown facts; missing keywords go to <span class="mono">declared_gaps[]</span> — never added to the text.</p></div>
+  </div>
+</section>
+
+<!-- ============ 8 ROADMAP ============ -->
+<section class="card" id="roadmap">
+  <div class="sec-head"><span class="num">08</span><h2>Roadmap</h2></div>
+  <p class="srcline">docs/product/epics-and-stories.md — 13 epics · 80 stories (FR-1…FR-120, NFR-1…NFR-22)</p>
+
+  <div class="grid cols-3">
+    <div class="mini"><h4>MVP <span class="badge primary">E1–E11</span></h4><p>Foundations, Agent runtime, Onboarding &amp; Profile, Sources, Scheduler, Ranking, Tailoring, Email, Apply &amp; Tracker, Data/Privacy/Release, and session boards (LinkedIn/Indeed).</p></div>
+    <div class="mini"><h4>v1.1 <span class="badge accent">E12–E13</span></h4><p>InfoJobs + generic careers-page source + external-process adapter SDK; follow-up drafting, interview prep pack, weight calibration from outcomes; LATAM session boards (story 11.4).</p></div>
+    <div class="mini"><h4>Later</h4><p>Mock interviews, skill-gap/upskill plans, salary-negotiation helper, opt-in E2E sync between the user's devices, more UI languages. Explicitly out: accounts, billing, cloud backend, mobile, recruiter-side, mass-apply as a goal.</p></div>
+  </div>
+
+  <h4>Epics &amp; story counts</h4>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Epic</th><th>Phase</th><th>Stories</th></tr></thead>
+      <tbody>
+        <tr><td>E1</td><td>Foundations (walking skeleton)</td><td>MVP</td><td>8</td></tr>
+        <tr><td>E2</td><td>Agent runtime</td><td>MVP</td><td>5</td></tr>
+        <tr><td>E3</td><td>Onboarding &amp; Profile</td><td>MVP</td><td>8</td></tr>
+        <tr><td>E4</td><td>Sources &amp; Ingestion</td><td>MVP</td><td>8</td></tr>
+        <tr><td>E5</td><td>Scheduler &amp; Daily search</td><td>MVP</td><td>4</td></tr>
+        <tr><td>E6</td><td>Ranking &amp; Matches</td><td>MVP</td><td>9</td></tr>
+        <tr><td>E7</td><td>Tailoring studio</td><td>MVP</td><td>8</td></tr>
+        <tr><td>E8</td><td>Email</td><td>MVP</td><td>5</td></tr>
+        <tr><td>E9</td><td>Apply &amp; Tracker</td><td>MVP</td><td>9</td></tr>
+        <tr><td>E10</td><td>Data, Privacy &amp; Release</td><td>MVP</td><td>6</td></tr>
+        <tr><td>E11</td><td>Session boards (LinkedIn/Indeed)</td><td>MVP</td><td>4</td></tr>
+        <tr><td>E12</td><td>InfoJobs &amp; more sources</td><td>v1.1</td><td>3</td></tr>
+        <tr><td>E13</td><td>Coaching extras</td><td>v1.1</td><td>3</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="tiny muted"><strong>Build order rule:</strong> walking skeleton first; agent runtime + boba-mcp before any LLM feature; scoring deterministic and offline. Every story lists its dependencies; parallel stories use separate worktrees/branches.</p>
+  <div class="callout warn"><strong>⚠ Approval-gated stories</strong> (auth, money, DB or security — need sign-off before merge): 1.2 (DB encryption/keychain) · 2.3 (agent sandbox) · 8.1, 8.2, 8.5 (OAuth) · 9.6, 9.7, 9.8 (auto-apply) · 10.5 (code signing) · 11.x (session automation).</div>
+</section>
+
+<!-- ============ 9 NEXT ============ -->
+<section class="card" id="next">
+  <div class="sec-head"><span class="num">09</span><h2>Open questions &amp; next steps</h2></div>
+  <p class="srcline">docs/product/product-brief.md §9 · docs/architecture/architecture.md §17.1 · docs/reviews/planning-audit.md</p>
+
+  <h3>Status</h3>
+  <ul>
+    <li><strong>Research</strong> ✅ upstream, integrations, competitors, offer-scoring.</li>
+    <li><strong>PRD, epics &amp; stories</strong> ✅ (v1 rewritten: session-board auto-apply in MVP).</li>
+    <li><strong>UX</strong> ✅ brand, DESIGN, EXPERIENCE, voice &amp; tone.</li>
+    <li><strong>Architecture</strong> ✅ v1 + spine (AD-1…AD-22) + ADRs + tech-stack, §17 decisions applied.</li>
+    <li><strong>Planning audit</strong> ✅ 2 P0 + 10 P1; fixes approved by Diego 2026-10-05 (ADR-009, ADR-010).</li>
+    <li><strong>Planning audit round 2</strong> ✅ closed — 20/20 findings resolved, no P0/P1/P2 open.</li>
+  </ul>
+
+  <h3>Open questions (from the brief)</h3>
+  <ol class="small">
+    <li><strong>Auto-apply reality.</strong> Sanctioned candidate auto-apply exists only via InfoJobs; ATS apply APIs need an employer key; LinkedIn/Indeed/WWR prohibit automated submission. <em>Resolved:</em> session-board auto ships in MVP behind per-source opt-in, executed by the core, risk user-accepted.</li>
+    <li><strong>Reading Gmail.</strong> Restricted scope normally needs CASA. <em>Resolved:</em> bundled send-only client + BYO read client, Graph, IMAP or .eml; CASA deferred.</li>
+    <li><strong>Agent CLI variance.</strong> Different headless flags/formats/limits. Mitigated by the CliDriver contract, runtime capability probes, pinned fixtures and a supported-CLI matrix (see prd-addendum A.1).</li>
+    <li><strong>Token/quota cost of the daily run.</strong> Mitigation: deterministic pre-filter, LLM only on top candidates, per-run budget.</li>
+    <li><strong>Install friction.</strong> The user still needs an agent CLI installed; Boba detects missing ones and links guides, does not bundle them. Limited mode covers searching/tracking without AI.</li>
+    <li><strong>Legal.</strong> Browser-automation sources stay opt-in with a stated warning and no default-on.</li>
+  </ol>
+
+  <h3>Next steps — build phase</h3>
+  <ol class="small">
+    <li><strong>E1 Foundations</strong> — repo scaffold, encrypted store (story 1.2, approval-gated), typed IPC, EN/ES, theming, tray, audit log, CI.</li>
+    <li><strong>E2 Agent runtime</strong> — CLI detection + capability probing, run lifecycle, <span class="mono">boba-mcp</span> shim and sandbox lockdown (story 2.3).</li>
+    <li><strong>Walking skeleton acceptance</strong> — install a build, store data, upgrade to the next build: the store opens with no user interaction (ADR-009 upgrade test, macOS manual QA).</li>
+    <li><strong>Then feature epics</strong> E3→E11 in dependency order, honouring the approval gates above.</li>
+    <li><strong>Release path</strong> — free OSS signing: macOS persistent self-signed identity, Windows SignPath (pending), Tauri minisign updater always on (AD-22).</li>
+  </ol>
+
+  <div class="callout"><strong>Source of truth.</strong> This page summarizes the repo docs; when they disagree, the docs win. Spine: <span class="path">docs/architecture/ARCHITECTURE-SPINE.md</span> (AD-1…AD-22). Product contract: <span class="path">docs/product/PRD.md</span>. UX contract: <span class="path">docs/design/EXPERIENCE.md</span> + <span class="path">DESIGN.md</span>.</div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><strong>Boba Job Find</strong> — planning overview · 2026-10-04 · English</span>
+    <span class="tiny">Generated from <span class="mono">docs/</span>. Local-first, no telemetry.</span>
+    <a class="toTop tiny" href="#top">Back to top ↑</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var html = document.documentElement;
+  var btn = document.getElementById('themeToggle');
+  var mq = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+  function current() {
+    var t = html.getAttribute('data-theme');
+    if (t === 'dark' || t === 'light') return t;
+    return mq && mq.matches ? 'dark' : 'light';
+  }
+  function apply(t) {
+    html.setAttribute('data-theme', t);
+    try { localStorage.setItem('boba-overview-theme', t); } catch (e) {}
+  }
+  try {
+    var saved = localStorage.getItem('boba-overview-theme');
+    if (saved === 'dark' || saved === 'light') html.setAttribute('data-theme', saved);
+  } catch (e) {}
+  btn.addEventListener('click', function () { apply(current() === 'dark' ? 'light' : 'dark'); });
+  if (mq && mq.addEventListener) {
+    mq.addEventListener('change', function () {
+      var t = html.getAttribute('data-theme');
+      if (t !== 'dark' && t !== 'light') html.setAttribute('data-theme', mq.matches ? 'dark' : 'light');
+    });
+  }
+})();
+</script>
+</body>
+</html>

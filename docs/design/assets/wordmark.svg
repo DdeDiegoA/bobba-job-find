@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Boba Job Find — horizontal lockup (mark + wordmark).
+     Reference layout, not final outlines: text uses the Fredoka webfont stack and will be
+     converted to paths at brand handoff. "boba" lowercase display + "Job Find" in Nunito.
+     Clear space: >= 0.5 x mark height. Min width: 96px. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 96" width="300" height="96"
+     role="img" aria-label="Boba Job Find">
+  <title>Boba Job Find</title>
+  <g transform="translate(8 16) scale(1)">
+    <path d="M38 21 L46 7" fill="none" stroke="#C07430" stroke-width="6.5" stroke-linecap="round"/>
+    <circle cx="27" cy="31" r="15.5" fill="#FFFBF5" stroke="#9A5418" stroke-width="4"/>
+    <path d="M38.5 42.5 L51 55" fill="none" stroke="#9A5418" stroke-width="5.5" stroke-linecap="round"/>
+    <circle cx="21.5" cy="28" r="4" fill="#2E7D46"/>
+    <circle cx="30.5" cy="25.5" r="4" fill="#5B3E8A"/>
+    <circle cx="26.5" cy="34.5" r="4" fill="#B87A46"/>
+  </g>
+  <text x="78" y="52" font-family="Fredoka, 'Baloo 2', system-ui, sans-serif" font-weight="600"
+        font-size="40" fill="#2B201A" letter-spacing="-0.5">boba</text>
+  <text x="79" y="76" font-family="Nunito, system-ui, sans-serif" font-weight="700"
+        font-size="18" fill="#9A5418" letter-spacing="0.4">JOB FIND</text>
+</svg>

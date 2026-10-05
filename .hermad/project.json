@@ -1,0 +1,87 @@
+{
+  "name": "boba-job-find",
+  "label": "boba-job-find",
+  "projectDir": "/Users/diegoarenas/Programacion/proyectos/boba-job-find",
+  "personas": {
+    "orquestador": {
+      "kind": "claude",
+      "modelFlag": "--model opus",
+      "rol": "Orquestador top — rutea + aprueba"
+    },
+    "analyst": {
+      "kind": "opencode",
+      "modelFlag": "-m opencode-go/deepseek-v4.1-flash",
+      "rol": "Mary — análisis/brainstorm"
+    },
+    "architect": {
+      "kind": "claude",
+      "modelFlag": "--model opus",
+      "rol": "Winston — arquitectura/spine"
+    },
+    "pm": {
+      "kind": "claude",
+      "modelFlag": "--model opus",
+      "rol": "John — producto/PRD/epics"
+    },
+    "dev": {
+      "kind": "opencode",
+      "modelFlag": "-m opencode-go/deepseek-v4.1-flash",
+      "rol": "Amelia — build"
+    },
+    "reviewer": {
+      "kind": "opencode",
+      "modelFlag": "-m opencode-go/deepseek-v4.1-flash",
+      "rol": "Revisor — code review/QA"
+    },
+    "ux": {
+      "kind": "opencode",
+      "modelFlag": "-m opencode-go/deepseek-v4.1-flash",
+      "rol": "Sally — UX"
+    },
+    "reader": {
+      "kind": "opencode",
+      "modelFlag": "-m opencode-go/deepseek-v4.1-flash",
+      "rol": "Reader — mapa read-only del código (descartable)"
+    },
+    "security": {
+      "kind": "claude",
+      "modelFlag": "--model opus",
+      "rol": "Security — pentest activo con Strix (solo por orden del usuario)"
+    }
+  },
+  "departamentos": [
+    [
+      "producto",
+      [
+        "reader",
+        "architect",
+        "pm",
+        "analyst"
+      ]
+    ],
+    [
+      "desarrollo",
+      [
+        "dev"
+      ]
+    ],
+    [
+      "qa",
+      [
+        "reviewer"
+      ]
+    ],
+    [
+      "diseno",
+      [
+        "ux"
+      ]
+    ]
+  ],
+  "createdAt": "2026-10-04T20:01:28.793Z",
+  "skills": {
+    "add": [
+      "bmad-help"
+    ]
+  }
+}

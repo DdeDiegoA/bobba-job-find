@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boba Job Find — Design System Preview</title>
+<!-- Self-contained: all CSS/JS/SVG inline. Fonts are loaded from Google Fonts *for this preview only*
+     (convenience) and fall back to system fonts; the shipped app self-hosts them via @fontsource so it
+     makes no network request (CSP default-src 'self'). Open directly: file:///.../docs/design/preview.html -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ TOKENS (from DESIGN.md §14) ============ */
+  :root{
+    --caramel-100:#F7E7D3; --caramel-300:#E3B27A; --caramel-500:#C07430; --caramel-600:#9A5418; --caramel-700:#7E4312;
+    --cream-50:#FFFBF5; --neutral-150:#F5ECE0; --neutral-300:#DDCBB6; --neutral-600:#6B594C; --neutral-800:#2B201A;
+    --surface-sunken:#F0E4D5; --border-strong:#C4AE94;
+    --matcha:#2E7D46; --leaf:#5A7A12; --mango:#9E6203; --tangerine:#B84E12; --lychee:#A82E24; --taro:#5B3E8A;
+    --axis-fit:#2E7D46; --axis-quality:#5B3E8A;
+
+    /* semantic - light */
+    --bg:var(--cream-50); --surface:#FFFFFF; --surface-muted:var(--neutral-150);
+    --fg:var(--neutral-800); --fg-muted:var(--neutral-600); --fg-subtle:#8A7866;
+    --border:#E4D3BF; --primary:var(--caramel-600); --on-primary:#FFFFFF; --primary-hover:var(--caramel-700);
+    --primary-soft:var(--caramel-100); --on-primary-soft:var(--caramel-700);
+    --accent:#5B3E8A; --success:#2E6B3E; --warning:#8A5300; --danger:#A3281C; --info:#5B3E8A; --focus:var(--caramel-600);
+    --elev-1:0 1px 2px rgba(63,34,12,.06), inset 0 1px 0 rgba(255,255,255,.6);
+    --elev-2:0 4px 12px rgba(63,34,12,.10);
+    --elev-3:0 12px 28px rgba(63,34,12,.14);
+    --elev-4:0 24px 48px rgba(63,34,12,.20);
+    --band-strong:#2E7D46; --band-good:#5A7A12; --band-moderate:#9E6203; --band-weak:#B84E12; --band-poor:#A82E24;
+  }
+  html.dark{
+    --bg:#191210; --surface:#241A16; --surface-muted:#2E221C; --surface-sunken:#14100E;
+    --fg:#F5EDE4; --fg-muted:#BDAB9A; --fg-subtle:#7E6B5C;
+    --border:#3E2F27; --border-strong:#5A463A;
+    --primary:#E8A860; --on-primary:#241A16; --primary-hover:#F0B878;
+    --primary-soft:#3A2A1E; --on-primary-soft:#F0B878;
+    --accent:#C4A6F0; --success:#8FD3A0; --warning:#F0C070; --danger:#F2A49B; --info:#C4A6F0; --focus:#E8A860;
+    --elev-1:0 1px 2px rgba(0,0,0,.5); --elev-2:0 6px 16px rgba(0,0,0,.55);
+    --elev-3:0 16px 36px rgba(0,0,0,.6); --elev-4:0 28px 56px rgba(0,0,0,.66);
+    --axis-fit:#4FB268; --axis-quality:#A98BE0;
+    --band-strong:#3F9A5C; --band-good:#7FA526; --band-moderate:#C98213; --band-weak:#D96A2A; --band-poor:#C9483C;
+  }
+  /* forced themes for the palette comparison panel */
+  .force-light{ --bg:#FFFBF5; --surface:#FFFFFF; --surface-muted:#F5ECE0; --fg:#2B201A; --fg-muted:#6B594C; --border:#E4D3BF; --primary:#9A5418; --on-primary:#FFFFFF; --accent:#5B3E8A; --success:#2E6B3E; --warning:#8A5300; --danger:#A3281C; --info:#5B3E8A; --surface-sunken:#F0E4D5; }
+  .force-dark{ --bg:#191210; --surface:#241A16; --surface-muted:#2E221C; --fg:#F5EDE4; --fg-muted:#BDAB9A; --border:#3E2F27; --primary:#E8A860; --on-primary:#241A16; --accent:#C4A6F0; --success:#8FD3A0; --warning:#F0C070; --danger:#F2A49B; --info:#C4A6F0; --surface-sunken:#14100E; }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--fg);
+    font-family:"Nunito",ui-rounded,"Segoe UI",system-ui,sans-serif;
+    font-size:16px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4{font-family:"Fredoka",ui-rounded,system-ui,sans-serif;font-weight:600;line-height:1.15;margin:0}
+  .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+  a{color:var(--accent)}
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 24px 80px}
+  .topbar{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+  .topbar .inner{max-width:1120px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:12px}
+  .brand{display:flex;align-items:center;gap:10px;font-family:"Fredoka";font-weight:600;font-size:20px}
+  .brand small{display:block;font-family:"Nunito";font-size:10px;letter-spacing:.12em;color:var(--primary);text-transform:uppercase}
+  .spacer{flex:1}
+  .section{margin-top:48px;scroll-margin-top:80px}
+  .eyebrow{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--primary)}
+  .lead{color:var(--fg-muted);max-width:70ch}
+  .grid{display:grid;gap:16px}
+  .g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:860px){.g3,.g4{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:20px;box-shadow:var(--elev-1)}
+  .card.pad-lg{padding:28px}
+  .muted{color:var(--fg-muted)} .subtle{color:var(--fg-subtle)}
+  .micro{font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+
+  /* buttons */
+  .btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:12px;border:1px solid transparent;
+    font-family:"Nunito";font-weight:700;font-size:15px;cursor:pointer;background:var(--surface);color:var(--fg);border-color:var(--border);transition:.15s}
+  .btn:hover{border-color:var(--border-strong)}
+  .btn.primary{background:var(--primary);color:var(--on-primary);border-color:transparent}
+  .btn.primary:hover{background:var(--primary-hover)}
+  .btn.ghost{background:transparent;border-color:transparent;color:var(--fg-muted)}
+  .btn.ghost:hover{background:var(--surface-muted);color:var(--fg)}
+  .btn.danger{background:transparent;color:var(--danger);border-color:var(--border)}
+  .btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  .btn.sm{height:32px;padding:0 12px;font-size:13px}
+  .icon-btn{width:36px;height:36px;padding:0;justify-content:center;border-radius:12px}
+  .svg{width:20px;height:20px;flex:none}
+
+  /* chips / badges */
+  .chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:var(--surface-muted);color:var(--fg-muted);
+    font-size:13px;font-weight:600;border:1px solid transparent}
+  .chip.outline{background:transparent;border-color:var(--border)}
+  .badge{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;border-radius:8px;font-size:12px;font-weight:700}
+  .b-success{background:color-mix(in srgb,var(--success) 16%,transparent);color:var(--success)}
+  .b-warning{background:color-mix(in srgb,var(--warning) 18%,transparent);color:var(--warning)}
+  .b-danger{background:color-mix(in srgb,var(--danger) 16%,transparent);color:var(--danger)}
+  .b-info{background:color-mix(in srgb,var(--info) 16%,transparent);color:var(--info)}
+  .b-accent{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+  .b-neutral{background:var(--surface-muted);color:var(--fg-muted)}
+
+  /* score rings */
+  .ring{width:64px;height:64px;flex:none}
+  .ring-sm{width:44px;height:44px}
+  .ring .track{fill:none;stroke:var(--surface-sunken);stroke-width:5}
+  .ring .fill{fill:none;stroke-width:5;stroke-linecap:round;transform:rotate(-90deg);transform-origin:center}
+  .scorebox{display:flex;align-items:center;gap:12px}
+  .scorebox .num{font-family:"JetBrains Mono";font-weight:600;font-size:22px;line-height:1}
+  .bandword{font-weight:700;font-size:13px}
+  .glyph{font-size:15px;line-height:1}
+
+  /* beat/specimen */
+  .swatch{height:56px;border-radius:12px;border:1px solid var(--border);display:flex;align-items:flex-end;padding:6px 8px;font-size:11px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.4)}
+  .ramp{display:grid;grid-template-columns:repeat(10,1fr);gap:6px}
+  .ramp .swatch{height:44px;justify-content:center;align-items:center;text-shadow:none}
+  .tokrow{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px dashed var(--border)}
+  .tokdot{width:28px;height:28px;border-radius:8px;border:1px solid var(--border);flex:none}
+  .tokrow code{font-family:"JetBrains Mono";font-size:12px;color:var(--fg-muted)}
+
+  /* offer card */
+  .meta{color:var(--fg-muted);font-size:14px}
+  .why{font-size:13px;color:var(--fg-muted);display:flex;gap:8px;flex-wrap:wrap}
+  .why b{color:var(--fg)}
+  .flagrow{display:flex;gap:8px;flex-wrap:wrap}
+  .regex{background:var(--surface-muted);border-radius:10px;padding:8px 10px;font-size:13px;color:var(--fg-muted)}
+
+  /* meter bar */
+  .bar{height:8px;border-radius:999px;background:var(--surface-sunken);overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:999px}
+  .piprow{display:inline-flex;gap:3px}
+  .pip{width:8px;height:8px;border-radius:999px;background:var(--surface-sunken)}
+
+  /* kanban */
+  .kanban{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px}
+  .kcol{min-width:180px;flex:1;background:var(--surface-muted);border-radius:16px;padding:10px}
+  .khead{font-weight:700;font-size:13px;display:flex;justify-content:space-between;color:var(--fg-muted);margin:2px 4px 10px}
+  .kcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px;font-size:13px;box-shadow:var(--elev-1)}
+
+  /* wizard */
+  .steps{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .step{display:flex;align-items:center;gap:8px;color:var(--fg-muted);font-size:13px;font-weight:600}
+  .step .dot{width:24px;height:24px;border-radius:999px;border:2px solid var(--border);display:grid;place-items:center;font-size:12px;background:var(--surface)}
+  .step.done .dot{background:var(--success);border-color:var(--success);color:#fff}
+  .step.cur .dot{background:var(--primary);border-color:var(--primary);color:var(--on-primary)}
+  .step.cur{color:var(--fg)}
+  .stepline{width:24px;height:2px;background:var(--border)}
+
+  /* connection tile */
+  .tile{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:var(--elev-1)}
+  .tile .top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .logo-dot{width:36px;height:36px;border-radius:12px;background:var(--primary-soft);color:var(--on-primary-soft);display:grid;place-items:center}
+  .status{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+  .status .dot{width:8px;height:8px;border-radius:999px}
+  .on{color:var(--success)} .on .dot{background:var(--success)}
+  .off{color:var(--fg-muted)} .off .dot{background:var(--fg-subtle)}
+  .warn{color:var(--warning)} .warn .dot{background:var(--warning)}
+
+  /* inputs */
+  .field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
+  .input{width:100%;height:40px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--fg);
+    padding:0 12px;font:inherit;font-size:15px}
+  .input:focus{outline:2px solid var(--focus);outline-offset:1px;border-color:transparent}
+  .help{font-size:12px;color:var(--fg-muted);margin-top:5px}
+  .err{font-size:12px;color:var(--danger);margin-top:5px;font-weight:700}
+  .input.bad{border-color:var(--danger)}
+
+  .alert{display:flex;gap:12px;border-radius:14px;padding:14px;border:1px solid;align-items:flex-start}
+  .alert.warning{background:color-mix(in srgb,var(--warning) 10%,transparent);border-color:color-mix(in srgb,var(--warning) 35%,transparent);color:var(--warning)}
+  .alert.danger{background:color-mix(in srgb,var(--danger) 10%,transparent);border-color:color-mix(in srgb,var(--danger) 35%,transparent);color:var(--danger)}
+  .alert.info{background:color-mix(in srgb,var(--info) 10%,transparent);border-color:color-mix(in srgb,var(--info) 35%,transparent);color:var(--info)}
+  .alert strong{color:var(--fg)}
+
+  /* tray */
+  .tray{width:340px;max-width:100%;background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:var(--elev-4);padding:16px}
+  .trayrow{display:flex;justify-content:space-between;gap:10px;padding:8px;border-radius:10px;font-size:13px}
+  .trayrow:hover{background:var(--surface-muted)}
+
+  .footer{margin-top:64px;padding-top:24px;border-top:1px solid var(--border);color:var(--fg-muted);font-size:13px}
+  .anchor{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;font-weight:600}
+  .anchor a{text-decoration:none}
+  .divider{height:1px;background:var(--border);margin:16px 0}
+  .type-row{border-bottom:1px dashed var(--border);padding:14px 0;display:flex;justify-content:space-between;gap:16px;align-items:baseline;flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<!-- inline icon symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-kanban" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="14" y="4" width="7" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v6M15 3v6M7 9h10v3a5 5 0 0 1-10 0zM12 17v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M4 12h4M12 12h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-crosshair" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" fill="currentColor"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" fill="currentColor"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 13 4 4 10-10" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 9v5M12 17.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="m5.6 5.6 12.8 12.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-7 16-2.5-6.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
+
+<div class="topbar">
+  <div class="inner">
+    <svg width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><path d="M38 21 46 7" fill="none" stroke="#C07430" stroke-width="6.5" stroke-linecap="round"/><circle cx="27" cy="31" r="15.5" fill="var(--bg)" stroke="#9A5418" stroke-width="4"/><path d="M38.5 42.5 51 55" fill="none" stroke="#9A5418" stroke-width="5.5" stroke-linecap="round"/><circle cx="21.5" cy="28" r="4" fill="#2E7D46"/><circle cx="30.5" cy="25.5" r="4" fill="#5B3E8A"/><circle cx="26.5" cy="34.5" r="4" fill="#B87A46"/></svg>
+    <div class="brand"><div>boba<small>Job Find</small></div></div>
+    <div class="spacer"></div>
+    <div class="anchor" style="margin-right:8px">
+      <a href="#palette">Palette</a><a href="#type">Type</a><a href="#components">Components</a>
+    </div>
+    <button class="btn ghost icon-btn" onclick="toggleTheme()" aria-label="Toggle theme"><svg class="svg" id="themeIcon"><use href="#i-moon"/></svg></button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="section" id="top" style="margin-top:24px">
+    <div class="eyebrow">Design system preview</div>
+    <h1 style="font-size:40px;margin:8px 0 6px">Steep your search.<br>Sip the good offers.</h1>
+    <p class="lead">Boba Job Find — a warm, playful, local-first desktop job-search app. Soft rounded shapes,
+    a tea/tapioca palette, and a calm, honest coach against job-search stress. Light + dark, EN + ES.
+    Toggle the theme (top right) to see the semantic layer swap.</p>
+    <div class="grid g3" style="margin-top:20px">
+      <div class="card"><div class="micro muted">Voice</div><p style="margin:6px 0 0">Warm, honest, encouraging coach.<br>“We do the steeping. You pick the pearls.”</p></div>
+      <div class="card"><div class="micro muted">Two axes, always</div><p style="margin:6px 0 0"><b>Fit</b> — can you get it? · <b>Quality</b> — do you want it?<br>Never blended into one opaque number.</p></div>
+      <div class="card"><div class="micro muted">Never color alone</div><p style="margin:6px 0 0">Every Verdict = number + band word + shape glyph. Grayscale-safe.</p></div>
+    </div>
+  </div>
+
+  <!-- PALETTE -->
+  <div class="section" id="palette">
+    <div class="eyebrow">01 · Color</div>
+    <h2 style="font-size:28px">Palette &amp; tokens</h2>
+    <p class="lead">Three layers: primitive ramps → semantic tokens → components. Contrast is verified by
+    <code class="mono">assets/palette_check.py</code> (all pairs pass WCAG AA).</p>
+
+    <h3 style="margin:24px 0 10px">Primitive ramps</h3>
+    <div class="grid" style="gap:14px">
+      <div><div class="micro muted">Caramel · brand</div>
+        <div class="ramp" style="margin-top:6px">
+          <div class="swatch" style="background:#FDF7F1;color:#2B201A">50</div><div class="swatch" style="background:#F7E7D3;color:#2B201A">100</div><div class="swatch" style="background:#EFCFA8;color:#2B201A">200</div><div class="swatch" style="background:#E3B27A;color:#2B201A">300</div><div class="swatch" style="background:#D4904E">400</div><div class="swatch" style="background:#C07430">500</div><div class="swatch" style="background:#9A5418">600</div><div class="swatch" style="background:#7E4312">700</div><div class="swatch" style="background:#5E3210">800</div><div class="swatch" style="background:#3F220C">900</div>
+        </div></div>
+      <div><div class="micro muted">Warm neutrals · cream → espresso</div>
+        <div class="ramp" style="margin-top:6px">
+          <div class="swatch" style="background:#FFFBF5;color:#2B201A">50</div><div class="swatch" style="background:#F7F0E6;color:#2B201A">100</div><div class="swatch" style="background:#F5ECE0;color:#2B201A">150</div><div class="swatch" style="background:#EEE3D5;color:#2B201A">200</div><div class="swatch" style="background:#DDCBB6;color:#2B201A">300</div><div class="swatch" style="background:#C4AE94">400</div><div class="swatch" style="background:#8A7866">500</div><div class="swatch" style="background:#6B594C">600</div><div class="swatch" style="background:#2B201A">800</div><div class="swatch" style="background:#191210">900</div>
+        </div></div>
+      <div><div class="micro muted">Flavor ramps · fill 600 / soft 100</div>
+        <div class="ramp" style="margin-top:6px">
+          <div class="swatch" style="background:#E3F2E7;color:#2B201A">M100</div><div class="swatch" style="background:#2E7D46">Matcha</div><div class="swatch" style="background:#EDF3D6;color:#2B201A">L100</div><div class="swatch" style="background:#5A7A12">Leaf</div><div class="swatch" style="background:#FCEFD2;color:#2B201A">M100</div><div class="swatch" style="background:#9E6203">Mango</div><div class="swatch" style="background:#FBE3D4;color:#2B201A">T100</div><div class="swatch" style="background:#B84E12">Tanger</div><div class="swatch" style="background:#FBE0DC;color:#2B201A">L100</div><div class="swatch" style="background:#A82E24">Lychee</div>
+        </div></div>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Semantic tokens — light vs dark</h3>
+    <div class="grid g2">
+      <div class="card force-light" style="background:var(--bg);color:var(--fg);border-color:var(--border)">
+        <div class="badge b-neutral" style="margin-bottom:12px">☀ Light</div>
+        <div class="tokrow"><span class="tokdot" style="background:var(--bg)"></span><code>--bg · --surface</code><span class="tokdot" style="background:var(--surface)"></span></div>
+        <div class="tokrow"><span class="tokdot" style="background:var(--fg)"></span><code>--fg</code> <span class="muted" style="margin-left:auto">15.4:1</span></div>
+        <div class="tokrow"><span class="tokdot" style="background:var(--fg-muted)"></span><code>--fg-muted</code> <span class="muted" style="margin-left:auto">6.5:1</span></div>
+        <div class="tokrow"><span class="tokdot" style="background:var(--primary)"></span><code>--primary</code> <span class="muted" style="margin-left:auto">white on it 5.8:1</span></div>
+        <div class="tokrow"><span class="tokdot" style="background:var(--accent)"></span><code>--accent</code></div>
+        <div class="tokrow" style="border:none"><span class="tokdot" style="background:var(--success)"></span><span class="tokdot" style="background:var(--warning)"></span><span class="tokdot" style="background:var(--danger)"></span><code>--success / warning / danger</code></div>
+      </div>
+      <div class="card force-dark" style="background:var(--bg);color:var(--fg);border-color:var(--border)">
+        <div class="badge b-neutral" style="margin-bottom:12px">☾ Dark</div>
+        <div class="tokrow" style="border-color:var(--border)"><span class="tokdot" style="background:var(--bg);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--bg · --surface</code><span class="tokdot" style="background:var(--surface);border-color:var(--border)"></span></div>
+        <div class="tokrow" style="border-color:var(--border)"><span class="tokdot" style="background:var(--fg);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--fg</code> <span style="color:var(--fg-muted);margin-left:auto">16.0:1</span></div>
+        <div class="tokrow" style="border-color:var(--border)"><span class="tokdot" style="background:var(--fg-muted);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--fg-muted</code> <span style="color:var(--fg-muted);margin-left:auto">8.3:1</span></div>
+        <div class="tokrow" style="border-color:var(--border)"><span class="tokdot" style="background:var(--primary);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--primary</code> <span style="color:var(--fg-muted);margin-left:auto">dark text on it 8.3:1</span></div>
+        <div class="tokrow" style="border-color:var(--border)"><span class="tokdot" style="background:var(--accent);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--accent</code></div>
+        <div class="tokrow" style="border:none"><span class="tokdot" style="background:var(--success);border-color:var(--border)"></span><span class="tokdot" style="background:var(--warning);border-color:var(--border)"></span><span class="tokdot" style="background:var(--danger);border-color:var(--border)"></span><code style="color:var(--fg-muted)">--success / warning / danger</code></div>
+      </div>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Verdict bands — color + number + word + glyph</h3>
+    <div class="grid g4" id="bands"></div>
+    <p class="help" style="margin-top:10px">Poor adds a diagonal hatch so it stays legible in grayscale. Confidence is a separate dashed meter (not a band): High · Medium · Low · <b>Lead</b>.</p>
+  </div>
+
+  <!-- TYPE -->
+  <div class="section" id="type">
+    <div class="eyebrow">02 · Typography</div>
+    <h2 style="font-size:28px">Type specimens</h2>
+    <p class="lead">Fredoka (display) · Nunito (body/UI) · JetBrains Mono (numbers). All open-license, bundled as woff2.</p>
+    <div class="card" style="margin-top:16px">
+      <div class="type-row"><div style="font-family:Fredoka;font-size:40px;font-weight:600">Let's find work worth applying to.</div><code class="mono muted">Fredoka 600 · 40/44</code></div>
+      <div class="type-row"><div style="font-family:Fredoka;font-size:28px;font-weight:600">Today's Offers</div><code class="mono muted">Fredoka 600 · 28/34</code></div>
+      <div class="type-row"><div style="font-family:Fredoka;font-size:22px;font-weight:600">Score breakdown</div><code class="mono muted">Fredoka 600 · 22/28</code></div>
+      <div class="type-row"><div style="max-width:560px">Senior Backend Engineer at Nimbus. You match dbt, Airflow and Python; Snowflake is the gap worth closing. Encaje 82 · Calidad 71.</div><code class="mono muted">Nunito 400 · 16/24</code></div>
+      <div class="type-row"><div class="muted" style="max-width:560px">Remote (EU) · €65–80k · 2 days ago · Greenhouse · ghost-risk low</div><code class="mono muted">Nunito 400 · 14/20</code></div>
+      <div class="type-row" style="border:none"><div class="mono" style="font-size:40px">82 <span style="font-size:20px;color:var(--fg-muted)">/</span> 71</div><code class="mono muted">JetBrains Mono 600 · tabular</code></div>
+    </div>
+  </div>
+
+  <!-- COMPONENTS -->
+  <div class="section" id="components">
+    <div class="eyebrow">03 · Components</div>
+    <h2 style="font-size:28px">Key components</h2>
+
+    <h3 style="margin:22px 0 10px">Offer card — dual score</h3>
+    <div class="grid g2">
+      <div class="card">
+        <div style="display:flex;gap:14px;align-items:flex-start">
+          <div class="logo-dot mono" style="font-weight:700">N</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-family:Fredoka;font-size:18px;font-weight:600">Senior Backend Engineer</div>
+            <div class="meta">Nimbus · Remote (EU) · €65–80k · 2d</div>
+            <div class="flagrow" style="margin-top:8px"><span class="badge b-warning"><svg class="svg" style="width:14px;height:14px"><use href="#i-alert"/></svg>FLAG seniority</span><span class="chip">Greenhouse</span><span class="chip">Remote</span></div>
+            <div class="why" style="margin-top:10px">✓ <b>dbt, Airflow, Python</b> matched · ✗ Snowflake missing</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div class="scorebox" style="flex-direction:column;gap:4px;text-align:center">
+              <svg class="ring ring-sm" viewBox="0 0 44 44" aria-label="Fit Score 82 out of 100"><circle class="track" cx="22" cy="22" r="18"/><circle class="fill" cx="22" cy="22" r="18" stroke="var(--axis-fit)" stroke-dasharray="113" stroke-dashoffset="20.4"/></svg>
+              <div><div class="mono num" style="font-size:16px">82</div><div class="bandword muted">Fit</div></div>
+            </div>
+            <div class="scorebox" style="flex-direction:column;gap:4px;text-align:center">
+              <svg class="ring ring-sm" viewBox="0 0 44 44" aria-label="Quality Score 71 out of 100"><circle class="track" cx="22" cy="22" r="18"/><circle class="fill" cx="22" cy="22" r="18" stroke="var(--axis-quality)" stroke-dasharray="113" stroke-dashoffset="32.8"/></svg>
+              <div><div class="mono num" style="font-size:16px">71</div><div class="bandword muted">Quality</div></div>
+            </div>
+            <div style="align-self:center;margin-left:4px">
+              <div class="badge b-success" aria-label="Rank Score 78, Verdict Strong"><span class="glyph">●</span>Strong · 78</div>
+              <div class="help" style="margin-top:4px">Verdict · conf. Medium</div>
+            </div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;gap:8px"><button class="btn primary sm">Tailor</button><button class="btn sm">Save</button><button class="btn ghost sm">Dismiss</button></div>
+      </div>
+
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Compact row · Inbox</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="logo-dot mono" style="font-weight:700;background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)">T</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700">Data Engineer</div>
+            <div class="meta">Tapi Tea Co · Remote · $90–110k · 1d</div>
+          </div>
+          <div class="mono" style="font-size:15px"><span style="color:var(--axis-fit)">74</span> <span class="muted">/</span> <span style="color:var(--axis-quality)">84</span></div>
+          <div class="badge b-success"><span class="glyph">◗</span>Good · 78</div>
+        </div>
+        <div class="divider"></div>
+        <div class="micro muted" style="margin-bottom:10px">Low fit — “a reach” (honest, with a path)</div>
+        <div style="display:flex;gap:12px;align-items:center">
+          <span class="badge b-danger"><svg class="svg" style="width:14px;height:14px"><use href="#i-alert"/></svg>Fit 38 · Verdict Weak</span>
+          <div class="muted" style="font-size:13px">Senior role, you're mid — 2 of 5 must-haves missing. <b style="color:var(--fg)">You can still apply, or save it.</b></div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Explanation · gates · confidence</h3>
+    <div class="grid g2">
+      <div class="card">
+        <div class="micro muted">Gates</div>
+        <div style="display:flex;gap:8px;margin:10px 0 14px"><span class="badge b-success"><svg class="svg" style="width:14px;height:14px"><use href="#i-check"/></svg>PASS location</span><span class="badge b-warning"><svg class="svg" style="width:14px;height:14px"><use href="#i-alert"/></svg>FLAG seniority</span></div>
+        <div class="regex">⚠ “Senior role — 5+ years required.” — quoted from posting</div>
+        <div class="divider"></div>
+        <div class="micro muted" style="margin-bottom:10px">Fit</div>
+        <div id="fitRows"></div>
+        <div class="micro muted" style="margin:14px 0 10px">Quality</div>
+        <div id="qualRows"></div>
+        <div class="divider"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px"><span class="muted">Confidence</span><span class="mono" style="letter-spacing:2px;color:var(--warning)">▏▎▍▎▏</span></div>
+      </div>
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Meaning is never color alone</div>
+        <p class="muted" style="margin:0 0 12px">Each Verdict carries five redundant encodings: fill color, numeric Rank Score, band word, shape glyph, and meter fill. Try the grayscale mental test — nothing is lost.</p>
+        <div id="bandRows"></div>
+      </div>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Tracker · kanban + list fallback</h3>
+    <div class="card">
+      <div class="kanban" id="kanban"></div>
+      <p class="help">Drag or <code class="mono">Cmd+←/→</code> to move · moves are undoable. Below 900px: List mode.</p>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Onboarding · wizard steps</h3>
+    <div class="card">
+      <div class="steps" id="steps"></div>
+      <p class="help" style="margin-top:14px">Next is disabled until the step is valid; Back never loses input. &lt;1024px collapses to “Step 3 of 9”.</p>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Connections · tiles (Source Type + Risk Tier + status)</h3>
+    <div class="grid g3" id="tiles"></div>
+
+    <h3 style="margin:28px 0 10px">Tray notification</h3>
+    <div class="grid g2">
+      <div class="tray force-light" style="background:var(--surface);color:var(--fg);border-color:var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <svg width="22" height="22" viewBox="0 0 64 64"><path d="M38 21 46 7" fill="none" stroke="#C07430" stroke-width="6.5" stroke-linecap="round"/><circle cx="27" cy="31" r="15.5" fill="#FFFBF5" stroke="#9A5418" stroke-width="4"/><path d="M38.5 42.5 51 55" fill="none" stroke="#9A5418" stroke-width="5.5" stroke-linecap="round"/><circle cx="21.5" cy="28" r="4" fill="#2E7D46"/><circle cx="30.5" cy="25.5" r="4" fill="#5B3E8A"/><circle cx="26.5" cy="34.5" r="4" fill="#B87A46"/></svg>
+          <b style="font-family:Fredoka">3 Strong, 5 Good today</b><span class="spacer" style="flex:1"></span><span class="muted" style="font-size:12px">now</span>
+        </div>
+        <div class="muted" style="font-size:13px;margin-bottom:10px">We checked 6 Sources. Top: Senior Backend Eng · Nimbus — Fit 82, Quality 71.</div>
+        <div style="display:flex;gap:8px"><button class="btn primary sm">Open</button><button class="btn sm">Run now</button></div>
+      </div>
+      <div class="tray">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="font-family:Fredoka">boba</b><span style="flex:1"></span><svg class="svg muted"><use href="#i-moon"/></svg><svg class="svg muted"><use href="#i-settings"/></svg></div>
+        <div class="meta" style="margin-bottom:8px">Last run 06:12 · 12 new · Auto on · Outbox (2)</div>
+        <div class="trayrow"><span>Senior Backend Eng · Nimbus</span><span class="mono">82/71</span></div>
+        <div class="trayrow"><span>Data Engineer · Tapi Tea Co</span><span class="mono">74/84</span></div>
+        <div class="trayrow"><span>API Engineer · Cirrus</span><span class="mono">88/80</span></div>
+        <div class="divider"></div>
+        <div style="display:flex;gap:8px"><button class="btn primary sm" style="flex:1">Open Boba</button><button class="btn sm">Run now</button><button class="btn sm">Pause</button><button class="btn danger sm" title="Kill Switch">⏻</button></div>
+      </div>
+    </div>
+
+    <h3 style="margin:28px 0 10px">Atoms · buttons, inputs, badges, alerts</h3>
+    <div class="grid g2">
+      <div class="card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn primary">Tailor</button>
+          <button class="btn">Save</button>
+          <button class="btn ghost">Dismiss</button>
+          <button class="btn danger">Delete data</button>
+          <button class="btn primary icon-btn" aria-label="Send"><svg class="svg"><use href="#i-send"/></svg></button>
+        </div>
+        <div class="divider"></div>
+        <div class="field">
+          <label for="d1">Salary floor</label>
+          <input class="input" id="d1" value="€45,000">
+          <div class="help">Offers below your floor are flagged, never silently dropped.</div>
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label for="d2">Agent CLI</label>
+          <input class="input bad" id="d2" value="codx" aria-invalid="true" aria-describedby="d2e">
+          <div class="err" id="d2e">✕ We couldn't find that CLI. Try “codex”, or pick another engine.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="flagrow">
+          <span class="badge b-success">Strong</span><span class="badge b-neutral">Good</span><span class="badge b-warning">Moderate</span><span class="badge b-danger">Poor</span><span class="badge b-info">Lead</span><span class="badge b-accent">Quality</span>
+        </div>
+        <div class="flagrow" style="margin-top:10px"><span class="chip">Greenhouse</span><span class="chip">Remote</span><span class="chip outline">Closing soon</span><span class="chip">EN · ES</span></div>
+        <div class="divider"></div>
+        <div class="alert info"><svg class="svg"><use href="#i-check"/></svg><div><strong>Nothing new today.</strong><div class="muted" style="font-size:13px">That's normal — new roles post all week. We'll keep watch.</div></div></div>
+        <div class="alert warning" style="margin-top:10px"><svg class="svg"><use href="#i-alert"/></svg><div><strong>A stretch — and here's why.</strong><div class="muted" style="font-size:13px">Fit 38. Senior role, you're mid. 2 of 5 must-haves missing. You can still apply.</div></div></div>
+        <div class="alert danger" style="margin-top:10px"><svg class="svg"><use href="#i-ban"/></svg><div><strong>VETO — work eligibility.</strong><div class="muted" style="font-size:13px">“Must have EU work permit.” Shown, quoted, overridable.</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section" id="surfaces">
+    <div class="eyebrow">04 · Surfaces</div>
+    <h2 style="font-size:28px">Profile, proposals, safety</h2>
+    <div class="grid g2" style="margin-top:16px">
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Profile · EN/ES · versions</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <b style="font-family:Fredoka">Profile</b><span style="flex:1"></span>
+          <span class="chip outline">EN</span><span class="chip">ES</span><span class="chip">v7</span>
+        </div>
+        <div class="regex" style="margin-bottom:8px">Senior Backend Eng · Nimbus · 2022–now<br>• Led the dbt/Airflow migration <span class="muted">— evidence: role “Nimbus” ✓</span></div>
+        <div class="help">⚠ ES variant missing here — <a href="#surfaces">Draft ES</a>. Edits create a new version.</div>
+      </div>
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Needs you · Status Proposal · Outbox</div>
+        <div style="border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:8px">
+          <div style="font-size:13px"><b>Update on Nimbus:</b> “We'd like to schedule a call…”</div>
+          <div class="muted" style="font-size:12px;margin:4px 0 8px">Applied → Interviewing · confidence High</div>
+          <div style="display:flex;gap:8px"><button class="btn primary sm">Approve</button><button class="btn ghost sm">Dismiss</button></div>
+        </div>
+        <div class="trayrow" style="background:var(--surface-muted)"><span>Data Engineer · Tapi Tea Co</span><span class="mono muted">sends in 24m</span></div>
+        <div style="display:flex;gap:8px"><button class="btn sm">Edit</button><button class="btn ghost sm">Cancel</button></div>
+      </div>
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Red-flag / fraud badges — text + icon, never color alone</div>
+        <div class="flagrow"><span class="badge b-warning"><svg class="svg" style="width:14px;height:14px"><use href="#i-alert"/></svg>Likely ghost · 120d</span><span class="badge b-danger"><svg class="svg" style="width:14px;height:14px"><use href="#i-ban"/></svg>Recruitment-fraud risk · Auto blocked</span></div>
+        <div class="divider"></div>
+        <div class="micro muted" style="margin-bottom:8px">VETO — shown with quote + override</div>
+        <div class="regex">⊘ “Must be authorized to work in the US.” <button class="btn sm" style="margin-left:6px">Override</button></div>
+      </div>
+      <div class="card">
+        <div class="micro muted" style="margin-bottom:10px">Auto Rule · dry run · Limited mode</div>
+        <div class="regex" style="margin-bottom:8px">Email Apply × remote · Rank≥80 · Fit≥80 · conf≥Med · 5/day · 1/co/30d</div>
+        <div style="font-size:13px;color:var(--fg-muted);margin-bottom:8px">Dry run (first 3):<br>• Data Eng · Tapi Tea — would send · Rank 84<br>• API Eng · Cirrus — would SKIP · FLAG seniority</div>
+        <div class="alert info"><svg class="svg"><use href="#i-settings"/></svg><div><strong>Limited mode.</strong><div class="muted" style="font-size:13px">No Agent CLI — AI-only actions disabled. Search, scoring, Tracker still work. <a href="#surfaces">Connect an agent</a></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <b>Boba Job Find</b> — design system preview · docs/design/preview.html · tokens verified by
+    assets/palette_check.py (WCAG AA) · icons: Lucide (ISC) · fonts: Fredoka, Nunito, JetBrains Mono (open license).
+    <div class="divider"></div>
+    <div class="anchor"><a href="./DESIGN.md">DESIGN.md</a><a href="./brand.md">brand.md</a><a href="./voice-and-tone.md">voice-and-tone.md</a><a href="./EXPERIENCE.md">EXPERIENCE.md</a></div>
+  </div>
+</div>
+
+<script>
+  // theme
+  function toggleTheme(){
+    var d=document.documentElement.classList.toggle('dark');
+    document.querySelector('#themeIcon use').setAttribute('href', d ? '#i-sun' : '#i-moon');
+  }
+  if(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches){ toggleTheme(); }
+
+  // score bands
+  var bands=[
+    ['Strong','75–100','#2E7D46','#FFFFFF','●'],
+    ['Good','60–74','#5A7A12','#FFFFFF','◗'],
+    ['Moderate','45–59','#9E6203','#FFFFFF','◐'],
+    ['Weak','30–44','#B84E12','#FFFFFF','◔'],
+    ['Poor','0–29','#A82E24','#FFFFFF','○']
+  ];
+  document.getElementById('bands').innerHTML=bands.map(function(b){
+    return '<div class="card" style="padding:14px"><div class="micro muted">'+b[1]+'</div>'+
+      '<div style="display:flex;align-items:center;gap:10px;margin-top:8px">'+
+      '<span style="width:34px;height:34px;border-radius:12px;background:'+b[2]+';color:'+b[3]+';display:grid;place-items:center;font-size:17px">'+b[4]+'</span>'+
+      '<b style="font-family:Fredoka;font-size:17px">'+b[0]+'</b></div></div>';
+  }).join('');
+
+  // breakdown rows
+  function rows(el,data){
+    document.getElementById(el).innerHTML=data.map(function(r){
+      return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px">'+
+        '<span style="width:84px;color:var(--fg-muted)">'+r[0]+'</span>'+
+        '<span class="bar" style="flex:1;height:6px"><i style="width:'+r[1]+'%;background:'+r[2]+'"></i></span>'+
+        '<span class="mono" style="width:26px;text-align:right">'+r[1]+'</span>'+
+        '<span class="'+(r[3]?'':'subtle')+'" style="width:12px;text-align:center">'+(r[3]?'●':'○')+'</span></div>';
+    }).join('');
+  }
+  var g={strong:'#2E7D46',good:'#5A7A12',mod:'#9E6203',weak:'#B84E12',poor:'#A82E24'};
+  rows('fitRows',[['Skills 35%',88,g.strong,1],['Experience 25%',58,g.mod,1],['Domain 15%',82,g.strong,1],['Location 10%',95,g.strong,1],['Education 10%',100,g.strong,1],['Language 5%',100,g.strong,1]]);
+  rows('qualRows',[['Comp 30%',92,g.strong,1],['Company 25%',35,g.weak,0],['Terms 15%',78,g.strong,1],['Legitimacy 20%',85,g.strong,1],['Alignment 10%',80,g.strong,1]]);
+  document.getElementById('bandRows').innerHTML=bands.map(function(b){
+    return '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px">'+
+      '<span style="width:34px;height:24px;border-radius:8px;background:'+b[2]+';color:'+b[3]+';display:grid;place-items:center">'+b[4]+'</span>'+
+      '<b style="width:70px">'+b[0]+'</b><span class="mono muted">'+b[1]+'</span>'+
+      '<span class="bar" style="flex:1;height:6px"><i style="width:'+b[1].split('–')[0]+'%;background:'+b[2]+'"></i></span></div>';
+  }).join('');
+
+  // kanban — PRD Stages
+  var cols=[['Saved',5],['Preparing',2],['Applied',8],['Interviewing',2],['Offer',1],['Hired',1],['Rejected',3],['No Response',1]];
+  document.getElementById('kanban').innerHTML=cols.map(function(c,i){
+    var cards='';
+    if(i===0){cards='<div class="kcard"><b>Backend Eng</b><div class="muted" style="font-size:12px">Nimbus</div><div style="margin-top:6px"><span class="badge b-success">●78</span></div></div><div class="kcard muted">···</div>';}
+    else if(i===1){cards='<div class="kcard"><b>Data Eng</b><div style="margin-top:6px"><span class="badge b-warning">◗74</span></div></div>';}
+    else if(i===2){cards='<div class="kcard"><b>API Eng</b><div style="margin-top:6px"><span class="badge b-success">●88</span></div></div><div class="kcard muted">···</div>';}
+    else if(i===3){cards='<div class="kcard"><b>ML Eng</b><div style="margin-top:6px"><span class="badge b-success">●91</span></div></div>';}
+    else if(i===4){cards='<div class="kcard"><b>Sr Frontend</b><div style="margin-top:6px"><span class="badge b-success">●95</span></div></div>';}
+    else if(i===5){cards='<div class="kcard"><b>Sr FE</b><div style="margin-top:6px"><span class="badge b-success">●95</span></div></div>';}
+    else if(i===6){cards='<div class="kcard subtle">SRE <span class="badge b-danger">○20</span></div>';}
+    else{cards='<div class="kcard subtle">…</div>';}
+    return '<div class="kcol"><div class="khead"><span>'+c[0]+'</span><span>'+c[1]+'</span></div>'+cards+'</div>';
+  }).join('');
+
+  // wizard — FR-1..FR-10 order (9 steps)
+  var st=[['Language & theme','done'],['Agent CLI','done'],['Profile import','cur'],['Profile gaps',''],['Preferences',''],['Sources',''],['Email',''],['Apply & schedule',''],['First run','']];
+  document.getElementById('steps').innerHTML=st.map(function(s,i){
+    return (i?'<span class="stepline"></span>':'')+'<div class="step '+s[1]+'"><span class="dot">'+(s[1]==='done'?'✓':(i+1))+'</span>'+s[0]+'</div>';
+  }).join('')+'<span style="margin-left:auto" class="muted">Step 3 of 9</span>';
+
+  // connections — Source Type + Risk Tier
+  var tiles=[
+    ['Greenhouse','ATS Board · Safe','on','Connected · 06:12','Manage',''],
+    ['Remotive','Feed · Safe','warn','Failing 2×','Retry',''],
+    ['LinkedIn','Session Board · Prohibited','warn','Opted out','Enable ⚠','ToS risk — explicit opt-in'],
+    ['Gmail','send-only (read via IMAP/BYO)','on','Connected · send-only','Manage',''],
+    ['Outlook / Graph','OAuth · read+send','on','Connected','Manage',''],
+    ['IMAP / SMTP','IMAP/SMTP','off','Not set up','Set up',''],
+    ['Custom RSS / URL','Custom · Safe','on','2 Sources','Manage','']
+  ];
+  document.getElementById('tiles').innerHTML=tiles.map(function(t){
+    return '<div class="tile"><div class="top"><span class="logo-dot">'+
+      '<svg class="svg"><use href="#i-plug"/></svg></span><div><b>'+t[0]+'</b><div class="muted" style="font-size:12px">'+t[1]+'</div></div></div>'+
+      '<div class="status '+t[2]+'"><span class="dot"></span>'+t[3]+'</div>'+
+      (t[5]?'<div class="badge b-warning" style="margin-top:8px"><svg class="svg" style="width:14px;height:14px"><use href="#i-alert"/></svg>'+t[5]+'</div>':'')+
+      '<div class="divider"></div><button class="btn sm">'+t[4]+'</button></div>';
+  }).join('');
+</script>
+</body>
+</html>
