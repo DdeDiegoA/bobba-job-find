@@ -1,0 +1,126 @@
+# CI — quality gate for Boba Job Find (S1.8, NFR-6/NFR-22).
+#
+# Runs on every PR and on pushes to main. No release, no signing, no secrets:
+# the tag-driven release workflow is S10.5 (AD-22). This workflow never talks to
+# a job board or an LLM; all fixtures are recorded (AD-16 / SPINE consistency).
+#
+# Every third-party action is pinned to a full commit SHA (enforced by
+# scripts/ci/check-workflow-policy.mjs, run in the `hygiene` job).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  hygiene:
+    name: Repo hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Actions pinned by SHA, no job-board/LLM endpoints
+        run: node scripts/ci/check-workflow-policy.mjs
+      - name: stories.yaml fresh, deps acyclic, MVP FRs covered
+        run: python3 scripts/gen_stories.py --check
+
+  web:
+    name: Web (Biome, tsc, Vitest, i18n, bindings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.5.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install (frozen lockfile, dependency scripts disabled)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Biome (lint + format check)
+        run: pnpm lint
+      - name: TypeScript
+        run: pnpm typecheck
+      - name: Vitest
+        run: pnpm test
+      - name: i18n catalogs match in EN and ES
+        run: node scripts/ci/check-i18n.mjs
+      - name: Bindings are fresh
+        # scripts/gen-bindings.mjs is owned by S1.3 (build convention 4/AD-3).
+        run: |
+          node scripts/gen-bindings.mjs
+          git diff --exit-code -- src/lib/ipc/bindings.ts
+
+  rust:
+    name: Rust (fmt, clippy, test, deny)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace --locked
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  build:
+    name: Tauri build (${{ matrix.os }})
+    needs: [hygiene, web, rust]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.5.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            pkg-config \
+            libssl-dev
+      - name: Install (frozen lockfile, dependency scripts disabled)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Tauri build, no bundle
+        run: pnpm tauri build --no-bundle
