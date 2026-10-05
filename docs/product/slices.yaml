@@ -18,7 +18,7 @@
   title: Repo scaffold, crate workspace and module skeleton
   covers_extra: [AD-3, AD-21]
   deps: []
-  files: [package.json, pnpm-lock.yaml, Cargo.toml, Cargo.lock, rust-toolchain.toml, tsconfig.json, vite.config.ts, index.html, .gitattributes, .gitignore, deny.toml, src/**, src-tauri/**, locales/**, agent-pack/**, templates/**, tools/**, e2e/**]
+  files: [package.json, pnpm-lock.yaml, Cargo.toml, Cargo.lock, rust-toolchain.toml, tsconfig.json, vite.config.ts, index.html, README.md, pnpm-workspace.yaml, biome.json, .gitattributes, .gitignore, deny.toml, src/**, src-tauri/**, locales/**, agent-pack/**, templates/**, tools/**, e2e/**]
   ac_extra:
     - "Given the Structural Seed in ARCHITECTURE-SPINE.md, when the scaffold lands, then every crate (boba-domain, boba-app, boba-store, boba-sources, boba-agent, boba-mcp-proto, boba-mcp, boba-docs, boba-mail, boba-browser) exists under src-tauri/crates and every module path listed in docs/product/backlog.md §Module map exists as a compiling stub, so later slices add code only inside the folders they own (AD-16)."
     - "Given the Stack table, when I inspect Cargo.toml [workspace.dependencies] and package.json, then every dependency the MVP needs is pinned there once (including optional fastembed behind a cargo feature), so no later slice edits a lockfile unless it lists it in files."

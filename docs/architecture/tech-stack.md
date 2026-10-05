@@ -26,6 +26,7 @@
 | tauri-plugin-opener | 2.7 | Open apply links in the default browser |
 | tauri-plugin-window-state | 2.5 | Remember window geometry |
 | tauri-plugin-log | 2.10 | Local rolling logs (redacted) |
+| tauri-plugin-global-shortcut | 2.4 | Global Kill Switch shortcut (architecture §10.2; story 1.1 AC8) |
 | ~~tauri-plugin-deep-link~~ | — | **Not used.** OAuth is loopback-only (scheme squatting risk; planning audit P1-11). |
 | ~~tauri-plugin-shell~~ | — | **Not used.** The core spawns processes itself (ProcessSupervisor). No shell access from the webview. |
 | ~~tauri-plugin-sql / store / fs~~ | — | **Not used.** All persistence goes through the core (AD-2). |

@@ -108,7 +108,7 @@ This document breaks `PRD.md` (FR-1 to FR-120, NFR-1 to NFR-22) into buildable e
 Goal: a signed-off substrate that every later story builds on. The app opens, stores data encrypted, speaks EN and ES, and lives in the tray.
 
 ### Story 1.1: Repo scaffold and crate workspace
-**Phase:** MVP · **Depends on:** — · **Files:** `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `tsconfig.json`, `vite.config.ts`, `index.html`, `.gitattributes`, `.gitignore`, `deny.toml`, `src/**`, `src-tauri/**`, `locales/**`, `agent-pack/**`, `templates/**`, `tools/**`, `e2e/**` · **Covers:** AD-1, AD-16, spine Structural Seed
+**Phase:** MVP · **Depends on:** — · **Files:** `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `tsconfig.json`, `vite.config.ts`, `index.html`, `README.md`, `pnpm-workspace.yaml`, `biome.json`, `.gitattributes`, `.gitignore`, `deny.toml`, `src/**`, `src-tauri/**`, `locales/**`, `agent-pack/**`, `templates/**`, `tools/**`, `e2e/**` · **Covers:** AD-1, AD-16, spine Structural Seed
 
 As a developer, I want the Tauri v2 workspace with all spine crates stubbed, so that features land in the right module from day one.
 

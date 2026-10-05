@@ -232,12 +232,22 @@ def render_backlog_sections(waves, slices, stories, mig_no, tail):
     for i, w in enumerate(waves, 1):
         for sid in w:
             files_sec.append(f"- **{sid}** (wave {i}): " + ", ".join(f"`{f}`" for f in expanded(by_id[sid], mig_no)))
-    owned = sorted({f for s in slices if s["id"] != "S1.1" for f in expanded(s, mig_no)})
+    scaffold = raw_files(next(s for s in slices if s["id"] == "S1.1"))
+    owned = sorted({f for s in slices if s["id"] != "S1.1" for f in expanded(s, mig_no)
+                    if any(overlap(f, g) for g in scaffold) and not f.startswith(MIG)})
+    later = {}
+    for s in slices:
+        for f in expanded(s, mig_no):
+            if s["id"] != "S1.1" and not any(overlap(f, g) for g in scaffold):
+                later.setdefault(s["id"], []).append(f)
     groups = {}
     for f in owned:
         key = "/".join(f.split("/")[:3]) if f.startswith(C) else "/".join(f.split("/")[:2]) if "/" in f else f
         groups.setdefault(key, []).append(f)
     modmap = [f"- `{k}`: " + ", ".join(f"`{f[len(k) + 1:] if f.startswith(k + '/') else f}`" for f in v) for k, v in sorted(groups.items())]
+    modmap += ["", "**Not stubbed by S1.1** (outside its files; each is created by its owning slice):", ""]
+    modmap += [f"- **{sid}**: " + ", ".join(f"`{f}`" for f in fs) for sid, fs in later.items()]
+    modmap += ["- **every slice with a migration**: its own `" + MIG + "NNNN_name.sql` (see Slice files)"]
     return {"summary": "\n".join(summary), "waves": "\n".join(out), "files": "\n".join(files_sec), "modmap": "\n".join(modmap)}
 
 

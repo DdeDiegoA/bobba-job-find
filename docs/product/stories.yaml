@@ -6,7 +6,7 @@ stories:
     title: "Repo scaffold and crate workspace"
     phase: "MVP"
     depends_on: []
-    files: ["package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "tsconfig.json", "vite.config.ts", "index.html", ".gitattributes", ".gitignore", "deny.toml", "src/**", "src-tauri/**", "locales/**", "agent-pack/**", "templates/**", "tools/**", "e2e/**"]
+    files: ["package.json", "pnpm-lock.yaml", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "tsconfig.json", "vite.config.ts", "index.html", "README.md", "pnpm-workspace.yaml", "biome.json", ".gitattributes", ".gitignore", "deny.toml", "src/**", "src-tauri/**", "locales/**", "agent-pack/**", "templates/**", "tools/**", "e2e/**"]
     covers: ["AD-1", "AD-16"]
     ac:
       - "Given a fresh clone When I run the documented dev command Then an empty Boba window opens on macOS, Windows and Linux."

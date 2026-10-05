@@ -161,7 +161,7 @@ These touch auth, money, DB or security. Per the team approval policy, the orque
 ## Slice files (exact ownership)
 
 <!-- gen:files:begin -->
-- **S1.1** (wave 1): `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `tsconfig.json`, `vite.config.ts`, `index.html`, `.gitattributes`, `.gitignore`, `deny.toml`, `src/**`, `src-tauri/**`, `locales/**`, `agent-pack/**`, `templates/**`, `tools/**`, `e2e/**`
+- **S1.1** (wave 1): `package.json`, `pnpm-lock.yaml`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `tsconfig.json`, `vite.config.ts`, `index.html`, `README.md`, `pnpm-workspace.yaml`, `biome.json`, `.gitattributes`, `.gitignore`, `deny.toml`, `src/**`, `src-tauri/**`, `locales/**`, `agent-pack/**`, `templates/**`, `tools/**`, `e2e/**`
 - **S1.2a** (wave 2): `src-tauri/crates/boba-store/src/db/**`, `src-tauri/crates/boba-store/src/keys/**`, `src-tauri/crates/boba-store/src/migrate/**`, `src-tauri/crates/boba-store/tests/db.rs`, `src-tauri/crates/boba-store/migrations/0001_init.sql`
 - **S1.3** (wave 2): `src-tauri/src/ipc/**`, `src-tauri/src/events/**`, `src-tauri/crates/boba-app/src/error/**`, `src/lib/ipc/**`, `scripts/gen-bindings.mjs`
 - **S1.8** (wave 2): `.github/workflows/ci.yml`, `scripts/ci/**`
@@ -241,22 +241,15 @@ These touch auth, money, DB or security. Per the team approval policy, the orque
 
 ## Module map
 
-Every path below exists as a stub after S1.1 (convention 1). They are grouped by crate or top folder.
+Every path in the first list exists as a compiling stub after S1.1 (convention 1), grouped by crate or top folder. Paths outside S1.1's `files` (scripts, workflows, docs, migrations) are listed after it with the slice that creates them.
 
 <!-- gen:modmap:begin -->
-- `.github/workflows`: `ci.yml`, `release.yml`
 - `agent-pack/skills`: `answer_questions/**`, `classify_emails/**`, `extract_postings/**`, `narrate_scores/**`, `profile_gaps/**`, `profile_import/**`, `review_application/**`, `tailor_application/**`, `translate_profile/**`
 - `agent-pack/system.md`: `agent-pack/system.md`
-- `docs/install`: `**`
-- `docs/qa`: `accessibility.md`, `macos-upgrade-test.md`, `platforms.md`
 - `e2e/a11y`: `**`
 - `e2e/onboarding`: `**`
 - `locales/en`: `ai_engine.json`, `apply_bar.json`, `applying.json`, `audit_stats.json`, `backup.json`, `common.json`, `connections_email.json`, `connections_sources.json`, `export.json`, `gated.json`, `inbox.json`, `inbox_actions.json`, `kill_switch.json`, `manual_add.json`, `network.json`, `notifications.json`, `nudges.json`, `offer.json`, `onboarding.json`, `onboarding_cv.json`, `onboarding_engine.json`, `onboarding_finish.json`, `onboarding_gaps.json`, `outbox.json`, `palette.json`, `preferences.json`, `profile.json`, `run_report.json`, `session_auto.json`, `session_optin.json`, `settings_scoring.json`, `shell.json`, `status_proposals.json`, `studio.json`, `studio_coverage.json`, `studio_trace.json`, `today.json`, `tracker.json`, `tray.json`, `unlock.json`
 - `locales/es`: `ai_engine.json`, `apply_bar.json`, `applying.json`, `audit_stats.json`, `backup.json`, `common.json`, `connections_email.json`, `connections_sources.json`, `export.json`, `gated.json`, `inbox.json`, `inbox_actions.json`, `kill_switch.json`, `manual_add.json`, `network.json`, `notifications.json`, `nudges.json`, `offer.json`, `onboarding.json`, `onboarding_cv.json`, `onboarding_engine.json`, `onboarding_finish.json`, `onboarding_gaps.json`, `outbox.json`, `palette.json`, `preferences.json`, `profile.json`, `run_report.json`, `session_auto.json`, `session_optin.json`, `settings_scoring.json`, `shell.json`, `status_proposals.json`, `studio.json`, `studio_coverage.json`, `studio_trace.json`, `today.json`, `tracker.json`, `tray.json`, `unlock.json`
-- `scripts/check-i18n.mjs`: `scripts/check-i18n.mjs`
-- `scripts/ci`: `**`
-- `scripts/gen-bindings.mjs`: `scripts/gen-bindings.mjs`
-- `scripts/release`: `**`
 - `src-tauri/crates/boba-agent`: `src/budget/**`, `src/detect/**`, `src/drivers/**`, `src/lockdown/**`, `src/mcp/**`, `src/pack/**`, `src/runtime/**`, `src/supervisor/**`, `src/sweep/**`, `src/tasks/**`
 - `src-tauri/crates/boba-app`: `src/answers/**`, `src/applications/**`, `src/apply/ats_form/**`, `src/apply/email/**`, `src/apply/engine/**`, `src/apply/kill_switch/**`, `src/apply/manual/**`, `src/apply/outbox/**`, `src/apply/rules/**`, `src/apply/session/**`, `src/capabilities/**`, `src/daily_search/**`, `src/digest/**`, `src/embeddings/**`, `src/error/**`, `src/fitting/**`, `src/i18n/**`, `src/ingest/dedup/**`, `src/ingest/lifecycle/**`, `src/ingest/manual/**`, `src/ingest/normalize/**`, `src/jobs/**`, `src/narration/**`, `src/network_log/**`, `src/posting_features/**`, `src/profile/**`, `src/profile_gaps/**`, `src/profile_import/**`, `src/retention/**`, `src/review/**`, `src/scoring/**`, `src/sources/**`, `src/stats/**`, `src/status_proposals/**`, `src/system/**`, `src/tailoring/**`, `src/triage/**`
 - `src-tauri/crates/boba-browser`: `src/driver/**`, `src/forms/**`, `src/session/**`, `src/session_forms/**`
@@ -266,7 +259,7 @@ Every path below exists as a stub after S1.1 (convention 1). They are grouped by
 - `src-tauri/crates/boba-mcp`: `**`
 - `src-tauri/crates/boba-mcp-proto`: `**`
 - `src-tauri/crates/boba-sources`: `src/aggregators/**`, `src/ats/**`, `src/feeds/**`, `src/http/**`, `src/registry/**`, `src/rss/**`, `src/sdk/**`, `src/session/indeed/**`, `src/session/linkedin/**`, `src/session/sdk/**`, `tests/fixtures/ats/**`, `tests/fixtures/feeds/**`, `tests/fixtures/session/**`
-- `src-tauri/crates/boba-store`: `migrations/0001_init.sql`, `migrations/0002_cli_install.sql`, `migrations/0003_documents.sql`, `migrations/0004_sources.sql`, `migrations/0005_agent_runs.sql`, `migrations/0006_system.sql`, `migrations/0007_postings.sql`, `migrations/0008_profile.sql`, `migrations/0009_email_accounts.sql`, `migrations/0010_applications.sql`, `migrations/0011_posting_lifecycle.sql`, `migrations/0012_posting_features.sql`, `migrations/0013_answer_bank.sql`, `migrations/0014_scoring.sql`, `migrations/0015_jobs.sql`, `migrations/0016_narration.sql`, `migrations/0017_apply_attempts.sql`, `migrations/0018_auto_rules.sql`, `migrations/0019_email_messages.sql`, `migrations/0020_status_proposals.sql`, `src/backup/**`, `src/db/**`, `src/export/**`, `src/keys/**`, `src/migrate/**`, `src/repos/agent_run.rs`, `src/repos/applications.rs`, `src/repos/audit.rs`, `src/repos/cli_install.rs`, `src/repos/documents.rs`, `src/repos/email.rs`, `src/repos/jobs.rs`, `src/repos/outbox.rs`, `src/repos/postings.rs`, `src/repos/profile.rs`, `src/repos/scoring.rs`, `src/repos/settings.rs`, `src/repos/sources.rs`, `src/reset/**`, `src/unlock/**`, `tests/db.rs`
+- `src-tauri/crates/boba-store`: `src/backup/**`, `src/db/**`, `src/export/**`, `src/keys/**`, `src/migrate/**`, `src/repos/agent_run.rs`, `src/repos/applications.rs`, `src/repos/audit.rs`, `src/repos/cli_install.rs`, `src/repos/documents.rs`, `src/repos/email.rs`, `src/repos/jobs.rs`, `src/repos/outbox.rs`, `src/repos/postings.rs`, `src/repos/profile.rs`, `src/repos/scoring.rs`, `src/repos/settings.rs`, `src/repos/sources.rs`, `src/reset/**`, `src/unlock/**`, `tests/db.rs`
 - `src-tauri/src`: `autostart/**`, `commands/agent.rs`, `commands/email.rs`, `commands/ingest.rs`, `commands/offers.rs`, `commands/profile.rs`, `commands/sources.rs`, `commands/studio.rs`, `commands/tracker.rs`, `commands/unlock.rs`, `events/**`, `ipc/**`, `lifecycle/**`, `notifications/**`, `scheduler/**`, `shortcuts/**`, `tray/kill_switch.rs`, `tray/menu.rs`, `tray/mod.rs`, `tray/run_controls.rs`
 - `src-tauri/tauri.conf.json`: `src-tauri/tauri.conf.json`
 - `src/app`: `**`, `header/kill-switch/**`, `palette/**`
@@ -278,6 +271,16 @@ Every path below exists as a stub after S1.1 (convention 1). They are grouped by
 - `templates/cv`: `**`
 - `templates/fonts`: `**`
 - `tools/fake-cli`: `**`
+
+**Not stubbed by S1.1** (outside its files; each is created by its owning slice):
+
+- **S1.2b**: `docs/qa/macos-upgrade-test.md`
+- **S1.3**: `scripts/gen-bindings.mjs`
+- **S1.4**: `scripts/check-i18n.mjs`
+- **S1.8**: `.github/workflows/ci.yml`, `scripts/ci/**`
+- **S10.5**: `.github/workflows/release.yml`, `scripts/release/**`, `docs/install/**`
+- **S10.6**: `docs/qa/accessibility.md`, `docs/qa/platforms.md`
+- **every slice with a migration**: its own `src-tauri/crates/boba-store/migrations/NNNN_name.sql` (see Slice files)
 <!-- gen:modmap:end -->
 
 ## Icebox (v1.1 and later; not in any wave)

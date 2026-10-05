@@ -129,7 +129,7 @@ graph LR
 - **ProcessSupervisor.** Spawns children with `process-wrap`: a process group on Unix and a Job Object on Windows, with kill-on-drop. It enforces the wall-clock timeout, captures stdout and stderr line by line, and turns cancellation into kill-tree. Children: agent CLIs, the user's Chrome for CDP, and (v1.1) external-process adapters.
 - **Local IPC server.** An `interprocess` local socket (Unix domain socket under app data, mode 0600; a Windows named pipe with an owner-only DACL). It serves MCP tool calls proxied by `boba-mcp`, after authenticating the per-run token.
 - **Window.** `tauri.conf.json` sets `minWidth: 960, minHeight: 640` (DESIGN.md floor). Design tokens come from DESIGN.md §14 into `src/styles/tokens.css`. Fonts are bundled woff2 via @fontsource.
-- **Plugins used:** single-instance, notification, autostart, updater, process, dialog, opener, window-state, log. No deep-link plugin: OAuth is loopback-only (§11). The **shell plugin is not exposed to the UI.** Tauri capabilities grant the webview only `core:default`, our own commands and the dialog/opener/notification/updater permissions.
+- **Plugins used:** single-instance, notification, autostart, updater, process, dialog, opener, window-state, log, global-shortcut (kill switch). No deep-link plugin: OAuth is loopback-only (§11). The **shell plugin is not exposed to the UI.** Tauri capabilities grant the webview only `core:default`, our own commands and the dialog/opener/notification/updater permissions.
 
 ### 4.2 `boba-domain` (pure)
 
