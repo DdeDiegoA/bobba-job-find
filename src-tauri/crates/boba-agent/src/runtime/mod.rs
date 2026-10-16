@@ -1415,6 +1415,65 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// CH8: `server_tool_use` is a tool call too, so a CLI that opens cleanly and
+    /// then reaches for a native tool *through that block type* still aborts an
+    /// untrusted run — the block must not be a way around the gate.
+    #[test]
+    fn a_server_tool_use_after_a_clean_init_aborts_an_untrusted_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let lines = [
+            r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"s1","name":"WebSearch","input":{}}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"done","usage":{}}"#,
+        ]
+        .join("\n");
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "replay".to_string()),
+                        ("BOBA_FAKE_LINES".to_string(), lines),
+                    ],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            !events.iter().any(
+                |event| matches!(event, AgentEvent::ToolCall { name, .. } if name == "WebSearch")
+            ),
+            "the native tool call was emitted as the agent's own work: {events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
     /// A run that reads third-party content must not continue when the CLI
     /// reports a native tool: the tool set is the whole basis of ADR-010's
     /// envelope, so the run fails visibly instead.

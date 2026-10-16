@@ -337,22 +337,39 @@ fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
     // catalog's schema before anything stores them. An invalid one goes back to
     // the agent; once the retry budget is spent the run is marked failed and
     // stops answering, so the task fails visibly instead of looping (AC2).
+    //
+    // The refusal budget and the dispatch share one lock (CH8): the check, the
+    // count and `handler.call` are a single critical section, so a refusal on
+    // one connection can never land between another connection's schema check
+    // and its write. Without that, a write would reach the handler in the
+    // window after the core had already refused the run's output.
     if spec.kind.is_write() {
         let mut attempts = state
             .outputs
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Re-checked under the lock: the early check above may be stale by now.
+        if state.output_failed.load(Ordering::SeqCst) {
+            return wire::error(id, wire::CODE_UNAUTHORIZED, "the run is no longer active");
+        }
         if let Err(invalid) = check_output(&state.task, name, &args) {
-            let verdict = attempts.refused();
-            drop(attempts);
-            if verdict == OutputVerdict::Fail {
+            if attempts.refused() == OutputVerdict::Fail {
                 state.output_failed.store(true, Ordering::SeqCst);
             }
             return wire::error(id, wire::CODE_INVALID_PARAMS, &invalid.to_string());
         }
+        let answer = serve(state, spec, id, name, &args);
+        drop(attempts);
+        return answer;
     }
 
-    match state.handler.call(&state.task, name, &args) {
+    serve(state, spec, id, name, &args)
+}
+
+/// Hand one allowed call to the handler and shape its answer, wrapping untrusted
+/// results in the envelope (AD-7).
+fn serve(state: &RunState, spec: &tool::ToolSpec, id: Value, name: &str, args: &Value) -> Value {
+    match state.handler.call(&state.task, name, args) {
         Ok(value) => {
             let payload = if spec.untrusted {
                 wire::envelope(value)
@@ -822,6 +839,115 @@ mod tests {
         let mut second = BufReader::new(stream);
         let mut line = String::new();
         assert_eq!(second.read_line(&mut line).expect("read"), 0);
+    }
+
+    /// A handler that holds its call open until the test releases it, so a
+    /// second connection's refusals can be attempted while a write is in flight.
+    #[derive(Default)]
+    struct BlockingHandler {
+        entered: Mutex<bool>,
+        entered_cv: std::sync::Condvar,
+        release: Mutex<bool>,
+        release_cv: std::sync::Condvar,
+        seen: Mutex<Vec<String>>,
+    }
+
+    impl BlockingHandler {
+        fn wait_until_entered(&self, timeout: Duration) -> bool {
+            let entered = self.entered.lock().unwrap();
+            let (entered, _) = self
+                .entered_cv
+                .wait_timeout_while(entered, timeout, |entered| !*entered)
+                .unwrap();
+            *entered
+        }
+
+        fn release(&self) {
+            *self.release.lock().unwrap() = true;
+            self.release_cv.notify_all();
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl ToolHandler for BlockingHandler {
+        fn call(&self, _task: &str, tool: &str, _args: &Value) -> Result<Value, String> {
+            *self.entered.lock().unwrap() = true;
+            self.entered_cv.notify_all();
+            let mut release = self.release.lock().unwrap();
+            while !*release {
+                release = self.release_cv.wait(release).unwrap();
+            }
+            self.seen.lock().unwrap().push(tool.to_string());
+            Ok(json!({"ok": true}))
+        }
+    }
+
+    /// CH8, the race: a second connection's refusal must not be able to fail the
+    /// run while another connection's write is already past its schema check.
+    /// The refusal budget and the dispatch are one critical section, so the
+    /// write is served before the run can fail, never after.
+    #[test]
+    fn a_write_cannot_be_served_after_the_run_is_failed() {
+        let root = TempRoot::new();
+        let handler = Arc::new(BlockingHandler::default());
+        let endpoint = McpEndpoint::start(
+            &root.endpoint("01RUN"),
+            tool::EXTRACT_POSTINGS,
+            "t",
+            "input",
+            None,
+            Arc::clone(&handler) as Arc<dyn ToolHandler>,
+            Limits::default(),
+        )
+        .expect("start the endpoint");
+
+        let mut writer = Client::connect(&root.endpoint("01RUN"), "t");
+        let mut refuser = Client::connect(&root.endpoint("01RUN"), "t");
+
+        // One valid write goes in flight and holds there, inside its critical
+        // section.
+        let write = std::thread::spawn(move || {
+            writer.call_tool(
+                "propose_posting_features",
+                json!({"id": "pst_1", "features": {"skills": []}}),
+            )
+        });
+        assert!(
+            handler.wait_until_entered(Duration::from_secs(5)),
+            "the write never reached the handler"
+        );
+
+        // A second connection spends the output budget while that write is in
+        // flight: the run must not fail underneath it.
+        let spend = std::thread::spawn(move || {
+            for _ in 0..3 {
+                refuser.call_tool("propose_posting_features", json!({"features": {}}));
+            }
+        });
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !endpoint.failed_output(),
+            "the run was failed while a write was in flight"
+        );
+
+        handler.release();
+        let served = write.join().unwrap();
+        assert!(
+            served["result"].is_object(),
+            "the write was refused: {served}"
+        );
+        spend.join().unwrap();
+
+        // The write was served, once, and only before the run failed.
+        assert!(endpoint.failed_output(), "the budget was never spent");
+        assert_eq!(
+            handler.calls(),
+            vec!["propose_posting_features".to_string()],
+            "a write reached the handler after the run had failed"
+        );
     }
 
     #[test]
