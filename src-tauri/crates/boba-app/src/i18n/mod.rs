@@ -64,6 +64,7 @@ const ERROR_FRAGMENTS: &[(&str, &str, &str)] = error_fragments![
     "store",
     "task",
     "tracker",
+    "unlock",
     "unknown",
 ];
 

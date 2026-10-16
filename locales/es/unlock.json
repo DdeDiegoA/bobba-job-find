@@ -1,1 +1,13 @@
-{}
+{
+  "title": "Desbloquea Boba",
+  "body": "Escribe tu frase de paso para descifrar tus datos. Solo permanece en memoria durante esta sesión.",
+  "passphrase.label": "Frase de paso",
+  "unlock": "Desbloquear",
+  "unlocking": "Desbloqueando…",
+  "retry": "Reintentar leer la clave",
+  "retrying": "Leyendo la clave…",
+  "ready.title": "Boba está desbloqueado",
+  "ready.body": "Tus datos están abiertos durante esta sesión.",
+  "continue": "Continuar",
+  "checking": "Comprobando…"
+}

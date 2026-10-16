@@ -20,6 +20,8 @@ rusqlite_migration = { workspace = true }
 r2d2 = { workspace = true }
 r2d2_sqlite = { workspace = true }
 keyring-core = { workspace = true }
+# Argon2id passphrase fallback when no keychain is usable (ADR-004, ADR-009).
+argon2 = { workspace = true }
 zeroize = { workspace = true }
 getrandom = { workspace = true }
 ulid = { workspace = true }

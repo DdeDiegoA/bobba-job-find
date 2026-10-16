@@ -1,0 +1,8 @@
+{
+  "errors.unlock.locked": "Boba no puede leer la clave de tus datos. Escribe tu frase de paso o reintenta leer la clave.",
+  "errors.unlock.no_keychain": "Este equipo no tiene llavero, así que Boba necesita una frase de paso. Elige una que recuerdes: es la única forma de volver a tus datos.",
+  "errors.unlock.no_passphrase": "Esta base de datos no se creó con una frase de paso, así que una frase de paso no puede abrirla.",
+  "errors.unlock.wrong_passphrase": "Esa frase de paso no abre tus datos. Revísala e inténtalo de nuevo.",
+  "errors.unlock.kdf": "Boba no pudo convertir tu frase de paso en una clave. Inténtalo de nuevo.",
+  "errors.unlock.store": "Boba no pudo abrir tus datos. Reinicia Boba e inténtalo de nuevo."
+}
