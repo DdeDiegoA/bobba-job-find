@@ -12,6 +12,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
 use boba_app::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
+use boba_domain::dedup::{DedupProbe, description_simhash, job_key_of, probe_matches};
 use boba_domain::posting::{ApplyHints, Money, Offer, PayPeriod, Provenance, WorkMode};
 
 use crate::db::{Store, StoreError};
@@ -99,9 +100,9 @@ pub fn insert_offer(
         "INSERT INTO posting (id, source_id, external_id, title, company, location_json, \
          work_mode, amount_minor, currency, pay_period, posted_at, deadline, first_seen, \
          last_seen, lang, description_html, description_text, requirements_json, apply_url, \
-         apply_email) \
+         apply_email, dedup_key, simhash) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20)",
+                 ?18, ?19, ?20, ?21, ?22)",
         params![
             offer.id,
             offer.source_id,
@@ -123,7 +124,57 @@ pub fn insert_offer(
             json_array(&offer.requirements),
             offer.apply.url,
             offer.apply.email,
+            // S4.3 fills the two dedup columns 0008 shipped for it: the indexed
+            // job key a later ingest looks this posting up by, and the simhash
+            // of its description (`NULL` when the description is too short to
+            // compare, AD-19). `simhash` is a `u64` in a SQLite INTEGER; the
+            // cast is lossless both ways.
+            job_key_of(offer),
+            description_simhash(&offer.description_text).map(|hash| hash as i64),
         ],
+    )?;
+    insert_provenance(&tx, provenance)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The postings an Offer could already be (S4.3, AD-19): the same `job_key`, the
+/// same canonical apply URL, or the same company.
+///
+/// The store owns the filtering, the domain owns the rule ([`probe_matches`]),
+/// and this reads the postings rather than narrowing them in SQL: 0008 index
+/// only `dedup_key`, and this slice owns no migration, so a query could not use
+/// an index for the company or the canonical URL anyway. A local database holds
+/// one user's postings — thousands of rows — and the answer is a handful.
+pub fn dedup_candidates(conn: &Connection, probe: &DedupProbe) -> Result<Vec<Offer>, StoreError> {
+    let mut stmt = conn.prepare(SELECT)?;
+    let rows = stmt.query_map([], row)?;
+    let mut candidates = Vec::new();
+    for offer in rows {
+        let offer = offer?;
+        if probe_matches(probe, &offer) {
+            candidates.push(offer);
+        }
+    }
+    Ok(candidates)
+}
+
+/// Attach one more source's observation to the posting dedup merged it into, and
+/// refresh `last_seen`, in one transaction (S4.3, AD-19). Nothing else on the
+/// posting moves — the user already read it as it was first seen — and no row is
+/// ever deleted. A posting that is not there is an error: the foreign key on
+/// `posting_source.posting_id` refuses the orphan row, and the timestamp goes
+/// back with it.
+pub fn merge_provenance(
+    conn: &Connection,
+    posting_id: &str,
+    provenance: &Provenance,
+    now: &str,
+) -> Result<(), StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE posting SET last_seen = ?2 WHERE id = ?1",
+        params![posting_id, now],
     )?;
     insert_provenance(&tx, provenance)?;
     tx.commit()?;
@@ -202,6 +253,25 @@ impl IngestionRepo for Store {
         self.read(move |conn| provenance_for(conn, &posting_id))
             .map_err(map_err)
     }
+
+    fn dedup_candidates(&self, probe: &DedupProbe) -> Result<Vec<Offer>, IngestionRepoError> {
+        let probe = probe.clone();
+        self.read(move |conn| dedup_candidates(conn, &probe))
+            .map_err(map_err)
+    }
+
+    fn merge_provenance(
+        &self,
+        posting_id: &str,
+        provenance: &Provenance,
+        now: &str,
+    ) -> Result<(), IngestionRepoError> {
+        let posting_id = posting_id.to_string();
+        let provenance = provenance.clone();
+        let now = now.to_string();
+        self.execute(move |conn| merge_provenance(conn, &posting_id, &provenance, &now))
+            .map_err(map_err)
+    }
 }
 
 #[cfg(test)]
@@ -263,6 +333,151 @@ mod tests {
             raw: format!(r#"{{"id":"{external_id}"}}"#),
             fetched_at: "2026-10-16T00:00:00Z".into(),
         }
+    }
+
+    /// Long enough that the description simhash has something to compare.
+    const LONG: &str = "About the role. We are looking for a Backend Engineer to join our \
+        platform team in a remote first company. You will design and build APIs in Rust and \
+        PostgreSQL, own services end to end, and work with product managers to ship features \
+        that our customers use every day. About you. You have at least four years building \
+        production backends and you care about observability, queues and clean interfaces.";
+
+    /// A second source's view of the same job: another id, another URL.
+    fn other_source(id: &str, source_id: &str, url: &str) -> Offer {
+        Offer {
+            id: id.into(),
+            source_id: source_id.into(),
+            external_id: format!("{source_id}-1"),
+            apply: ApplyHints {
+                url: url.into(),
+                email: None,
+            },
+            ..offer(id)
+        }
+    }
+
+    #[test]
+    fn an_insert_writes_the_dedup_key_and_the_simhash() {
+        let conn = connection();
+        let mut stored = offer("pst_1");
+        stored.description_text = LONG.into();
+        insert_offer(&conn, &stored, &provenance("pst_1", "remotive", "abc-1")).unwrap();
+
+        let (key, simhash): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT dedup_key, simhash FROM posting WHERE id = 'pst_1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(key, job_key_of(&stored), "S4.3 fills the indexed key");
+        assert_eq!(
+            simhash.map(|value| value as u64),
+            description_simhash(LONG),
+            "and the simhash later runs compare against"
+        );
+    }
+
+    #[test]
+    fn a_short_description_stores_no_simhash() {
+        let conn = connection();
+        let mut stored = offer("pst_1");
+        stored.description_text = "Apply now.".into();
+        insert_offer(&conn, &stored, &provenance("pst_1", "remotive", "abc-1")).unwrap();
+
+        let simhash: Option<i64> = conn
+            .query_row("SELECT simhash FROM posting WHERE id = 'pst_1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(simhash, None, "nothing comparable, nothing stored");
+    }
+
+    #[test]
+    fn candidates_are_the_postings_with_the_same_key_url_or_company() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+        // The same job on another board: another id, another URL.
+        let elsewhere = other_source("pst_2", "himalayas", "https://himalayas.app/x9");
+        insert_offer(&conn, &elsewhere, &provenance("pst_2", "himalayas", "x9")).unwrap();
+        // A stranger: another company, another title, another URL.
+        let mut stranger = other_source("pst_3", "remotive", "https://jobs.example.com/zz");
+        stranger.company = "Globex".into();
+        stranger.title = "Data Analyst".into();
+        insert_offer(&conn, &stranger, &provenance("pst_3", "remotive", "zz")).unwrap();
+
+        let probe = DedupProbe::of(&elsewhere);
+        let mut ids: Vec<String> = dedup_candidates(&conn, &probe)
+            .unwrap()
+            .into_iter()
+            .map(|offer| offer.id)
+            .collect();
+        ids.sort();
+
+        assert_eq!(
+            ids,
+            ["pst_1", "pst_2"],
+            "the stranger is not worth a comparison"
+        );
+    }
+
+    #[test]
+    fn merging_adds_a_provenance_row_and_refreshes_last_seen_only() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_1",
+            &provenance("pst_1", "himalayas", "xyz-9"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+
+        let rows = provenance_for(&conn, "pst_1").unwrap();
+        assert_eq!(rows.len(), 2, "both sources are kept (AD-19)");
+        assert_eq!(rows[0].source_id, "himalayas", "nothing was deleted");
+
+        let (first_seen, last_seen, title): (String, String, String) = conn
+            .query_row(
+                "SELECT first_seen, last_seen, title FROM posting WHERE id = 'pst_1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            last_seen, "2026-10-17T00:00:00Z",
+            "the posting was seen again"
+        );
+        assert_eq!(
+            first_seen, "2026-10-16T00:00:00Z",
+            "it was still seen first then"
+        );
+        assert_eq!(title, "Backend Engineer", "the posting itself is untouched");
+    }
+
+    #[test]
+    fn merging_into_a_posting_that_is_not_there_writes_nothing() {
+        let conn = connection();
+        let error = merge_provenance(
+            &conn,
+            "pst_ghost",
+            &provenance("pst_ghost", "remotive", "abc-1"),
+            "2026-10-17T00:00:00Z",
+        );
+        assert!(error.is_err(), "the FK refuses an orphan provenance row");
+        assert_eq!(provenance_for(&conn, "pst_ghost").unwrap().len(), 0);
     }
 
     #[test]
