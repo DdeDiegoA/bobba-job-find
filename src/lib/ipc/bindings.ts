@@ -35,6 +35,40 @@ export const commands = {
     typedError<PreferencesSnapshot, AppError_Serialize>(
       __TAURI_INVOKE("preferences_save", { values }),
     ),
+  /**  Every connected mailbox, oldest first. */
+  emailAccounts: () =>
+    typedError<ConnectionView[], AppError_Serialize>(__TAURI_INVOKE("email_accounts")),
+  /**
+   *  Connect Outlook with delegated OAuth (AC1, AC2).
+   *
+   *  Opens the system browser on the provider's authorisation URL and waits for
+   *  the single loopback callback. A failure to bind the port, an expired or
+   *  mismatched `state`, or a refused consent all surface as typed errors that
+   *  point the UI at troubleshooting or the user's own client id (AC2).
+   */
+  emailConnectOutlook: (input: ConnectOutlookInput) =>
+    typedError<ConnectionView, AppError_Serialize>(
+      __TAURI_INVOKE("email_connect_outlook", { input }),
+    ),
+  /**
+   *  Switch a connection between send-only and read+send (AC3).
+   *
+   *  Reading is only switched on when the granted scopes cover it (NFR-5): a
+   *  connection authorised send-only must run the flow again, so the UI can ask
+   *  for `Mail.Read` instead of claiming reading works.
+   */
+  emailSetMode: (id: string, mode: EmailMode) =>
+    typedError<ConnectionView, AppError_Serialize>(__TAURI_INVOKE("email_set_mode", { id, mode })),
+  /**
+   *  Disconnect a mailbox (AC4).
+   *
+   *  Revokes the tokens where the provider supports it, then deletes them from the
+   *  keychain and the connection. A provider that refuses (or has no revocation
+   *  endpoint) never blocks the local deletion: the user asked to disconnect.
+   *  Purging the stored mail is the sync owner's job (S8.3).
+   */
+  emailDisconnect: (id: string) =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("email_disconnect", { id })),
 };
 
 /** Events */
@@ -92,6 +126,59 @@ export type AppInfo = {
   /**  Core version. */
   version: string;
 };
+
+/**
+ *  Where the OAuth client id came from (AC1: bundled public client, or the
+ *  user's own).
+ */
+export type ClientIdKind =
+  /**  Boba's bundled public desktop client. */
+  | "bundled"
+  /**  The user's own app registration (BYO client id). */
+  | "byo";
+
+/**  The Connect Outlook form: address, mode, and an optional BYO client id (AC1). */
+export type ConnectOutlookInput = {
+  /**
+   *  The mailbox address, as typed by the user. Boba never asks for a
+   *  `User.Read` scope to guess it (NFR-5).
+   */
+  address: string;
+  /**  Send-only or read+send; it decides the scopes that are requested (AC3). */
+  mode: EmailMode;
+  /**  The user's own app-registration client id, when they have one. */
+  client_id: string | null;
+};
+
+/**
+ *  What the Connections screen shows for one mailbox.
+ *
+ *  Deliberately without the keychain reference: the UI never needs it, and a
+ *  token or a reference never crosses IPC (AD-13, FR-40).
+ */
+export type ConnectionView = {
+  /**  Connection id. */
+  id: string;
+  /**  Provider the mailbox is connected to. */
+  provider: MailProvider;
+  /**  The mailbox address. */
+  address: string;
+  /**  Send-only or read+send (AC3). */
+  mode: EmailMode;
+  /**  Whether this connection uses Boba's bundled client or the user's own. */
+  client_id_kind: ClientIdKind;
+  /**  The delegated scopes granted at consent (AC1). */
+  scopes: string[];
+  /**  When the mailbox was connected. */
+  connected_at: string;
+};
+
+/**  Whether a connection may read the mailbox or only send (FR-37, AC3). */
+export type EmailMode =
+  /**  Send only: reply parsing is off (FR-37). */
+  | "send_only"
+  /**  Read and send. */
+  | "read_send";
 
 /**  Stable, machine-readable error category. Adding a variant is additive. */
 export type ErrorCode =
@@ -159,6 +246,15 @@ export type FactView = {
   /**  Whether an agent run proposed this text (its run is audited in the DB). */
   from_agent_run: boolean;
 };
+
+/**  Which mailbox provider a connection belongs to (architecture §11). */
+export type MailProvider =
+  /**  Outlook.com / Microsoft 365 over Microsoft Graph. */
+  | "microsoft_graph"
+  /**  Gmail over the user's own or Boba's desktop OAuth client (S8.2). */
+  | "gmail"
+  /**  Any provider over IMAP/SMTP (S8.2). */
+  | "imap_smtp";
 
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";
