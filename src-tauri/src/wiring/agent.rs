@@ -9,17 +9,17 @@
 //! `Arc<dyn AgentPort>`. Nothing here edits `lib.rs`, and no `boba-agent` type
 //! learns a global path.
 //!
-//! What is live after this chore: every run gets its own workspace, token and
-//! MCP endpoint, its own `mcp.json`, an event stream the UI can follow, and a
-//! CLI command built from the driver's evidence **and** ADR-010's gate — the
-//! lock-down verdict comes from the probed `cli_install` row, and a task that
-//! reads third-party content is refused unless that CLI's lock-down is verified.
+//! What is live after this slice: every run gets its own workspace, token and
+//! MCP endpoint, its own CLI config, the rendered agent pack, an event stream the
+//! UI can follow, and a CLI command built from the driver's evidence **and**
+//! ADR-010's two halves — the gate decides whether an untrusted task may start
+//! from the probed `cli_install` row ([`lock_down`]), and the runtime refuses the
+//! run unless its own init event lists only this app's tools.
 //! What is deliberately *not* live: the data behind most catalog tools (profile,
-//! postings, scores, mail, documents land in later slices), the CLI argv for the
-//! CLIs whose MCP flag is not a plain `--flag <path>`, and the observation that
-//! will let a verified CLI run untrusted tasks (S2.4). Gaps are explicit
-//! refusals here rather than silence — see [`RepoTools`], [`command_builder`] and
-//! [`lock_down`].
+//! postings, scores, mail, documents land in later slices), and a verified
+//! lock-down for the CLIs whose driver has nothing to pin them with. Gaps are
+//! explicit refusals here rather than silence — see [`RepoTools`] and
+//! [`command_builder`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -591,10 +591,10 @@ fn run_process<R: AgentRepo>(
                     }
                 } else if !parsed.events.is_empty() {
                     // An untrusted run is opened by its init event, always: a
-                    // stream that starts with the agent's own work means the
-                    // pinned lockdown (or the stream format it is observed
-                    // through) is not in force, so the run stops instead of
-                    // continuing unverified.
+                    // stream that starts with the agent's own work means the pin
+                    // — or the stream that reports what the CLI may call — did
+                    // not hold, so the run stops instead of continuing
+                    // unverified.
                     if state.task.reads_untrusted() && !opened {
                         proc.kill();
                         return Outcome::Failed(FailureReason::Unsupported);
@@ -626,17 +626,7 @@ fn run_process<R: AgentRepo>(
 
     let status = proc.wait();
 
-    // The verdict is taken here and the *reason* is settled last: a run that
-    // failed on its own — auth expired, quota, a crash — keeps that answer,
-    // because it is the actionable one (FR-21: an auth failure must pause AI
-    // work, not read as "this CLI is unsupported"), and a stream with no lines at
-    // all is a CLI that called no tool. A run that *succeeded* unverified is
-    // refused: nothing vouched for what it did.
-    if unverified && status.as_ref().is_some_and(|status| status.success()) {
-        return Outcome::Failed(FailureReason::Unsupported);
-    }
-
-    match status {
+    let outcome = match status {
         Some(status) if status.success() => Outcome::Finished {
             exit_code: status.code().unwrap_or(0),
             tokens_in: usage.tokens_in,
@@ -648,7 +638,19 @@ fn run_process<R: AgentRepo>(
             Outcome::Failed(classify_failure(&stderr, status.code().unwrap_or(1)))
         }
         None => Outcome::Failed(FailureReason::Crashed),
+    };
+
+    // An unverified run never just reports "finished": nothing vouched for the
+    // tools it had, so the run says so whatever the CLI claimed. The one
+    // carve-out is a failure that pauses AI work — auth expired, quota — because
+    // FR-21 needs that signal ("sign in again") to reach the user, and reading it
+    // as "this CLI is unsupported" would both misdiagnose and un-pause the daily
+    // run (orquestador ruling (d) + reviewer C).
+    if unverified && !matches!(&outcome, Outcome::Failed(reason) if reason.pauses_ai()) {
+        return Outcome::Failed(FailureReason::Unsupported);
     }
+
+    outcome
 }
 
 /// Parse one stdout line as an `AgentEvent`; non-JSON is plain `Text`. The
@@ -1181,57 +1183,59 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
-    /// A CLI that says nothing at all and exits clean cannot vouch for the tool
-    /// set: the run is refused rather than reported as a success (ruling (d)).
+    /// A CLI that says nothing at all cannot vouch for the tool set, so the run
+    /// is unverified however it exits — cleanly, or not (ruling (d), reviewer C).
     #[test]
-    fn a_silent_cli_that_exits_clean_is_refused_for_an_untrusted_run() {
-        let root = scratch();
-        let repo = Arc::new(FakeRepo::default());
-        let runtime = AgentRuntime::new(Arc::clone(&repo))
-            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
-            .with_sandbox(
-                SandboxConfig {
-                    runs_root: root.join("runs"),
-                    app_data: root.clone(),
-                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+    fn a_silent_cli_leaves_an_untrusted_run_unverified() {
+        for mode in ["silent", "silent-fail"] {
+            let root = scratch();
+            let repo = Arc::new(FakeRepo::default());
+            let runtime = AgentRuntime::new(Arc::clone(&repo))
+                .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+                .with_sandbox(
+                    SandboxConfig {
+                        runs_root: root.join("runs"),
+                        app_data: root.clone(),
+                        shim: PathBuf::from("/nonexistent/boba-mcp"),
+                    },
+                    Arc::new(NoTools),
+                );
+
+            let handle = runtime.start(
+                task(),
+                RunSpec {
+                    spec: CommandSpec {
+                        program: fake_cli_path(),
+                        args: vec![],
+                        cwd: None,
+                        env: vec![("BOBA_FAKE_MODE".to_string(), mode.to_string())],
+                    },
                 },
-                Arc::new(NoTools),
             );
+            let run_id = handle.run_id.clone();
+            let events: Vec<AgentEvent> = handle.events.iter().collect();
 
-        let handle = runtime.start(
-            task(),
-            RunSpec {
-                spec: CommandSpec {
-                    program: fake_cli_path(),
-                    args: vec![],
-                    cwd: None,
-                    env: vec![("BOBA_FAKE_MODE".to_string(), "silent".to_string())],
-                },
-            },
-        );
-        let run_id = handle.run_id.clone();
-        let events: Vec<AgentEvent> = handle.events.iter().collect();
-
-        assert!(
-            matches!(
-                events.last(),
-                Some(AgentEvent::Failed {
-                    reason: FailureReason::Unsupported,
-                    ..
-                })
-            ),
-            "{events:?}"
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|event| matches!(event, AgentEvent::Finished { .. })),
-            "an unverified run must not report success: {events:?}"
-        );
-        let run = repo.get_run(&run_id).unwrap().expect("run");
-        assert_eq!(run.status, RunStatus::Failed.id());
-        assert_eq!(run.failure_reason.as_deref(), Some("unsupported"));
-        std::fs::remove_dir_all(root).ok();
+            assert!(
+                matches!(
+                    events.last(),
+                    Some(AgentEvent::Failed {
+                        reason: FailureReason::Unsupported,
+                        ..
+                    })
+                ),
+                "{mode}: {events:?}"
+            );
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| matches!(event, AgentEvent::Finished { .. })),
+                "{mode}: an unverified run must not report success: {events:?}"
+            );
+            let run = repo.get_run(&run_id).unwrap().expect("run");
+            assert_eq!(run.status, RunStatus::Failed.id(), "{mode}");
+            assert_eq!(run.failure_reason.as_deref(), Some("unsupported"), "{mode}");
+            std::fs::remove_dir_all(root).ok();
+        }
     }
 
     /// A stream whose first work arrives before any init event cannot vouch for
@@ -1285,11 +1289,11 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
-    /// An auth failure on an untrusted run keeps its own classification: the
-    /// missing init event is not a second, louder reason to report, and FR-21
-    /// needs the auth signal to pause AI work.
+    /// An unverified run reports itself unverified however it ended — except
+    /// when it failed for a reason that pauses AI work (FR-21), where that
+    /// signal is the actionable one.
     #[test]
-    fn an_untrusted_run_that_fails_still_reports_why() {
+    fn an_unverified_run_reports_itself_unverified_whatever_the_exit() {
         let root = scratch();
         let repo = Arc::new(FakeRepo::default());
         let runtime = AgentRuntime::new(Arc::clone(&repo))
@@ -1316,6 +1320,8 @@ mod tests {
         );
         let events: Vec<AgentEvent> = handle.events.iter().collect();
 
+        // Auth expires before any init event can arrive, and the user needs to
+        // read that, not "unsupported CLI".
         assert!(
             matches!(
                 events.last(),
@@ -1325,6 +1331,10 @@ mod tests {
                 })
             ),
             "{events:?}"
+        );
+        assert!(
+            FailureReason::AuthExpired.pauses_ai(),
+            "the carve-out only makes sense for a pausing reason"
         );
         std::fs::remove_dir_all(root).ok();
     }
@@ -1367,8 +1377,8 @@ mod tests {
     }
 
     /// The same init event on a task that only reads the user's own input is the
-    /// security badge, not a refusal (ADR-010 §2): it still runs, and it still
-    /// earns the observation for the CLI.
+    /// security badge, not a refusal (ADR-010 §2): it still runs, because the
+    /// envelope is what protects third-party content and this run has none.
     #[test]
     fn a_native_tool_does_not_abort_a_user_input_run() {
         let root = scratch();
