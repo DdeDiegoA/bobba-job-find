@@ -7,5 +7,6 @@
   "errors.profile.unknown_item": "That profile item no longer exists.",
   "errors.profile.unknown_revision": "That version no longer exists.",
   "errors.profile.version_overflow": "Your profile version is out of range.",
-  "errors.profile.missing_id": "The profile item id is missing."
+  "errors.profile.missing_id": "The profile item id is missing.",
+  "errors.store.locked": "Boba can't reach your data yet. Unlock it to continue."
 }

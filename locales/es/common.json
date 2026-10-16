@@ -7,5 +7,6 @@
   "errors.profile.unknown_item": "Ese elemento del perfil ya no existe.",
   "errors.profile.unknown_revision": "Esa versión ya no existe.",
   "errors.profile.version_overflow": "La versión de tu perfil está fuera de rango.",
-  "errors.profile.missing_id": "Falta el identificador del elemento del perfil."
+  "errors.profile.missing_id": "Falta el identificador del elemento del perfil.",
+  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar."
 }

@@ -21,13 +21,15 @@ fn service(app: &tauri::AppHandle) -> AppResult<ProfileService> {
     let repo = app
         .try_state::<Arc<dyn ProfileRepo>>()
         .map(|state| state.inner().clone())
-        .ok_or_else(|| {
-            AppError::internal("errors.profile.store").with_detail(
-                "reason",
-                "the profile store is not mounted in the app state",
-            )
-        })?;
+        .ok_or_else(store_not_mounted)?;
     Ok(ProfileService::new(repo, Arc::new(SystemClock)))
+}
+
+/// The store is not mounted yet: no key is in hand, so the app is effectively
+/// locked (ADR-009). CH4 owns the composition root (ADR-012) and will replace
+/// the state lookup with `wiring::port::<dyn ProfileRepo>(&app)`.
+fn store_not_mounted() -> AppError {
+    AppError::locked("errors.store.locked")
 }
 
 /// Map a use-case failure onto the typed IPC error (AD-3).
@@ -106,6 +108,14 @@ mod tests {
         let mapped = to_app(ProfileError::Repo(ProfileRepoError::new("disk")));
         assert_eq!(mapped.code, ErrorCode::Internal);
         assert_eq!(mapped.message_key, "errors.profile.store");
+    }
+
+    /// CH4 contract (ADR-012): an unmounted store reads as the Locked state.
+    #[test]
+    fn an_unmounted_store_reports_the_locked_state() {
+        let error = store_not_mounted();
+        assert_eq!(error.code, ErrorCode::Locked);
+        assert_eq!(error.message_key, "errors.store.locked");
     }
 
     #[test]
