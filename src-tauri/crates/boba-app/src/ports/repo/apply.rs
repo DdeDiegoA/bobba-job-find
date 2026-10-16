@@ -1,3 +1,50 @@
 //! `ApplyRepo` — owns `application`, `apply_attempt`, `status_event`, `outbox`,
 //! `application_answer_bank` (AD-12, AD-16). Status changes go only through the
-//! apply `TransitionStatus` use case.
+//! apply `TransitionStatus` use case, which is the only writer of
+//! `application.status` and `status_event`.
+//!
+//! `application.status` is moved and its `status_event` appended in **one**
+//! transaction, and only when the stored status is still the one the caller saw:
+//! the check is what makes an approved Status Proposal and a user drag of the
+//! same card safe to race (AC4).
+
+use boba_domain::application::{Application, PackageItem, StatusEvent};
+
+/// A repo-level failure, stringified so the port stays free of the adapter's
+/// error types.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ApplyRepoError {
+    #[error("apply store error: {0}")]
+    Store(String),
+    /// The application does not exist (or was deleted with its Offer).
+    #[error("unknown application: {0}")]
+    UnknownApplication(String),
+    /// The stored status is no longer `expected`: the move was already applied
+    /// (or another actor moved the card), so the caller re-reads the board.
+    #[error("status moved from {expected} to {found} in the meantime")]
+    Conflict { expected: String, found: String },
+}
+
+/// The apply owner's read and write surface (AD-16).
+pub trait ApplyRepo: Send + Sync {
+    /// Every application on the board, oldest first.
+    fn applications(&self) -> Result<Vec<Application>, ApplyRepoError>;
+
+    /// One application by id, `None` when unknown.
+    fn application_get(&self, id: &str) -> Result<Option<Application>, ApplyRepoError>;
+
+    /// One application's history, oldest first (AC3 timeline).
+    fn status_events(&self, application_id: &str) -> Result<Vec<StatusEvent>, ApplyRepoError>;
+
+    /// The documents this application holds, oldest version first (AC3: the
+    /// Package the application carries, read through the documents owner).
+    fn package(&self, application_id: &str) -> Result<Vec<PackageItem>, ApplyRepoError>;
+
+    /// Append one status event and move the row in one transaction (AC2/AC4).
+    ///
+    /// `event.from_status` is the status the caller saw: the write fails with
+    /// [`ApplyRepoError::Conflict`] when the row already moved. `None` means
+    /// "no expectation", which is how the row that records an application's
+    /// birth is written.
+    fn append_status_event(&self, event: &StatusEvent) -> Result<(), ApplyRepoError>;
+}

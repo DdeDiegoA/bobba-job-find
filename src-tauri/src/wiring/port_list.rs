@@ -13,6 +13,7 @@ use std::sync::Arc;
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::mail::MailPort;
 use boba_app::ports::repo::agent::AgentRepo;
+use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
@@ -56,5 +57,7 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         Ok(mail) => mount_port::<dyn MailPort>(app, Arc::new(mail)),
         Err(error) => tracing::error!(?error, "mail port left unmounted"),
     }
+    // The apply area owns `application` + `status_event` (S9.1).
+    mount_port::<dyn ApplyRepo>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }

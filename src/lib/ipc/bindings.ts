@@ -69,6 +69,21 @@ export const commands = {
    */
   emailDisconnect: (id: string) =>
     typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("email_disconnect", { id })),
+  /**  The board: every Stage column with its cards (AC1). */
+  trackerBoard: () => typedError<BoardView, AppError_Serialize>(__TAURI_INVOKE("tracker_board")),
+  /**  One card in full: snapshot, package, timeline, next action, notes (AC3). */
+  trackerApplicationDetail: (applicationId: string) =>
+    typedError<ApplicationDetail, AppError_Serialize>(
+      __TAURI_INVOKE("tracker_application_detail", { applicationId }),
+    ),
+  /**
+   *  Move one card (AC2/AC4). The only way a status changes: it logs a
+   *  `status_event` and returns the updated card.
+   */
+  trackerTransitionStatus: (input: TransitionInput) =>
+    typedError<ApplicationDetail, AppError_Serialize>(
+      __TAURI_INVOKE("tracker_transition_status", { input }),
+    ),
 };
 
 /** Events */
@@ -125,6 +140,55 @@ export type AppInfo = {
   name: string;
   /**  Core version. */
   version: string;
+};
+
+/**  One card on the board (AC1). */
+export type ApplicationCard = {
+  id: string;
+  /**  The stored status (`saved`, `drafted`, …). */
+  status: string;
+  /**  The column it sits in. */
+  stage: string;
+  title: string;
+  company: string;
+  next_action: string | null;
+};
+
+/**  Everything the card detail shows (AC3). */
+export type ApplicationDetail = {
+  id: string;
+  posting_id: string;
+  status: string;
+  stage: string;
+  title: string;
+  company: string;
+  apply_url: string | null;
+  lang: string | null;
+  deadline: string | null;
+  notes: string | null;
+  next_action: string | null;
+  package: PackageItemView[];
+  timeline: StatusEventView[];
+  created_at: string;
+  updated_at: string;
+};
+
+/**  One column (AC1). The four terminal columns collapse in the UI (FR-93). */
+export type BoardColumn = {
+  stage: string;
+  /**
+   *  The status a card gets when it is dropped here (AC2): a drop names a
+   *  column, the column names the status.
+   */
+  status: string;
+  terminal: boolean;
+  count: number;
+  cards: ApplicationCard[];
+};
+
+/**  The whole Tracker in one read (AC1). */
+export type BoardView = {
+  columns: BoardColumn[];
 };
 
 /**
@@ -259,6 +323,18 @@ export type MailProvider =
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";
 
+/**  One document of the Package the application carries (AC3). */
+export type PackageItemView = {
+  document_id: string;
+  /**  `cv` or `cover_letter`. */
+  kind: string;
+  lang: string;
+  /**  `u32` because specta refuses to export 64-bit integers (AD-3). */
+  version: number;
+  /**  A document is only attachable once verified (AD-14). */
+  verified: boolean;
+};
+
 /**  Everything the user can edit (FR-7). */
 export type Preferences = {
   roles: string[];
@@ -318,6 +394,22 @@ export type SalaryFloor = {
 /**  Target seniority (FR-7). */
 export type Seniority = "intern" | "junior" | "mid" | "senior" | "lead" | "principal";
 
+/**
+ *  One move in the timeline (AC3). The Stage is the label the UI shows (FR-94:
+ *  "Stage changes"), resolved here so no screen repeats the status → column map.
+ */
+export type StatusEventView = {
+  id: string;
+  from_status: string | null;
+  from_stage: string | null;
+  to_status: string;
+  to_stage: string;
+  /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
+  source: string;
+  reason: string | null;
+  created_at: string;
+};
+
 /**  Terminal event for a long task, emitted as `task.finished`. */
 export type TaskFinished = {
   /**  Id of the task that ended. */
@@ -357,6 +449,20 @@ export type TaskProgressed = {
 export type TimezoneWindow = {
   from: number;
   to: number;
+};
+
+/**
+ *  A move the UI asks for (AC2/AC4). `source` names who caused it, so an
+ *  approved Status Proposal or an apply outcome travels the same path as a drag.
+ */
+export type TransitionInput = {
+  application_id: string;
+  /**  The status the card showed when the user moved it (the race guard). */
+  from_status: string;
+  to_status: string;
+  /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
+  source: string;
+  reason: string | null;
 };
 
 /**  Work modes the user accepts at all (FR-7). */

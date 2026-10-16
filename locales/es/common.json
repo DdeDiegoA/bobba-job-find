@@ -34,5 +34,12 @@
   "errors.email.keychain": "Boba no pudo acceder a tu llavero, así que no se cambió nada.",
   "errors.email.store": "No se pudieron leer ni guardar tus conexiones.",
   "errors.email.unknown_connection": "Esa conexión ya no existe.",
-  "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar»."
+  "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar».",
+  "errors.tracker.store": "No se pudieron leer tus postulaciones.",
+  "errors.tracker.unknown_application": "Esa postulación ya no existe.",
+  "errors.tracker.stale": "Esta tarjeta cambió en otra ventana. El tablero se actualizó.",
+  "errors.tracker.same_status": "La tarjeta ya está en esa Etapa.",
+  "errors.tracker.unknown_status": "Esa Etapa no es una que Boba conozca.",
+  "errors.tracker.missing_id": "No se indicó ninguna postulación.",
+  "errors.tracker.source_not_allowed": "Ese cambio lo registra la app; el tablero solo puede mover una tarjeta como tú."
 }

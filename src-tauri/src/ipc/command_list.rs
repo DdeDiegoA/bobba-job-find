@@ -23,6 +23,9 @@ macro_rules! boba_commands {
             crate::commands::email::email_connect_outlook,
             crate::commands::email::email_set_mode,
             crate::commands::email::email_disconnect,
+            crate::commands::tracker::tracker_board,
+            crate::commands::tracker::tracker_application_detail,
+            crate::commands::tracker::tracker_transition_status,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
