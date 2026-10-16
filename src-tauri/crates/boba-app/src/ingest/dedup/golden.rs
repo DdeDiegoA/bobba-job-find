@@ -33,6 +33,9 @@ enum Variant {
     WithCta,
     /// The sentences are put in a different order.
     Reordered,
+    /// The employer's own boilerplate is published with it, as it is with every
+    /// posting that employer makes.
+    WithEmployerBoilerplate,
 }
 
 /// One board's sighting of one job.
@@ -118,6 +121,15 @@ fn clusters() -> Vec<Vec<Sighting>> {
             sighting("greenhouse", "g-12", "Umbrella", "Product Designer", &["Madrid, ES"], "https://boards.greenhouse.io/umbrella/jobs/g-12", DESIGN, Variant::Whole),
             sighting("torre", "t-12", "Umbrella", "Product Designer", &["Madrid"], "https://torre.ai/jobs/t-12", DESIGN, Variant::NoTail),
         ],
+        // Two different jobs at one employer that advertise through the same
+        // careers index, and nothing else (reviewer-1 F1). One sighting each:
+        // they are two openings, so a shared listing URL is all they share.
+        vec![sighting("remotive", "r-13", "Vandelay", "Backend Engineer", &["Remote"], "https://vandelay.com/careers", BACKEND, Variant::Whole)],
+        vec![sighting("torre", "t-13", "Vandelay", "Data Analyst", &["Madrid, ES"], "https://vandelay.com/careers/", DATA, Variant::Whole)],
+        // Two different jobs at one employer, in one place, published with the
+        // employer's boilerplate on both (reviewer-1 F2). One sighting each.
+        vec![sighting("remotive", "r-14", "Soylent", "Backend Engineer", &["Remote"], "https://soylent.com/jobs/1", BACKEND, Variant::WithEmployerBoilerplate)],
+        vec![sighting("himalayas", "h-14", "Soylent", "Data Analyst", &["Remote"], "https://soylent.com/jobs/2", DATA, Variant::WithEmployerBoilerplate)],
     ]
 }
 
@@ -152,6 +164,7 @@ fn variant_of(base: &str, variant: Variant) -> String {
             None => base.to_string(),
         },
         Variant::WithCta => format!("{base} Apply now through our careers page."),
+        Variant::WithEmployerBoilerplate => format!("{EMPLOYER_BOILERPLATE} {base}"),
         Variant::Reordered => {
             let mut sentences: Vec<&str> = base.split_inclusive(". ").collect();
             sentences.reverse();
@@ -292,6 +305,24 @@ fn the_fixture_contains_the_duplicates_it_claims_to() {
         "every sighting has a description to compare"
     );
 }
+
+/// What one employer publishes under every posting it makes (F2). Long on
+/// purpose: the finding is that a shared boilerplate might carry two different
+/// roles over the description threshold.
+const EMPLOYER_BOILERPLATE: &str = "About us. Soylent is a company of about four hundred people \
+    building software for logistics teams across Europe and Latin America. We have been \
+    profitable since 2019, we work in small product teams, and we keep meetings short. Everyone \
+    here gets a learning budget, twenty five days of holiday, a remote first contract, private \
+    health cover, a yearly bonus reviewed against clear goals, and the equipment they need to \
+    do the job well. We hire for the long term, we promote from within, and we publish our \
+    salary bands so that nobody has to negotiate in the dark. Our offices in Madrid and Bogota \
+    are open to anyone who prefers to work from a desk, and our remote colleagues are full \
+    members of every team. We believe good software comes from people who have time to think, \
+    so we protect focus time, we write things down, and we review each other's work without \
+    ceremony. We interview in three steps, we answer every application within a week, and we \
+    give feedback even when the answer is no. We are an equal opportunity employer and we \
+    consider every application on its merits, whatever your background, nationality, gender, \
+    age or disability.";
 
 const BACKEND: &str = "About the role. We are looking for a Backend Engineer to join our \
     platform team in a remote first company. You will design and build APIs in Rust and \

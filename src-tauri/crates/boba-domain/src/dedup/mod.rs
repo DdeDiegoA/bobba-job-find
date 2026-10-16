@@ -21,7 +21,7 @@ mod url;
 
 pub use key::job_key_of;
 pub use simhash::{SIMHASH_SIMILARITY, description_simhash, similarity};
-pub use url::canonical_url;
+pub use url::{canonical_url, identifies_a_posting};
 
 /// What the store is asked for when it looks for the posting an Offer may
 /// already be (AD-19). The store answers with candidate postings; this module
@@ -70,7 +70,7 @@ pub fn probe_matches(probe: &DedupProbe, candidate: &Offer) -> bool {
 /// only believed when both descriptions are long enough to compare at all.
 pub fn duplicate_of(offer: &Offer, existing: &Offer) -> Option<DuplicateReason> {
     let url = canonical_url(&offer.apply.url);
-    if !url.is_empty() && url == canonical_url(&existing.apply.url) {
+    if identifies_a_posting(&url) && url == canonical_url(&existing.apply.url) {
         return Some(DuplicateReason::CanonicalUrl);
     }
 
@@ -79,10 +79,12 @@ pub fn duplicate_of(offer: &Offer, existing: &Offer) -> Option<DuplicateReason> 
         return Some(DuplicateReason::JobKey);
     }
 
-    if !same_place(offer, existing) {
+    if !same_place(offer, existing) || !titles_agree(offer, existing) {
         // One employer, one title, one description, two cities: two postings.
         // A similar description cannot outvote the location the key is built
-        // from, or every repost across cities would collapse into one.
+        // from, or every repost across cities would collapse into one. Nor can
+        // it outvote the title when the two boards share no word of it: one
+        // employer's boilerplate belongs to every role it posts.
         return None;
     }
 
@@ -102,6 +104,23 @@ pub fn duplicate_of(offer: &Offer, existing: &Offer) -> Option<DuplicateReason> 
 fn same_place(offer: &Offer, existing: &Offer) -> bool {
     let (left, right) = (key::bucket_of(offer), key::bucket_of(existing));
     left.is_empty() || right.is_empty() || left == right
+}
+
+/// Whether the two boards agree on at least one word of the title — the guard
+/// the description signal runs behind (reviewer-1 F2).
+///
+/// Measured: two different roles at one employer sharing 150 words of boilerplate
+/// reach 0.859 and with 300 shared words 0.875, so the threshold alone already
+/// separates them. This is the second line of defence for the shapes that were
+/// not measured, and it costs nothing real: two boards retitling the same job
+/// keep a word of it ("Backend Engineer" / "Senior Backend Engineer"). A board
+/// that sends no title contradicts nothing.
+fn titles_agree(offer: &Offer, existing: &Offer) -> bool {
+    let (left, right) = (text::words(&offer.title), text::words(&existing.title));
+    if left.is_empty() || right.is_empty() {
+        return true;
+    }
+    left.iter().any(|word| right.contains(word))
 }
 
 /// Why two Offers count as the same job (AD-19). The strongest signal found, in
@@ -269,6 +288,31 @@ mod tests {
         everything. We offer health cover, a wellness allowance, flexible hours and a bonus \
         tied to growth targets that we set together at the start of each quarter.";
 
+    /// What one employer puts under every posting it publishes (F2).
+    const SHARED_BOILERPLATE: &str = "About us. Acme is a company of about four hundred people \
+        building software for logistics teams across Europe and Latin America. We have been \
+        profitable since 2019, we work in small product teams, and we keep meetings short. \
+        Everyone at Acme gets a learning budget, twenty five days of holiday, a remote first \
+        contract, private health cover, a yearly bonus reviewed against clear goals, and the \
+        equipment they need to do the job well. We hire for the long term, we promote from \
+        within, and we publish our salary bands so that nobody has to negotiate in the dark. \
+        Our offices in Madrid and Bogota are open to anyone who prefers to work from a desk, \
+        and our remote colleagues are full members of every team. We believe good software \
+        comes from people who have time to think, so we protect focus time, we write things \
+        down, and we review each other's work without ceremony.";
+
+    /// A second boilerplate paragraph, so the probe measures real shared text
+    /// rather than one paragraph counted twice.
+    const BENEFITS: &str = "About our process. We interview in three steps: a conversation with         the hiring manager, a technical or case exercise that reflects the actual work, and a         final chat about how you like to work. You will hear from us within a week of every         stage, and we give feedback even when the answer is no. We are an equal opportunity         employer and we consider every application on its merits, whatever your background,         nationality, gender, age or disability. If you need an adjustment during the process,         tell us and we will make it. Acme is committed to a workplace where people can do their         best work, and we expect everyone here to help keep it that way.";
+
+    const BACKEND_DAY: &str = "About the role. As a Backend Engineer you will design and build \
+        APIs in Rust and PostgreSQL, own services end to end, and work with product managers to \
+        ship features that our customers use every day.";
+
+    const ANALYST_DAY: &str = "About the role. As a Data Analyst you will build dashboards in \
+        Metabase, write SQL against our warehouse, define the metrics the business runs on, and \
+        explain the numbers to people who do not read charts for a living.";
+
     #[test]
     fn a_lightly_reworded_republish_still_reads_as_the_same_description() {
         let original = description_simhash(BACKEND_JOB).expect("long enough to compare");
@@ -355,6 +399,100 @@ mod tests {
         other_job.apply.url = "https://jobs.example.com/abc-2".into();
         other_job.description_text = MARKETING_JOB.into();
         assert_eq!(duplicate_of(&posted, &other_job), None);
+    }
+
+    #[test]
+    fn a_career_site_is_not_one_job() {
+        // F1 (reviewer-1): one employer's careers index is one URL for every job
+        // it has open, so the URL cannot decide on its own.
+        let mut backend = offer("Acme", "Backend Engineer", &["Remote"]);
+        let mut analyst = offer("Acme", "Data Analyst", &["Madrid, ES"]);
+        backend.apply.url = "https://acme.com/careers".into();
+        analyst.apply.url = "https://acme.com/careers/".into();
+
+        assert_eq!(
+            duplicate_of(&backend, &analyst),
+            None,
+            "a listing page is not a posting"
+        );
+
+        // The same employers' job boards, same story.
+        backend.apply.url = "https://boards.greenhouse.io/acme/jobs".into();
+        analyst.apply.url = "https://boards.greenhouse.io/acme/jobs".into();
+        assert_eq!(duplicate_of(&backend, &analyst), None);
+
+        // A URL that does name the posting is still the strongest signal, even
+        // when a board retitled the job.
+        backend.apply.url = "https://boards.greenhouse.io/acme/jobs/4839".into();
+        analyst.apply.url = "https://boards.greenhouse.io/acme/jobs/4839".into();
+        assert_eq!(
+            duplicate_of(&backend, &analyst),
+            Some(DuplicateReason::CanonicalUrl)
+        );
+
+        backend.apply.url = "https://boards.example.com/jobs?gh_jid=1".into();
+        analyst.apply.url = "https://boards.example.com/jobs?gh_jid=1".into();
+        assert_eq!(
+            duplicate_of(&backend, &analyst),
+            Some(DuplicateReason::CanonicalUrl),
+            "an ATS job id in the query names the posting"
+        );
+    }
+
+    #[test]
+    fn shared_boilerplate_does_not_merge_two_roles() {
+        // F2 (reviewer-1): one employer, one location, one long "About us", two
+        // roles. The boilerplate alone carries the simhash over the threshold.
+        let mut backend = offer("Acme", "Backend Engineer", &["Remote"]);
+        let mut analyst = offer("Acme", "Data Analyst", &["Remote"]);
+        backend.description_text = format!("{SHARED_BOILERPLATE} {BACKEND_DAY}");
+        analyst.description_text = format!("{SHARED_BOILERPLATE} {ANALYST_DAY}");
+        backend.apply.url = "https://acme.com/jobs/1".into();
+        analyst.apply.url = "https://acme.com/jobs/2".into();
+
+        assert_eq!(
+            duplicate_of(&backend, &analyst),
+            None,
+            "two roles are two jobs, however much boilerplate they share"
+        );
+
+        // Measured, not assumed: the boilerplate alone does not reach the
+        // threshold, at 150 shared words or at 300. The threshold is the first
+        // guard, `titles_agree` the second.
+        let with_benefits = format!("{SHARED_BOILERPLATE} {BENEFITS}");
+        for (shared, measured) in [
+            (SHARED_BOILERPLATE, 0.8594_f64),
+            (with_benefits.as_str(), 0.875),
+        ] {
+            let similarity = similarity(
+                description_simhash(&format!("{shared} {BACKEND_DAY}")).unwrap(),
+                description_simhash(&format!("{shared} {ANALYST_DAY}")).unwrap(),
+            );
+            assert!(
+                (similarity - measured).abs() < 0.001,
+                "the margin this guard is sized against moved: {similarity} was {measured}"
+            );
+            assert!(
+                similarity < SIMHASH_SIMILARITY,
+                "{similarity} stays under 0.9"
+            );
+        }
+    }
+
+    #[test]
+    fn a_retitle_that_keeps_a_word_of_the_title_still_merges() {
+        // The guard in `titles_agree` must not cost the case it exists for.
+        let mut posted = offer("Acme", "Backend Engineer", &["Remote"]);
+        let mut retitled = offer("Acme", "Senior Backend Engineer", &["Remote"]);
+        posted.description_text = BACKEND_JOB.into();
+        retitled.description_text = format!("{BACKEND_JOB} Apply now through our careers page.");
+        retitled.apply.url = "https://other.example.com/x".into();
+
+        assert_eq!(
+            duplicate_of(&posted, &retitled),
+            Some(DuplicateReason::Description),
+            "a board that keeps the role in the title still merges"
+        );
     }
 
     #[test]

@@ -2,8 +2,10 @@
 //!
 //! The user finds a job where automation is not allowed (LinkedIn, Indeed, a
 //! company page) and pastes it. Both inputs end in the same place: one
-//! `RawPosting` normalised by [`crate::ingest::normalize`] and stored under the
-//! `manual` source, whose name the UI shows as **Manual** (AC2).
+//! `RawPosting` normalised and ingested under the `manual` source, whose name
+//! the UI shows as **Manual** (AC2) — and deduplicated, so pasting the same job
+//! a second time adds a provenance row to the posting already in the inbox
+//! rather than a second posting (AD-19, [`crate::ingest::dedup`]).
 //!
 //! Upstream of this module the command layer fetches a pasted URL through the
 //! shared `HttpClient` — robots rules, the per-host bucket and the honest
@@ -24,7 +26,7 @@ use boba_domain::source::{AccessClass, ApplyCapability, LegalTier, RawPosting, S
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::ingest::normalize;
+use crate::ingest::dedup;
 use crate::ports::clock::ClockPort;
 use crate::ports::repo::ingestion::IngestionRepo;
 use crate::ports::repo::sources::SourcesRepo;
@@ -143,15 +145,36 @@ impl ManualIntake {
         self.keep(&posting_from_page(html, url))
     }
 
-    /// Register the Manual source once, normalise and store the Offer.
+    /// Register the Manual source once, normalise the Offer and store it under
+    /// the posting it belongs to (AC2, AD-19).
+    ///
+    /// Dedup runs here, on the one production ingest path: pasting the same job
+    /// twice — from the board and from the company page, say — lands on one
+    /// posting with a provenance row per paste. The view is then built from the
+    /// *posting*, not from the Offer, which may have been merged away and whose
+    /// id is not a posting id at all.
     fn keep(&self, raw: &RawPosting) -> Result<ManualOffer, ManualError> {
         let now = self.clock.now_rfc3339();
         if self.sources.get_source(SOURCE_ID)?.is_none() {
             self.sources.upsert_source(&manual_source(&now))?;
         }
-        let offer = normalize::ingest(self.repo.as_ref(), raw, SOURCE_ID, &now)?;
-        Ok(view(&offer))
+        let outcome = dedup::ingest_deduped(self.repo.as_ref(), raw, SOURCE_ID, &now)?;
+        let posting = self
+            .repo
+            .get_offer(outcome.posting_id())?
+            // The store just reported this posting, so not finding it is a store
+            // fault, reported as one rather than handed to the UI as an id that
+            // answers to nothing.
+            .ok_or_else(|| missing_posting(outcome.posting_id()))?;
+        Ok(view(&posting))
     }
+}
+
+/// A posting the store reported and then did not have.
+fn missing_posting(posting_id: &str) -> ManualError {
+    ManualError::Repo(crate::ports::repo::ingestion::IngestionRepoError::Store(
+        format!("posting {posting_id} is missing after ingest"),
+    ))
 }
 
 /// The `manual` source row. It has no board and never runs, so it is ungated;
@@ -570,6 +593,49 @@ mod tests {
         assert!(stored.description_text.contains("Acme Corp builds boba."));
         assert_eq!(stored.first_seen, NOW);
         assert_eq!(stored.last_seen, NOW);
+    }
+
+    /// The same job at two URLs, as two pages (F3, reviewer-1): the manual path
+    /// is the production ingest, so AC1 has to hold here, not only in `dedup`.
+    fn posting_page(title: &str, description: &str) -> String {
+        format!(
+            "<html><head><title>{title}</title>\
+             <script type=\"application/ld+json\">\
+             {{\"@type\":\"JobPosting\",\"title\":\"{title}\",\
+             \"description\":\"{description}\",\
+             \"hiringOrganization\":{{\"name\":\"Acme Corp\"}},\
+             \"jobLocation\":{{\"address\":{{\"addressLocality\":\"Remote\"}}}}}}\
+             </script></head><body></body></html>"
+        )
+    }
+
+    #[test]
+    fn the_same_job_pasted_twice_is_one_posting_with_two_provenance_rows() {
+        let (intake, repo, _sources) = intake();
+        let page = posting_page(
+            "Backend Engineer",
+            "We are looking for a Backend Engineer to build APIs in Rust and PostgreSQL, own \
+             services end to end, and ship features our customers use every day.",
+        );
+
+        let first = intake
+            .from_page(&page, "https://boards.example.com/acme/1")
+            .expect("stored");
+        let second = intake
+            .from_page(&page, "https://another.example.com/acme/1")
+            .expect("stored");
+
+        assert_eq!(
+            second.id, first.id,
+            "the same job pasted twice is one posting (AD-19)"
+        );
+        assert_eq!(repo.postings().len(), 1, "one posting, not two");
+        let rows = repo.provenance(&first.id).unwrap();
+        assert_eq!(rows.len(), 2, "both pastes are kept, nothing deleted");
+        assert!(
+            rows.iter()
+                .any(|row| row.url.ends_with("another.example.com/acme/1"))
+        );
     }
 
     #[test]

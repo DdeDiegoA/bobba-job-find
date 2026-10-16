@@ -35,6 +35,66 @@ const TRACKING: &[&str] = &[
     "vero_id",
 ];
 
+/// Path segments that name a place rather than a posting: a URL ending in one
+/// of these is an index every opening of that employer shares.
+const INDEX_SEGMENTS: &[&str] = &[
+    "careers",
+    "career",
+    "jobs",
+    "job",
+    "apply",
+    "application",
+    "applications",
+    "positions",
+    "position",
+    "openings",
+    "opening",
+    "vacancies",
+    "vacancy",
+    "empleos",
+    "empleo",
+    "vacantes",
+    "vacante",
+    "search",
+    "board",
+    "boards",
+    "listing",
+    "listings",
+    "index",
+    "home",
+    "en",
+    "es",
+];
+
+/// Whether a canonical URL names one posting rather than a listing (reviewer-1
+/// F1): an ATS job id, a slug or a query does; a careers index does not.
+///
+/// Without this, one employer's `/careers` page — the same URL on every posting
+/// they publish — would merge a backend job in Madrid with a data job in
+/// Bogotá, because the URL was checked before anything else.
+pub fn identifies_a_posting(canonical: &str) -> bool {
+    let Some((_, rest)) = canonical.split_once("://") else {
+        return false;
+    };
+    let path_and_query = match rest.find('/') {
+        Some(slash) => &rest[slash..],
+        None => "",
+    };
+    let (path, query) = match path_and_query.split_once('?') {
+        Some((path, query)) => (path, query),
+        None => (path_and_query, ""),
+    };
+
+    // A query carries the ATS job id often enough to count (`?gh_jid=1`).
+    if !query.is_empty() {
+        return true;
+    }
+    match path.rsplit('/').find(|segment| !segment.is_empty()) {
+        Some(segment) => !INDEX_SEGMENTS.contains(&segment.to_lowercase().as_str()),
+        None => false,
+    }
+}
+
 /// The canonical form of an apply URL, or `""` when there is no URL at all.
 pub fn canonical_url(url: &str) -> String {
     let url = url.trim();
