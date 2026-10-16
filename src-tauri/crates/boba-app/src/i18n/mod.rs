@@ -108,6 +108,8 @@ pub fn translated(locale: Locale, key: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -154,5 +156,39 @@ mod tests {
     #[test]
     fn unknown_key_is_none() {
         assert_eq!(translated(Locale::En, "errors.does_not_exist"), None);
+    }
+
+    /// CH7: `ERROR_FRAGMENTS` is hand-listed, so a fragment file it forgets would
+    /// ship an unresolvable key. The list must match the directory, both languages.
+    #[test]
+    fn error_fragment_list_matches_the_locales_directory() {
+        let mut listed: Vec<String> = ERROR_FRAGMENTS
+            .iter()
+            .map(|(area, ..)| (*area).to_owned())
+            .collect();
+        listed.sort();
+        for lang in ["en", "es"] {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../locales")
+                .join(lang)
+                .join("errors");
+            let mut found: Vec<String> = std::fs::read_dir(&dir)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()))
+                .map(|entry| {
+                    entry
+                        .expect("fragment entry")
+                        .file_name()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .filter(|name| name.ends_with(".json"))
+                .map(|name| name.trim_end_matches(".json").to_owned())
+                .collect();
+            found.sort();
+            assert_eq!(
+                found, listed,
+                "locales/{lang}/errors/*.json does not match ERROR_FRAGMENTS"
+            );
+        }
     }
 }
