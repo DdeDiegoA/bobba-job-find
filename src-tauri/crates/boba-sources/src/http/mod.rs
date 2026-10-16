@@ -20,6 +20,19 @@ use texting_robots::Robot;
 /// Honest identity: `BobaJobFind/<ver> (+repo URL)` (AD-10).
 pub const REPO_URL: &str = "https://github.com/diegoarenas/boba-job-find";
 
+/// Redirects a robots.txt fetch may follow before it is treated as broken
+/// (RFC 9309 allows five). A broken chain fails closed (AD-10).
+const MAX_ROBOTS_HOPS: u32 = 5;
+
+/// What a robots.txt fetch produced.
+enum RobotsFetch {
+    Body(Vec<u8>),
+    /// Missing or unreachable: nothing to enforce.
+    Unavailable,
+    /// Broken or endless redirect chain: the origin must fail closed.
+    Broken,
+}
+
 /// The honest User-Agent string every request carries.
 pub fn user_agent() -> String {
     format!("BobaJobFind/{} (+{})", env!("CARGO_PKG_VERSION"), REPO_URL)
@@ -204,6 +217,10 @@ impl HttpClient {
                 entry.interval = interval;
                 entry.limiter = Arc::new(RateLimiter::direct(quota_for(interval)));
                 carry_over = interval.saturating_sub(entry.last_start.elapsed());
+                // Tightening replaces the limiter, so a caller already waiting on
+                // the replaced one can still slip through once.
+                // shortcut: one in-flight request may beat a tightened interval;
+                // upgrade to a queued limiter if that ever matters.
             }
             (entry.limiter.clone(), carry_over)
         };
@@ -251,25 +268,15 @@ impl HttpClient {
             }
         }
         let robot = match self.robots_url(url) {
-            Some(robots_url) => {
-                // Fetch robots.txt directly (no robots check, no budget) so this
-                // stays out of the `fetch` recursion cycle. Host default only:
-                // a manifest's interval belongs to the adapter's own request.
-                let host_default = RateLimits {
-                    min_interval_ms: 0,
-                    daily_cap: None,
-                };
-                self.acquire_slot(&robots_url, &host_default).await;
-                match self.send_with_retry(&robots_url).await {
-                    Ok(resp) if resp.status == 200 => {
-                        Robot::new(&self.config.user_agent, &resp.body)
-                            .ok()
-                            .map(Arc::new)
-                    }
-                    // An absent or unreachable robots.txt means "allow all".
-                    _ => None,
-                }
-            }
+            Some(robots_url) => match self.fetch_robots(&robots_url).await {
+                RobotsFetch::Body(body) => Robot::new(&self.config.user_agent, &body)
+                    .ok()
+                    .map(Arc::new),
+                // An absent or unreachable robots.txt means "allow all".
+                RobotsFetch::Unavailable => None,
+                // A broken redirect chain must never fall back to allow-all.
+                RobotsFetch::Broken => Some(disallow_all(&self.config.user_agent)),
+            },
             None => None,
         };
         {
@@ -283,6 +290,37 @@ impl HttpClient {
             );
         }
         check_robot(robot.as_deref(), url)
+    }
+
+    /// Fetch robots.txt, following its redirects by hand: the client never
+    /// follows any (AD-10), and a 3xx used to reach the real rules (http→https,
+    /// apex→www). Every hop is paced for its own origin.
+    async fn fetch_robots(&self, url: &str) -> RobotsFetch {
+        // Host default only: a manifest's interval belongs to the adapter's own
+        // request. This also stays out of the `fetch` recursion cycle.
+        let host_default = RateLimits {
+            min_interval_ms: 0,
+            daily_cap: None,
+        };
+        let mut current = url.to_string();
+        for _ in 0..=MAX_ROBOTS_HOPS {
+            self.acquire_slot(&current, &host_default).await;
+            match self.send_with_retry(&current).await {
+                Ok(response) if response.status == 200 => return RobotsFetch::Body(response.body),
+                Ok(response) if (300..400).contains(&response.status) => {
+                    match response
+                        .location
+                        .as_deref()
+                        .and_then(|location| redirect_target(&current, location))
+                    {
+                        Some(next) => current = next,
+                        None => return RobotsFetch::Broken,
+                    }
+                }
+                _ => return RobotsFetch::Unavailable,
+            }
+        }
+        RobotsFetch::Broken
     }
 
     fn robots_url(&self, url: &str) -> Option<String> {
@@ -455,6 +493,20 @@ fn check_robot(robot: Option<&Robot>, url: &str) -> Result<(), SourceError> {
         }),
         _ => Ok(()),
     }
+}
+
+/// The rules used when a robots.txt redirect chain is broken (AD-10).
+fn disallow_all(user_agent: &str) -> Arc<Robot> {
+    Arc::new(
+        Robot::new(user_agent, b"User-Agent: *\nDisallow: /\n")
+            .expect("a static disallow-all robots file parses"),
+    )
+}
+
+/// Resolve a `Location` (absolute or relative) to the next http(s) URL.
+fn redirect_target(current: &str, location: &str) -> Option<String> {
+    let next = reqwest::Url::parse(current).ok()?.join(location).ok()?;
+    matches!(next.scheme(), "http" | "https").then(|| next.to_string())
 }
 
 fn header_str(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Option<String> {
@@ -783,6 +835,93 @@ mod tests {
         assert_eq!(response.status, 302);
         assert_eq!(response.location.as_deref(), Some(location.as_str()));
         assert!(!response.text().contains("must never be fetched"));
+    }
+
+    /// A redirected robots.txt is followed by hand (RFC 9309), so its rules
+    /// still gate the origin that served the redirect.
+    #[tokio::test]
+    async fn redirected_robots_is_followed_and_still_blocks() {
+        let target = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("User-Agent: *\nDisallow: /blocked"),
+            )
+            .mount(&target)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/blocked"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let origin = MockServer::start().await;
+        let robots_target = format!("{}/robots.txt", target.uri());
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(
+                ResponseTemplate::new(301).insert_header("Location", robots_target.as_str()),
+            )
+            .mount(&origin)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/blocked"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(
+                &format!("{}/blocked", origin.uri()),
+                FetchKind::Html,
+            ))
+            .await
+            .expect_err("the redirected robots.txt still disallows /blocked");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
+    }
+
+    /// A robots.txt redirect without a usable `Location` fails closed (AD-10).
+    #[tokio::test]
+    async fn robots_redirect_without_a_location_fails_closed() {
+        let origin = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(ResponseTemplate::new(301))
+            .mount(&origin)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(&format!("{}/page", origin.uri()), FetchKind::Html))
+            .await
+            .expect_err("a broken robots redirect must not allow all");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
+    }
+
+    /// A robots.txt redirect loop stops after five hops and fails closed.
+    #[tokio::test]
+    async fn robots_redirect_loop_fails_closed() {
+        let origin = MockServer::start().await;
+        let itself = format!("{}/robots.txt", origin.uri());
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", itself.as_str()))
+            .expect(6) // the original fetch plus the five allowed hops
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(&format!("{}/page", origin.uri()), FetchKind::Html))
+            .await
+            .expect_err("a redirect loop must not allow all");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
     }
 
     #[tokio::test]
