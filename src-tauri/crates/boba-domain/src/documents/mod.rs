@@ -193,12 +193,13 @@ pub struct Contact {
 }
 
 /// A claim-bearing line: `fact_ids` name the profile facts it is built from
-/// (AD-15). An item with no facts is a fabrication and is rejected by the
-/// validator in S7.3.
+/// (AD-15). The field is **required**: a claim that names no facts is a
+/// fabrication, so an item that does not carry the list at all is not a claim we
+/// are willing to parse. An empty list is parseable and is what the validator in
+/// S7.3 rejects.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claim {
     pub text: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fact_ids: Vec<String>,
 }
 

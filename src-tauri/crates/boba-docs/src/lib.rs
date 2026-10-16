@@ -143,18 +143,25 @@ mod tests {
     }
 
     #[test]
-    fn a_claim_without_facts_serialises_as_an_empty_list_not_a_missing_field() {
+    fn every_claim_carries_fact_ids_and_a_missing_list_fails_to_parse() {
         let mut doc = cv(Lang::En);
         doc.sections[0].items[0].fact_ids = vec![];
         let value: serde_json::Value =
             serde_json::to_value(&doc).expect("serialize the model the validator reads");
-        assert!(
-            value["declared_gaps"][0] == "Kubernetes",
-            "missing keywords stay on the document: {value}"
+        assert_eq!(
+            value["sections"][0]["items"][0]["fact_ids"],
+            serde_json::json!([]),
+            "the list is always written, even when it is empty"
         );
+        assert_eq!(value["declared_gaps"][0], "Kubernetes");
+
+        // AC2: a claim-bearing item without its facts is not a draft we accept.
+        let missing = r#"{"schema_version":1,"lang":"en",
+            "contact":{"full_name":"Ada"},
+            "sections":[{"heading":"Experience","items":[{"text":"Led the billing team"}]}]}"#;
         assert!(
-            value["sections"][0]["items"][0].get("fact_ids").is_none(),
-            "an item with no facts omits the list; S7.3 rejects it"
+            serde_json::from_str::<CvDocument>(missing).is_err(),
+            "an item with no fact_ids must not deserialize"
         );
     }
 

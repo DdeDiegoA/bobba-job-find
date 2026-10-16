@@ -32,8 +32,10 @@ The validator will reject a draft that breaks this, and the whole point of the
 studio is that a user can trust every line.
 
 - Every claim-bearing item — a CV bullet, the summary, a cover-letter paragraph —
-  carries `fact_ids`: the `id`s of the profile facts it was built from. An item
-  whose facts you cannot name is a fabrication: **leave it out**.
+  carries `fact_ids`: the `id`s of the profile facts it was built from. The field
+  is **required**: a draft that leaves it out is rejected before it is stored, and
+  a draft that sends it empty is a claim Boba will not submit. An item whose facts
+  you cannot name is a fabrication: **leave it out**.
 - Never invent an employer, title, date, degree, certification, metric or skill,
   and never invent a `fact_id`. Copy them from `get_profile_facts`.
 - A keyword the posting asks for that the profile does not back goes in
@@ -65,8 +67,9 @@ Call `save_document_draft` **once per document** — the CV, then the cover lett
 {"app_id": "<app_id>", "doc": {"schema_version": 1, "lang": "es", "contact": {...}}}
 ```
 
-The `doc` object is one of these two shapes. `fact_ids` may be omitted only when
-the item has no facts — which, for an item you write, must never happen.
+The `doc` object is one of these two shapes. Every claim-bearing item must carry
+`fact_ids`; omit the field only on an object that is not a claim (`contact`, and
+`sections`/`paragraphs` themselves).
 
 ```json
 {

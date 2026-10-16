@@ -14,7 +14,8 @@
 //! drafting, reviewing and verifying around this step are S7.3–S7.7.
 
 use boba_domain::documents::{
-    CoverLetterDocument, CvDocument, DocumentKind, Lang, NewDocument, TemplateId, new_document_id,
+    CoverLetterDocument, CvDocument, DocumentKind, LanguageChoice, NewDocument, TemplateId,
+    new_document_id,
 };
 
 use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
@@ -34,11 +35,15 @@ pub struct DraftTemplates {
     pub cover: TemplateId,
 }
 
-/// The ids of the two stored documents (the CV, then the cover letter).
+/// The ids of the two stored documents (the CV, then the cover letter), plus the
+/// notice the studio shows when the Offer's language was neither ES nor EN
+/// (FR-70). `None` when the run drafted in the Offer's own language or in the
+/// user's override.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedDrafts {
     pub cv_id: String,
     pub cover_id: String,
+    pub fallback_from: Option<String>,
 }
 
 /// Why a run could not store its drafts.
@@ -54,19 +59,21 @@ pub enum TailorError {
 
 /// Store both drafts as documents of `application_id` (AD-16).
 ///
-/// `lang` is stamped onto both drafts here, so the language the run chose is the
-/// language that is stored — a draft can never disagree with its own row — and
-/// both rows are written `untrusted_origin = true` (ADR-010, AC7). A failure on
-/// the second insert leaves the first document stored: the studio regenerates,
-/// which bumps `version` (S7.1).
+/// `language` is the choice the run drafted in: it is stamped onto both drafts
+/// here, so a draft can never disagree with its own row, and both rows are
+/// written `untrusted_origin = true` (ADR-010, AC7). Its `fallback_from` comes
+/// back in [`SavedDrafts`] so the studio can explain an EN draft of a posting in
+/// some other language (FR-70). A failure on the second insert leaves the first
+/// document stored: the studio regenerates, which bumps `version` (S7.1).
 pub fn save_drafts(
     repo: &dyn DocumentsRepo,
     application_id: &str,
-    lang: Lang,
+    language: &LanguageChoice,
     templates: &DraftTemplates,
     drafts: &Drafts,
     created_at: &str,
 ) -> Result<SavedDrafts, TailorError> {
+    let lang = language.lang;
     let save = |kind: DocumentKind,
                 template: &TemplateId,
                 model_json: String|
@@ -96,7 +103,11 @@ pub fn save_drafts(
         &templates.cover,
         json(&drafts.cover.clone().with_lang(lang))?,
     )?;
-    Ok(SavedDrafts { cv_id, cover_id })
+    Ok(SavedDrafts {
+        cv_id,
+        cover_id,
+        fallback_from: language.fallback_from.clone(),
+    })
 }
 
 fn json(model: &impl serde::Serialize) -> Result<String, TailorError> {
@@ -108,7 +119,7 @@ mod tests {
     use std::sync::Mutex;
 
     use boba_domain::documents::{
-        Claim, Contact, DocumentRecord, LanguageChoice, Link, SCHEMA_VERSION, Section,
+        Claim, Contact, DocumentRecord, Lang, Link, SCHEMA_VERSION, Section,
     };
 
     use super::*;
@@ -249,7 +260,7 @@ mod tests {
         let saved = save_drafts(
             &repo,
             "app_1",
-            choice.lang,
+            &choice,
             &templates(),
             &drafts(Lang::En), // the agent answered in the wrong language
             "2026-10-16T09:00:00Z",
@@ -274,6 +285,10 @@ mod tests {
         assert_eq!(rows[1].template.as_str(), "cover-classic");
         assert_eq!(rows[0].id, saved.cv_id);
         assert_eq!(rows[1].id, saved.cover_id);
+        assert_eq!(
+            saved.fallback_from, None,
+            "the Offer's own language needs no notice"
+        );
     }
 
     // AC2/AC7: every claim carries its facts, gaps are declared, and an
@@ -284,7 +299,7 @@ mod tests {
         save_drafts(
             &repo,
             "app_1",
-            Lang::En,
+            &Lang::for_offer("en", None),
             &templates(),
             &drafts(Lang::En),
             "2026-10-16T09:00:00Z",
@@ -299,12 +314,39 @@ mod tests {
         assert_eq!(cv["declared_gaps"][0], "Kubernetes");
     }
 
+    // AC1: an override needs no notice, a fallback hands its reason back to the
+    // caller, and a draft of the Offer's own language carries neither.
     #[test]
-    fn an_override_is_drafted_and_a_fallback_keeps_its_reason() {
-        assert_eq!(Lang::for_offer("es", Some(Lang::En)).lang, Lang::En);
-        let fallback = Lang::for_offer("de", None);
-        assert_eq!(fallback.lang, Lang::En);
-        assert_eq!(fallback.fallback_from.as_deref(), Some("de"));
+    fn an_override_is_drafted_and_a_fallback_reaches_the_caller() {
+        let repo = FakeDocumentsRepo::default();
+
+        let override_choice = Lang::for_offer("es", Some(Lang::En));
+        let saved = save_drafts(
+            &repo,
+            "app_1",
+            &override_choice,
+            &templates(),
+            &drafts(Lang::En),
+            "t",
+        )
+        .expect("save");
+        assert_eq!(saved.fallback_from, None, "an override is not a fallback");
+        assert_eq!(repo.rows()[0].lang, Lang::En);
+
+        let saved = save_drafts(
+            &repo,
+            "app_2",
+            &Lang::for_offer("de", None),
+            &templates(),
+            &drafts(Lang::En),
+            "t",
+        )
+        .expect("save");
+        assert_eq!(
+            saved.fallback_from.as_deref(),
+            Some("de"),
+            "the studio is told why an EN draft was written for a German posting"
+        );
     }
 
     #[test]
@@ -316,7 +358,7 @@ mod tests {
         let error = save_drafts(
             &repo,
             "app_1",
-            Lang::En,
+            &Lang::for_offer("en", None),
             &templates(),
             &drafts(Lang::En),
             "t",
