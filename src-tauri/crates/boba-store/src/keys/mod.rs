@@ -200,6 +200,26 @@ pub fn install_platform_store() -> Result<(), KeyError> {
     Ok(())
 }
 
+/// The one mock credential store a **test binary** installs.
+///
+/// Every test helper routes through it (`keys` and `repos::audit`), so the
+/// process-wide default is set exactly once and never replaced: a second
+/// installer used to swap the store under a running test, and one reached the
+/// real macOS keychain. Tests install this before any other keychain call, so
+/// [`install_platform_store`] never opens a platform store from a test (S8.1).
+#[cfg(test)]
+pub(crate) fn use_mock_keychain() -> Arc<CredentialStore> {
+    static STORE: std::sync::OnceLock<Arc<CredentialStore>> = std::sync::OnceLock::new();
+    STORE
+        .get_or_init(|| {
+            let store: Arc<CredentialStore> =
+                keyring_core::mock::Store::new().expect("mock keychain");
+            keyring_core::set_default_store(Arc::clone(&store));
+            store
+        })
+        .clone()
+}
+
 #[cfg(target_os = "macos")]
 fn platform_store() -> Result<Arc<CredentialStore>, KeyError> {
     let store: Arc<CredentialStore> = apple_native_keyring_store::keychain::Store::new()
@@ -259,23 +279,12 @@ pub fn load_or_create(db_path: &Path, service: &str) -> Result<DbKey, KeyError> 
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, OnceLock};
-
     use super::*;
 
-    /// One in-process mock keychain: these tests never touch a real keychain
-    /// (S8.1). Keyed by the process, so every test in this module shares it and
-    /// uses its own reference.
-    fn mock_keychain() {
-        static ONCE: OnceLock<()> = OnceLock::new();
-        ONCE.get_or_init(|| {
-            let store: Arc<CredentialStore> = keyring_core::mock::Store::new().expect("mock");
-            keyring_core::set_default_store(store);
-        });
-    }
-
+    /// The whole test binary shares one mock keychain (see `use_mock_keychain`);
+    /// this module's tests never touch a real platform store (S8.1).
     fn store() -> SecretStore {
-        mock_keychain();
+        use_mock_keychain();
         SecretStore::new("app.bobajobfind.test")
     }
 

@@ -359,6 +359,38 @@ fn auth_error_classifies_and_pauses_ai() {
     assert_eq!(run.failure_reason.as_deref(), Some("auth_expired"));
 }
 
+// AC3 (S2.2 regression): the run must not classify until the stderr pipe is
+// closed. `reap()` used to leave the stderr reader racing the classification,
+// so a stderr that closes late (a grandchild still holding it) made an
+// auth-expired run come back `Unsupported` instead of `AuthExpired`.
+#[cfg(unix)]
+#[test]
+fn auth_error_is_classified_when_stderr_closes_late() {
+    let repo = Arc::new(FakeRepo::default());
+    let runtime = runtime(Arc::clone(&repo));
+    let handle = runtime.start(
+        task(RunBudget::default()),
+        spec(&[
+            ("BOBA_FAKE_MODE", "fail-auth"),
+            ("BOBA_FAKE_STDERR_HOLD_MS", "700"),
+        ]),
+    );
+    let (run_id, events) = drain(handle);
+
+    match events.last() {
+        Some(AgentEvent::Failed { reason, .. }) => {
+            assert_eq!(
+                *reason,
+                FailureReason::AuthExpired,
+                "a late stderr close must not downgrade auth to Unsupported"
+            );
+        }
+        other => panic!("expected Failed(AuthExpired), got {other:?}"),
+    }
+    let run = repo.get_run(&run_id).unwrap().expect("run");
+    assert_eq!(run.failure_reason.as_deref(), Some("auth_expired"));
+}
+
 // AC3: classification covers quota and not-found as well.
 #[test]
 fn classify_failure_maps_quota_and_not_found() {

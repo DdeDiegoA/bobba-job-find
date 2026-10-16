@@ -49,6 +49,7 @@ pub struct SupervisedProcess {
     lines: Receiver<String>,
     reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<String>>,
+    stderr_reader: Option<JoinHandle<()>>,
     reaped: bool,
 }
 
@@ -105,9 +106,10 @@ impl SupervisedProcess {
             })?;
 
         let stderr = Arc::new(Mutex::new(String::new()));
+        let mut stderr_reader = None;
         if let Some(pipe) = stderr_pipe {
             let sink = Arc::clone(&stderr);
-            let _ = thread::Builder::new()
+            stderr_reader = thread::Builder::new()
                 .name("boba-agent-stderr".to_string())
                 .spawn(move || {
                     let mut text = String::new();
@@ -116,7 +118,8 @@ impl SupervisedProcess {
                     if let Ok(mut guard) = sink.lock() {
                         guard.push_str(&text);
                     }
-                });
+                })
+                .ok();
         }
 
         Ok(Self {
@@ -124,6 +127,7 @@ impl SupervisedProcess {
             lines,
             reader: Some(reader),
             stderr,
+            stderr_reader,
             reaped: false,
         })
     }
@@ -162,6 +166,11 @@ impl SupervisedProcess {
         self.reaped = true;
         let _ = self.child.wait();
         if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+        // Join the stderr reader too: `stderr_so_far()` must never race it, or
+        // an auth failure can be classified from an empty string.
+        if let Some(reader) = self.stderr_reader.take() {
             let _ = reader.join();
         }
     }
