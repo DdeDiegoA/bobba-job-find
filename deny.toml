@@ -50,6 +50,17 @@ ignore = [
     # Revisit: citationberg allows quick-xml >=0.41, or typst bumps its citation stack.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
+    # --- CH3 (2026-10-15): unsafe-libyaml, approved by Diego. ---
+    # unsafe-libyaml 0.2.11 (unmaintained; upstream archived 2024-03-25, patched = [] i.e. no safe
+    # upgrade exists, no known vuln).
+    # Path: serde_yaml 0.9.34+deprecated -> hayagriva / typst-library -> typst -> boba-docs.
+    # Reached only from CSL/bibliography parsing (hayagriva) and typst's `yaml()` / data-file
+    # loading. Unreachable: our four templates (cv|cover/{classic,modern}.typ) only do
+    # `json(sys.inputs.data)` — no #cite, #bibliography, yaml() or file reads — and never parse
+    # untrusted YAML. Same reachability argument as CH2's RUSTSEC-2024-0320.
+    # Revisit: hayagriva/typst drops serde_yaml (re-assessed by every E7 slice, see the standing
+    # guard in docs/product/backlog.md and IB-2).
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml/hayagriva/typst-library; unmaintained, no safe upgrade, YAML path unreachable from our templates" },
 ]
 
 [licenses]
