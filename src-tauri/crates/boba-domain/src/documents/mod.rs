@@ -168,6 +168,73 @@ pub struct RenderedPdf {
     pub layout: LayoutReport,
 }
 
+/// What a parser reads back out of a rendered PDF (FR-77, SM-8, AD-14).
+///
+/// S7.6 fills it from the PDF's **own text layer**, so the check looks at what an
+/// ATS sees and not at what the document meant to print: contact details as
+/// literal text, the document's own reading order, no `(cid:` or U+FFFD, and the
+/// requirement keywords the Profile backs (FR-75).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TextLayerReport {
+    /// The text the extractor read back, in reading order.
+    pub text_layer: String,
+    /// Contact fields the layer does not show as literal text (FR-77).
+    pub missing_contact: Vec<String>,
+    /// Profile-backed requirement keywords the layer does not show (FR-77).
+    pub missing_keywords: Vec<String>,
+    /// Blocks whose order the layer does not follow, in document order (FR-77).
+    pub out_of_order: Vec<String>,
+    /// The undecodable markers found in the layer: `(cid:` and `U+FFFD` (FR-77).
+    pub undecodable: Vec<String>,
+}
+
+impl TextLayerReport {
+    /// Whether an ATS can read this render (AC1, SM-8): nothing missing, nothing
+    /// out of order, nothing undecodable.
+    pub fn passed(&self) -> bool {
+        self.missing_contact.is_empty()
+            && self.missing_keywords.is_empty()
+            && self.out_of_order.is_empty()
+            && self.undecodable.is_empty()
+    }
+}
+
+/// The verdict of the three checks a render must pass (AD-14, AC3).
+///
+/// Built from the layout facts (§page budget and orphans), the ATS text layer and
+/// the fabrication check (AD-15, as `ValidationReport::is_ready` answers it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationReport {
+    pub layout: LayoutReport,
+    pub text_layer: TextLayerReport,
+    /// Whether the fabrication check passed (FR-74, AD-15).
+    pub fabrication_ready: bool,
+}
+
+impl VerificationReport {
+    /// FR-76: a cover letter is exactly one page, and a CV stays inside the page
+    /// budget the user chose (1–3, default 2); neither may end on a heading with
+    /// nothing under it.
+    pub fn layout_passes(&self, kind: DocumentKind, page_budget: u32) -> bool {
+        if self.layout.orphans > 0 {
+            return false;
+        }
+        match kind {
+            DocumentKind::CoverLetter => self.layout.pages == 1,
+            DocumentKind::Cv => self.layout.pages <= page_budget,
+        }
+    }
+
+    /// AC3 (AD-14): a document is `verified` only when the layout, ATS and
+    /// fabrication checks all pass. Only a `verified` document may be attached to
+    /// a submission.
+    pub fn is_verified(&self, kind: DocumentKind, page_budget: u32) -> bool {
+        self.layout_passes(kind, page_budget)
+            && self.text_layer.passed()
+            && self.fabrication_ready
+    }
+}
+
 /// A named link in the contact block (portfolio, GitHub, LinkedIn…).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Link {
@@ -467,5 +534,140 @@ mod tests {
         let id = new_document_id();
         assert!(id.starts_with("doc_"), "{id}");
         assert_ne!(id, new_document_id());
+    }
+
+    fn text_layer() -> TextLayerReport {
+        TextLayerReport {
+            text_layer: "Ada Lovelace ada@example.com Experience Rust".into(),
+            missing_contact: vec![],
+            missing_keywords: vec![],
+            out_of_order: vec![],
+            undecodable: vec![],
+        }
+    }
+
+    fn report(layout: LayoutReport, text_layer: TextLayerReport) -> VerificationReport {
+        VerificationReport {
+            layout,
+            text_layer,
+            fabrication_ready: true,
+        }
+    }
+
+    fn two_pages() -> LayoutReport {
+        LayoutReport {
+            pages: 2,
+            orphans: 0,
+        }
+    }
+
+    // FR-77, SM-8: the ATS check passes only when the parser found everything.
+    #[test]
+    fn a_text_layer_passes_only_when_nothing_is_missing() {
+        assert!(text_layer().passed());
+
+        for failed in [
+            TextLayerReport {
+                missing_contact: vec!["email".into()],
+                ..text_layer()
+            },
+            TextLayerReport {
+                missing_keywords: vec!["rust".into()],
+                ..text_layer()
+            },
+            TextLayerReport {
+                out_of_order: vec!["Experience".into()],
+                ..text_layer()
+            },
+            TextLayerReport {
+                undecodable: vec!["(cid:".into(), "U+FFFD".into()],
+                ..text_layer()
+            },
+        ] {
+            assert!(!failed.passed(), "{failed:?}");
+        }
+    }
+
+    // FR-76: the letter is exactly one page; a CV fits the budget the user chose.
+    #[test]
+    fn the_page_budget_is_per_kind_and_an_orphan_never_passes() {
+        let one_page = report(
+            LayoutReport {
+                pages: 1,
+                orphans: 0,
+            },
+            text_layer(),
+        );
+        assert!(one_page.layout_passes(DocumentKind::Cv, 2));
+        assert!(one_page.layout_passes(DocumentKind::CoverLetter, 3));
+
+        let two_pages = report(two_pages(), text_layer());
+        assert!(two_pages.layout_passes(DocumentKind::Cv, 2));
+        assert!(
+            !two_pages.layout_passes(DocumentKind::Cv, 1),
+            "one page was asked for"
+        );
+        assert!(
+            !two_pages.layout_passes(DocumentKind::CoverLetter, 3),
+            "a cover letter is exactly one page, whatever the CV budget says"
+        );
+
+        let orphaned = report(
+            LayoutReport {
+                pages: 1,
+                orphans: 1,
+            },
+            text_layer(),
+        );
+        assert!(!orphaned.layout_passes(DocumentKind::Cv, 2));
+        assert!(!orphaned.layout_passes(DocumentKind::CoverLetter, 2));
+    }
+
+    // AC3 (AD-14): all three checks, or the document is not `verified`.
+    #[test]
+    fn a_document_is_verified_only_when_all_three_checks_pass() {
+        let verified = report(two_pages(), text_layer());
+        assert!(verified.is_verified(DocumentKind::Cv, 2));
+
+        let over_budget = report(
+            LayoutReport {
+                pages: 3,
+                orphans: 0,
+            },
+            text_layer(),
+        );
+        assert!(!over_budget.is_verified(DocumentKind::Cv, 2), "layout failed");
+
+        let unreadable = report(
+            two_pages(),
+            TextLayerReport {
+                undecodable: vec!["(cid:".into()],
+                ..text_layer()
+            },
+        );
+        assert!(!unreadable.is_verified(DocumentKind::Cv, 2), "ATS failed");
+
+        let fabricated = VerificationReport {
+            layout: two_pages(),
+            text_layer: text_layer(),
+            fabrication_ready: false,
+        };
+        assert!(
+            !fabricated.is_verified(DocumentKind::Cv, 2),
+            "the fabrication check failed"
+        );
+
+        let all_wrong = VerificationReport {
+            layout: LayoutReport {
+                pages: 4,
+                orphans: 1,
+            },
+            text_layer: TextLayerReport {
+                missing_keywords: vec!["rust".into()],
+                ..text_layer()
+            },
+            fabrication_ready: false,
+        };
+        assert!(!all_wrong.is_verified(DocumentKind::Cv, 2));
     }
 }
