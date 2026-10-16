@@ -17,6 +17,8 @@ use boba_domain::documents::{
     CoverLetterDocument, CvDocument, DocumentKind, LanguageChoice, NewDocument, TemplateId,
     new_document_id,
 };
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 
@@ -35,14 +37,18 @@ pub struct DraftTemplates {
     pub cover: TemplateId,
 }
 
-/// The ids of the two stored documents (the CV, then the cover letter), plus the
-/// notice the studio shows when the Offer's language was neither ES nor EN
-/// (FR-70). `None` when the run drafted in the Offer's own language or in the
-/// user's override.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The two stored documents of a tailoring run, as the payload the tailor
+/// surface returns to the studio (AD-3: typed, translated by the UI).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct SavedDrafts {
+    /// The draft CV's document id.
     pub cv_id: String,
+    /// The draft cover letter's document id.
     pub cover_id: String,
+    /// The Offer's language, set only when it was neither ES nor EN and the run
+    /// drafted in EN anyway (FR-70). The studio shows it as the reason for the
+    /// language it did not expect; `None` means there is nothing to explain. The
+    /// same value is stored on both documents, so a reload keeps the notice.
     pub fallback_from: Option<String>,
 }
 
@@ -86,6 +92,8 @@ pub fn save_drafts(
             lang,
             template: template.clone(),
             model_json,
+            // Stored with the row, so the studio's notice survives a reload.
+            language_fallback_from: language.fallback_from.clone(),
             // Agent-written text that read the posting: untrusted (ADR-010, AC7).
             untrusted_origin: true,
             created_at: created_at.to_string(),
@@ -332,6 +340,11 @@ mod tests {
         .expect("save");
         assert_eq!(saved.fallback_from, None, "an override is not a fallback");
         assert_eq!(repo.rows()[0].lang, Lang::En);
+        assert_eq!(
+            repo.rows()[0].language_fallback_from,
+            None,
+            "an override leaves nothing to explain"
+        );
 
         let saved = save_drafts(
             &repo,
@@ -346,6 +359,13 @@ mod tests {
             saved.fallback_from.as_deref(),
             Some("de"),
             "the studio is told why an EN draft was written for a German posting"
+        );
+        assert!(
+            repo.rows()
+                .iter()
+                .filter(|row| row.application_id == "app_2")
+                .all(|row| row.language_fallback_from.as_deref() == Some("de")),
+            "and the reason is stored with both documents"
         );
     }
 

@@ -460,6 +460,7 @@ mod tests {
                     lang: Lang::En,
                     template: TemplateId::new("classic"),
                     model_json: "{}".into(),
+                    language_fallback_from: None,
                     untrusted_origin: true,
                     created_at: "2026-10-16T09:00:00Z".into(),
                 },

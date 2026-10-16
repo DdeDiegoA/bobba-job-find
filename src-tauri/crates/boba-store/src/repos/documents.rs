@@ -32,7 +32,7 @@ fn bad_value(column: &'static str, value: String) -> rusqlite::Error {
 
 const SELECT: &str = "SELECT id, application_id, kind, lang, template, version, model_json, \
      pdf_blob IS NOT NULL, docx_blob IS NOT NULL, verification_json, verified_at, \
-     untrusted_origin, created_at, updated_at \
+     language_fallback_from, untrusted_origin, created_at, updated_at \
      FROM document";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<DocumentRecord> {
@@ -50,9 +50,10 @@ fn row(r: &Row<'_>) -> rusqlite::Result<DocumentRecord> {
         has_docx: r.get::<_, i64>(8)? != 0,
         verification_json: r.get(9)?,
         verified_at: r.get(10)?,
-        untrusted_origin: r.get::<_, i64>(11)? != 0,
-        created_at: r.get(12)?,
-        updated_at: r.get(13)?,
+        language_fallback_from: r.get(11)?,
+        untrusted_origin: r.get::<_, i64>(12)? != 0,
+        created_at: r.get(13)?,
+        updated_at: r.get(14)?,
     })
 }
 
@@ -62,8 +63,8 @@ pub fn insert(conn: &Connection, new: &NewDocument) -> Result<i64, StoreError> {
     conn.execute(
         "INSERT INTO document \
          (id, application_id, kind, lang, template, version, model_json, untrusted_origin, \
-          created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+          language_fallback_from, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
         params![
             new.id,
             new.application_id,
@@ -73,6 +74,7 @@ pub fn insert(conn: &Connection, new: &NewDocument) -> Result<i64, StoreError> {
             version,
             new.model_json,
             i64::from(new.untrusted_origin),
+            new.language_fallback_from,
             new.created_at,
         ],
     )?;
@@ -288,6 +290,7 @@ mod tests {
             lang: Lang::En,
             template: TemplateId::new(template),
             model_json: "{\"schema_version\":1}".into(),
+            language_fallback_from: None,
             untrusted_origin: true,
             created_at: "2026-10-05T00:00:00Z".into(),
         }
@@ -392,6 +395,11 @@ mod tests {
         )
         .unwrap();
         assert!(get(&conn, "doc_2").unwrap().unwrap().untrusted_origin);
+        assert_eq!(
+            get(&conn, "doc_2").unwrap().unwrap().language_fallback_from,
+            None,
+            "a draft in the Offer's own language has nothing to explain"
+        );
 
         let default: String = conn
             .query_row(
@@ -401,5 +409,29 @@ mod tests {
             )
             .expect("the column exists");
         assert_eq!(default, "1", "the migration's default is untrusted");
+    }
+
+    // FR-70: the reason a draft is not in the Offer's language is stored with the
+    // document, so the studio can explain itself after a reload.
+    #[test]
+    fn a_language_fallback_is_persisted_with_its_document() {
+        let conn = connection();
+        let fallback = NewDocument {
+            language_fallback_from: Some("de".into()),
+            ..new("doc_1", DocumentKind::Cv, "cv-classic")
+        };
+        insert(&conn, &fallback).unwrap();
+
+        let record = get(&conn, "doc_1").unwrap().expect("the row");
+        assert_eq!(record.language_fallback_from.as_deref(), Some("de"));
+        assert_eq!(record.lang, Lang::En, "the fallback language is EN");
+        assert_eq!(
+            latest(&conn, "app_1", DocumentKind::Cv)
+                .unwrap()
+                .expect("the row")
+                .language_fallback_from
+                .as_deref(),
+            Some("de")
+        );
     }
 }

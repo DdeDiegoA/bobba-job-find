@@ -322,6 +322,11 @@ pub struct NewDocument {
     pub template: TemplateId,
     /// The serialized [`CvDocument`] / [`CoverLetterDocument`].
     pub model_json: String,
+    /// The Offer's language, when it was neither ES nor EN and the run drafted in
+    /// EN anyway (FR-70). `None` when the draft is in the Offer's own language or
+    /// in the user's override: there is no notice to show. Stored with the
+    /// document so the studio can still explain itself after a reload.
+    pub language_fallback_from: Option<String>,
     /// Drafts come from an agent run (ADR-010), so their origin is untrusted
     /// until the verifier (S7.5/S7.6) has passed them.
     pub untrusted_origin: bool,
@@ -342,6 +347,8 @@ pub struct DocumentRecord {
     pub has_docx: bool,
     pub verification_json: Option<String>,
     pub verified_at: Option<String>,
+    /// See [`NewDocument::language_fallback_from`].
+    pub language_fallback_from: Option<String>,
     pub untrusted_origin: bool,
     pub created_at: String,
     pub updated_at: String,
