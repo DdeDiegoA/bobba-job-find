@@ -12,6 +12,7 @@ pub mod opencode;
 
 use std::path::PathBuf;
 
+use boba_app::ports::agent::AgentEvent;
 use serde::{Deserialize, Serialize};
 
 /// The agent CLIs Boba knows how to drive (FR-2).
@@ -86,18 +87,98 @@ impl CliKind {
 
     /// The flags that start **one non-interactive run** with `prompt`, in the
     /// order the CLI documents them, without the MCP-config flag (the caller
-    /// adds that). `None` when this CLI's argv is not wired yet.
+    /// adds that). `None` when this CLI cannot run unattended at all.
     ///
     /// Every flag is checked against the CLI's recorded `--help` fixture in the
     /// test below. Both CLIs list the prompt as a positional/option value after
     /// their print flag, and neither documents an end-of-options `--`, so a
     /// prompt that could be read as an option is the caller's to refuse.
+    ///
+    /// Claude Code additionally asks for `--output-format stream-json`: that is
+    /// what makes the run's init event (and with it ADR-010 §1's lockdown
+    /// check) visible to the runtime, and what lets the run report prose instead
+    /// of one opaque blob. `--verbose` is required by the CLI for that format
+    /// (checked against the fixture).
     pub fn non_interactive_argv(self, prompt: &str) -> Option<Vec<String>> {
         match self {
-            CliKind::ClaudeCode => Some(vec!["--print".to_string(), prompt.to_string()]),
+            CliKind::ClaudeCode => Some(vec![
+                "--print".to_string(),
+                "--verbose".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                prompt.to_string(),
+            ]),
             CliKind::GeminiCli => Some(vec!["--prompt".to_string(), prompt.to_string()]),
-            CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
+            // Codex, OpenCode and Aider: the prompt goes after the CLI's own
+            // non-interactive subcommand.
+            CliKind::Codex => Some(vec![
+                "exec".to_string(),
+                "--json".to_string(),
+                "--skip-git-repo-check".to_string(),
+                prompt.to_string(),
+            ]),
+            CliKind::OpenCode => Some(vec![
+                "run".to_string(),
+                "--format".to_string(),
+                "json".to_string(),
+                prompt.to_string(),
+            ]),
+            CliKind::Aider => Some(vec![
+                "--message".to_string(),
+                prompt.to_string(),
+                "--yes-always".to_string(),
+                "--no-git".to_string(),
+            ]),
         }
+    }
+
+    /// How this CLI is told about the run's `boba` MCP server (AD-6). Every CLI
+    /// needs one: without it a run could neither read its input nor write its
+    /// output.
+    pub const fn mcp_wiring(self) -> McpWiring {
+        match self {
+            CliKind::ClaudeCode | CliKind::GeminiCli => McpWiring::ConfigFile("--mcp-config"),
+            CliKind::Codex => McpWiring::Overrides,
+            CliKind::OpenCode => McpWiring::WorkspaceFile("opencode.json"),
+            // Aider has no MCP support (its recorded `--help` lists none), so a
+            // run on it could never reach Boba's tools.
+            CliKind::Aider => McpWiring::Unsupported,
+        }
+    }
+
+    /// The MCP config a `WorkspaceFile` CLI reads from its own workspace, as
+    /// `(file name, contents)`. `None` for the CLIs that take their config
+    /// another way.
+    ///
+    /// The shape is the CLI's own, so it lives with the driver: OpenCode reads
+    /// `opencode.json` (`mcp.<name>` = a local server, `environment` for the
+    /// shim's endpoint and token).
+    pub fn workspace_mcp_config(
+        self,
+        shim: &std::path::Path,
+        endpoint: &str,
+        token: &str,
+    ) -> Option<(&'static str, serde_json::Value)> {
+        let McpWiring::WorkspaceFile(file) = self.mcp_wiring() else {
+            return None;
+        };
+        Some((
+            file,
+            serde_json::json!({
+                "$schema": "https://opencode.ai/config.json",
+                "mcp": {
+                    boba_mcp_proto::tool::SERVER_NAME: {
+                        "type": "local",
+                        "command": [shim.display().to_string()],
+                        "environment": {
+                            boba_mcp_proto::schema::ENV_ENDPOINT: endpoint,
+                            boba_mcp_proto::schema::ENV_TOKEN: token,
+                        },
+                        "enabled": true,
+                    }
+                },
+            }),
+        ))
     }
 
     /// Install link shown for a "Not installed" CLI (FR-2).
@@ -109,6 +190,87 @@ impl CliKind {
             CliKind::GeminiCli => "https://github.com/google-gemini/gemini-cli",
             CliKind::Aider => "https://aider.chat/docs/install.html",
         }
+    }
+}
+
+/// How a run's `boba` MCP server reaches a CLI (AD-6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpWiring {
+    /// A `--flag <path>` pointing at the run's MCP config file, written by the
+    /// runtime.
+    ConfigFile(&'static str),
+    /// A config file the CLI reads from the run's workspace by itself.
+    WorkspaceFile(&'static str),
+    /// Config overrides on the command line; the endpoint and the token travel
+    /// in the process environment, never in argv (AD-6).
+    Overrides,
+    /// The CLI has no MCP support, so no run on it may start.
+    Unsupported,
+}
+
+/// One CLI's view of an init event's tool list (ADR-010 §1), when the line was
+/// one: the runtime checks it before an untrusted run may continue.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Line {
+    /// Normalised events for this line (AD-4).
+    pub events: Vec<AgentEvent>,
+    /// The tool list the CLI reported at the start of the run, when this line
+    /// was its init event. `None` for every other line, and for a CLI that
+    /// reports no init event (nothing to verify, so nothing gets verified).
+    pub init_tools: Option<Vec<String>>,
+}
+
+/// Reads one CLI's stdout stream into normalised events, keeping the little
+/// state a stream needs (Claude Code's tool-use ids, so a tool result can name
+/// its tool). One per run.
+#[derive(Debug, Default)]
+pub enum StreamReader {
+    /// Claude Code's `stream-json`.
+    Claude(claude_code::Stream),
+    /// A CLI whose stdout is plain lines, or tagged JSON events already in the
+    /// `AgentEvent` wire shape.
+    #[default]
+    Plain,
+}
+
+impl StreamReader {
+    /// The reader for `kind`. Every non-Claude CLI goes through `Plain` until
+    /// its own stream format is wired.
+    pub fn for_cli(kind: CliKind) -> Self {
+        match kind {
+            CliKind::ClaudeCode => StreamReader::Claude(claude_code::Stream::default()),
+            _ => StreamReader::Plain,
+        }
+    }
+
+    /// Normalise one stdout line.
+    pub fn line(&mut self, line: &str) -> Line {
+        match self {
+            StreamReader::Claude(stream) => stream.line(line),
+            StreamReader::Plain => plain_line(line),
+        }
+    }
+}
+
+/// The CLI-agnostic parse: a tagged `AgentEvent` JSON line, or plain text.
+pub fn plain_line(line: &str) -> Line {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Line::default();
+    }
+    if trimmed.starts_with('{')
+        && let Ok(event) = serde_json::from_str::<AgentEvent>(trimmed)
+    {
+        return Line {
+            events: vec![event],
+            init_tools: None,
+        };
+    }
+    Line {
+        events: vec![AgentEvent::Text {
+            text: trimmed.to_string(),
+        }],
+        init_tools: None,
     }
 }
 
@@ -274,9 +436,19 @@ mod tests {
         let argv = CliKind::ClaudeCode
             .non_interactive_argv("do the thing")
             .expect("claude argv");
-        assert_eq!(argv, vec!["--print", "do the thing"]);
-        assert!(claude.contains("--print"));
-        assert!(claude.contains("[prompt]"), "the prompt is positional");
+        assert_eq!(
+            argv,
+            vec![
+                "--print",
+                "--verbose",
+                "--output-format",
+                "stream-json",
+                "do the thing"
+            ]
+        );
+        for needle in ["--print", "--verbose", "--output-format", "stream-json"] {
+            assert!(claude.contains(needle), "claude does not document {needle}");
+        }
 
         let gemini = include_str!("fixtures/gemini_help.txt");
         let argv = CliKind::GeminiCli
@@ -285,8 +457,75 @@ mod tests {
         assert_eq!(argv, vec!["--prompt", "do the thing"]);
         assert!(gemini.contains("--prompt"));
 
-        for kind in [CliKind::Codex, CliKind::OpenCode, CliKind::Aider] {
-            assert_eq!(kind.non_interactive_argv("x"), None, "{}", kind.id());
+        // The three CLIs that take their prompt after a subcommand, each flag
+        // checked against its own recorded help.
+        for (kind, fixture, argv) in [
+            (
+                CliKind::Codex,
+                include_str!("fixtures/codex_help.txt"),
+                vec!["exec", "--json", "--skip-git-repo-check", "do the thing"],
+            ),
+            (
+                CliKind::OpenCode,
+                include_str!("fixtures/opencode_help.txt"),
+                vec!["run", "--format", "json", "do the thing"],
+            ),
+            (
+                CliKind::Aider,
+                include_str!("fixtures/aider_help.txt"),
+                vec!["--message", "do the thing", "--yes-always", "--no-git"],
+            ),
+        ] {
+            let built = kind.non_interactive_argv("do the thing").expect("argv");
+            assert_eq!(built, argv, "{}", kind.display_name());
+            for flag in argv.iter().filter(|arg| arg.starts_with('-')) {
+                assert!(
+                    fixture.contains(flag),
+                    "{} does not document {flag}",
+                    kind.display_name()
+                );
+            }
+            if kind != CliKind::Aider {
+                // The subcommand is what makes it non-interactive.
+                assert!(fixture.contains(argv[0]), "{}", kind.display_name());
+            }
+        }
+    }
+
+    #[test]
+    fn every_cli_says_how_its_mcp_server_reaches_it() {
+        // AD-6: without a way to reach `boba-mcp`, a run could neither read its
+        // input nor write its output, so every CLI must answer, and the answer
+        // must be evidence-backed.
+        for kind in CliKind::ALL {
+            match kind.mcp_wiring() {
+                McpWiring::ConfigFile(flag) => {
+                    let fixture = match kind {
+                        CliKind::ClaudeCode => include_str!("fixtures/claude_code_help.txt"),
+                        CliKind::GeminiCli => include_str!("fixtures/gemini_help.txt"),
+                        other => panic!("{} has no recorded help", other.display_name()),
+                    };
+                    assert_eq!(Some(flag), kind.mcp_config_flag());
+                    assert!(fixture.contains(flag), "{}", kind.display_name());
+                }
+                McpWiring::Overrides => {
+                    // Codex's own help names the override it takes.
+                    let help = include_str!("fixtures/codex_help.txt");
+                    assert!(help.contains("-c, --config <key=value>"));
+                    assert!(help.contains("mcp_servers.boba.command"));
+                }
+                McpWiring::WorkspaceFile(file) => {
+                    assert!(file.ends_with(".json"), "{file}");
+                }
+                McpWiring::Unsupported => {
+                    // The CLI's recorded help lists no MCP support at all.
+                    assert!(
+                        !include_str!("fixtures/aider_help.txt").contains("mcp"),
+                        "Aider's help mentions MCP"
+                    );
+                    assert_eq!(kind, CliKind::Aider);
+                }
+            }
         }
     }
 

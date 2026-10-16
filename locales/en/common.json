@@ -9,6 +9,7 @@
   "errors.agent.cancelled": "The AI task was cancelled.",
   "errors.agent.unsupported": "This task needs an AI tool with a verified tool lockdown, because it reads content from the web. Pick a Full CLI to enable it; other work continues.",
   "errors.agent.crashed": "The AI tool stopped unexpectedly. Other work continues.",
+  "errors.agent.invalid_output": "The AI tool kept answering in a shape Boba can't use, so the task was stopped. Try again.",
   "errors.store.locked": "Boba can't reach your data yet. Unlock it to continue.",
   "errors.profile.store": "Your profile could not be read or saved.",
   "errors.profile.no_variant": "Add the text in English or Spanish.",

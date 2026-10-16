@@ -308,7 +308,7 @@ mod tests {
         );
         let path = write_exe(&dir, "claude", &script);
         let install = probe_path(CliKind::ClaudeCode, &path).expect("install");
-        assert_eq!(install.version, "2.1.289 (Claude Code)");
+        assert_eq!(install.version, "2.1.301 (Claude Code)");
         assert_eq!(install.health, HealthStatus::Healthy);
         assert!(install.capabilities.stream_json);
         assert!(install.capabilities.mcp);

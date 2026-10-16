@@ -206,6 +206,13 @@ pub fn pinned_args(cli: CliKind, task_id: &str) -> Option<Vec<String>> {
                 .join(",");
             Some(vec![
                 "--strict-mcp-config".to_string(),
+                // `--tools ""` **removes** the CLI's own built-in tools (its
+                // `--help`: "Use \"\" to disable all tools"). This is the
+                // removal the run-time observation can verify: an allowlist
+                // pre-approves, it does not take anything away, so on its own it
+                // would leave every native tool in the init event.
+                "--tools".to_string(),
+                String::new(),
                 "--allowedTools".to_string(),
                 allowed,
             ])
@@ -345,7 +352,7 @@ mod tests {
         // Evidence, not invention: a flag may be pinned only if the CLI's
         // recorded help lists it, and every tool named must be one of our own.
         let claude_help = include_str!("../drivers/fixtures/claude_code_help.txt");
-        for flag in ["--strict-mcp-config", "--allowedTools"] {
+        for flag in ["--strict-mcp-config", "--tools", "--allowedTools"] {
             assert!(
                 claude_help.contains(flag),
                 "claude does not document {flag}"
@@ -355,17 +362,24 @@ mod tests {
             claude_help.contains("Comma-separated list of allowed tools"),
             "the allowlist separator is documented"
         );
+        assert!(
+            claude_help.contains(r#"Use "" to disable all tools"#),
+            "the removal of the built-in tool set is documented"
+        );
 
         let pinned = pinned_args(CliKind::ClaudeCode, "extract_postings").expect("pinned");
         assert_eq!(pinned[0], "--strict-mcp-config");
-        assert_eq!(pinned[1], "--allowedTools");
-        let allowed: Vec<&str> = pinned[2].split(',').collect();
+        // The removal comes before the allowlist, and takes an empty value.
+        assert_eq!(pinned[1], "--tools");
+        assert_eq!(pinned[2], "");
+        assert_eq!(pinned[3], "--allowedTools");
+        let allowed: Vec<&str> = pinned[4].split(',').collect();
         let expected: Vec<String> = boba_mcp_proto::tool::tools_for_task("extract_postings")
             .into_iter()
             .map(|spec| format!("mcp__{}__{}", boba_mcp_proto::tool::SERVER_NAME, spec.name))
             .collect();
         assert_eq!(allowed, expected, "the allowlist is this task's own tools");
-        assert_eq!(pinned.len(), 3, "{pinned:?}");
+        assert_eq!(pinned.len(), 5, "{pinned:?}");
 
         for cli in [
             CliKind::GeminiCli,

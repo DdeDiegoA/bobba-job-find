@@ -3,6 +3,7 @@
 //! and emit each one, enforce per-task limits, and classify failures so AI work
 //! can pause while non-AI work continues (FR-21, NFR-14).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -13,10 +14,11 @@ use boba_app::ports::agent::{
 };
 use boba_app::ports::repo::agent::{AgentRepo, FinishAgentRun, NewAgentRun, RunStatus};
 
-use crate::drivers::{CliKind, HealthStatus};
-use crate::lockdown::{TaskSupport, Unverified};
+use crate::drivers::{self, CliKind, HealthStatus};
+use crate::lockdown::{self, TaskSupport, Unverified};
 use crate::mcp::config::{self, RunSandbox, SandboxConfig};
 use crate::mcp::server::{Limits, McpEndpoint, ToolHandler};
+use crate::pack;
 use crate::supervisor::{CommandSpec, Stream, SupervisedProcess};
 
 /// How long to wait for a line before re-checking cancellation and limits.
@@ -40,6 +42,13 @@ pub type CommandBuilder = dyn Fn(&AgentTask, &RunSandbox) -> CommandSpec + Send 
 /// Event sink, e.g. the Tauri `agent.run.progressed` emitter.
 pub type Emitter = dyn Fn(&str, i64, &AgentEvent) + Send + Sync;
 
+/// Reports that a run has **observed** a CLI holding to its pinned lockdown:
+/// its init event listed only this app's tools (ADR-010 §1). The composition
+/// root owns what an observation means from then on — it is the only path that
+/// can lift the untrusted-content refusal for that CLI (orquestador ruling (c),
+/// 2026-10-16) — so the runtime only reports the fact.
+pub type LockdownObserver = dyn Fn(&str) + Send + Sync;
+
 /// Whether a task may run at all (ADR-010 §2). The composition root injects it —
 /// it owns the probed CLI evidence — and it is consulted before a run gets a
 /// workspace, so no caller can reach a CLI the gate holds back. A runtime
@@ -60,6 +69,8 @@ pub struct AgentRuntime<R: AgentRepo + 'static> {
     builder: Option<Arc<CommandBuilder>>,
     /// ADR-010's gate, consulted before anything is created for a run.
     gate: Option<Arc<TaskGate>>,
+    /// Told when a run observes a CLI holding to its pinned lockdown (ADR-010 §1).
+    observer: Option<Arc<LockdownObserver>>,
     /// Bounds the endpoint puts on its peers.
     limits: Limits,
 }
@@ -73,6 +84,7 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             sandbox: None,
             builder: None,
             gate: None,
+            observer: None,
             limits: Limits::default(),
         }
     }
@@ -94,6 +106,14 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
     /// The hard gate every task goes through (ADR-010 §2).
     pub fn with_gate(mut self, gate: Arc<TaskGate>) -> Self {
         self.gate = Some(gate);
+        self
+    }
+
+    /// Where an observed lockdown is reported (ADR-010 §1). The composition root
+    /// records it; without one, no CLI is ever observed, so nothing untrusted
+    /// ever runs.
+    pub fn with_observer(mut self, observer: Arc<LockdownObserver>) -> Self {
+        self.observer = Some(observer);
         self
     }
 
@@ -134,7 +154,7 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             return refused;
         }
 
-        let sandbox = match self
+        let some_sandbox = match self
             .sandbox
             .as_ref()
             .map(|(config, _)| config::prepare(config, &run_id))
@@ -144,6 +164,16 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             Some(Err(_)) => return self.failed(task, run_id, FailureReason::Crashed),
             None => None,
         };
+        // The workspace is the run's instruction sheet: `system.md` plus this
+        // task's skill, in the file the CLI reads, with the run's content
+        // language and its provenance (AC1, AC2), plus the CLI's own MCP config
+        // when it reads that from the workspace (AD-6).
+        if let Some(sandbox) = some_sandbox.as_ref()
+            && furnish(sandbox, &task).is_err()
+        {
+            return self.failed(task, run_id, FailureReason::Crashed);
+        }
+        let sandbox = some_sandbox;
         let endpoint = match self.endpoint_for(&task, sandbox.as_ref()) {
             Ok(endpoint) => endpoint,
             Err(reason) => return self.failed(task, run_id, reason),
@@ -176,6 +206,7 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             &sandbox.endpoint,
             task.kind.id(),
             &sandbox.token,
+            &task.prompt,
             task.budget.max_tool_calls,
             Arc::clone(handler),
             self.limits,
@@ -215,15 +246,17 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             run_spec,
             repo,
             emitter,
+            endpoint,
+            observer: self.observer.clone(),
             tx: tx.clone(),
             seq: 0,
         };
         thread::Builder::new()
             .name(format!("boba-agent-run-{run_id}"))
             .spawn(move || {
-                // Held for the whole run: dropping the endpoint revokes the
-                // token, dropping the sandbox deletes the workspace (AC1).
-                let _held = (endpoint, sandbox);
+                // Held for the whole run: dropping the sandbox deletes the
+                // workspace (AC1). The endpoint lives in the run state.
+                let _held = sandbox;
                 drive(state, cancel_for_thread, max_polls);
             })
             .expect("spawn run thread");
@@ -321,6 +354,44 @@ impl<R: AgentRepo + 'static> AgentPort for AgentRuntime<R> {
     }
 }
 
+/// Fill a run's workspace with what the CLI reads there: the agent pack (AC1)
+/// and, for a CLI that reads its own MCP config from the workspace, that config
+/// (AD-6). Both are per run, so both are written now and leave with the
+/// workspace.
+fn furnish(sandbox: &RunSandbox, task: &AgentTask) -> std::io::Result<()> {
+    let Some(kind) = cli_kind(&task.cli) else {
+        return Err(std::io::Error::other("unknown agent CLI"));
+    };
+    pack::write_into(
+        sandbox.workspace.path(),
+        task.kind,
+        kind,
+        task.model.as_deref(),
+        &task.target_language,
+    )?;
+    let Some((file, config)) =
+        kind.workspace_mcp_config(&shim_path(sandbox), &sandbox.endpoint, &sandbox.token)
+    else {
+        return Ok(());
+    };
+    std::fs::write(sandbox.workspace.path().join(file), config.to_string())
+}
+
+/// The `boba-mcp` shim this run points at, read back from the run's own
+/// `mcp.json`. The workspace config of a CLI that keeps its MCP servers in its
+/// own file names the same binary, so one source of truth serves both.
+fn shim_path(sandbox: &RunSandbox) -> PathBuf {
+    std::fs::read_to_string(&sandbox.config)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|config| {
+            config["mcpServers"][boba_mcp_proto::tool::SERVER_NAME]["command"]
+                .as_str()
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| PathBuf::from("boba-mcp"))
+}
+
 /// Put the run inside its workspace: `cwd` is the run's own directory, and the
 /// endpoint and token travel in the environment, never in argv.
 fn sandboxed(mut run_spec: RunSpec, sandbox: Option<&RunSandbox>) -> RunSpec {
@@ -348,6 +419,11 @@ struct RunState<R: AgentRepo> {
     run_spec: RunSpec,
     repo: Arc<R>,
     emitter: Option<Arc<Emitter>>,
+    /// The run's MCP endpoint, held for as long as the run: dropping it revokes
+    /// the token, and its invalid-output flag ends the run (AC2).
+    endpoint: Option<McpEndpoint>,
+    /// Where an observed lockdown is reported (ADR-010 §1).
+    observer: Option<Arc<LockdownObserver>>,
     tx: Sender<AgentEvent>,
     seq: i64,
 }
@@ -468,9 +544,17 @@ fn run_process<R: AgentRepo>(
         .budget
         .wall_clock
         .map(|limit| Instant::now() + limit);
+    // The CLI's own stream format (AD-4), and its init event as ADR-010 §1's
+    // evidence. An unknown CLI id parses as plain text: no init event, so
+    // nothing gets verified for it.
+    let mut reader = cli_kind(&state.task.cli)
+        .map(drivers::StreamReader::for_cli)
+        .unwrap_or_default();
     let mut usage = Usage::default();
     let mut tool_calls: u32 = 0;
     let mut polls: u64 = 0;
+    // Whether this run has been opened by its init event (ADR-010 §1).
+    let mut opened = false;
 
     loop {
         if cancel.is_cancelled() {
@@ -490,6 +574,17 @@ fn run_process<R: AgentRepo>(
             proc.kill();
             return Outcome::Failed(FailureReason::LimitExceeded);
         }
+        if state
+            .endpoint
+            .as_ref()
+            .is_some_and(McpEndpoint::failed_output)
+        {
+            // The agent's output stayed invalid after its retries: stop now, and
+            // report why (AC2), rather than let the CLI finish a run whose work
+            // the core has already refused.
+            proc.kill();
+            return Outcome::Failed(FailureReason::InvalidOutput);
+        }
         if max_polls.is_some_and(|cap| polls >= cap) {
             proc.kill();
             return Outcome::Failed(FailureReason::Crashed);
@@ -498,7 +593,39 @@ fn run_process<R: AgentRepo>(
 
         match proc.recv_line(POLL) {
             Stream::Line(line) => {
-                for event in parse_line(&line) {
+                let parsed = reader.line(&line);
+                if let Some(tools) = parsed.init_tools {
+                    // ADR-010 §1, the run-time observation: the CLI's own first
+                    // word on which tools it has. Only this build's tools, or the
+                    // pinned lockdown did not hold.
+                    opened = true;
+                    if lockdown::init_event_is_locked_down(&tools) {
+                        if let Some(observer) = &state.observer {
+                            observer(&state.task.cli);
+                        }
+                    } else if state.task.reads_untrusted() {
+                        // Fail closed, and never conditionally: a run that reads
+                        // third-party content must not continue with tools the
+                        // envelope does not protect — with or without a runtime
+                        // that happens to have an observer mounted. (A
+                        // user-input task may continue with the security badge,
+                        // ADR-010 §2.)
+                        proc.kill();
+                        return Outcome::Failed(FailureReason::Unsupported);
+                    }
+                } else if !parsed.events.is_empty() {
+                    // An untrusted run is opened by its init event, always: a
+                    // stream that starts with the agent's own work means the
+                    // pinned lockdown (or the stream format it is observed
+                    // through) is not in force, so the run stops instead of
+                    // continuing unverified.
+                    if state.task.reads_untrusted() && !opened {
+                        proc.kill();
+                        return Outcome::Failed(FailureReason::Unsupported);
+                    }
+                    opened = true;
+                }
+                for event in parsed.events {
                     match &event {
                         AgentEvent::Usage {
                             tokens_in,
@@ -531,20 +658,10 @@ fn run_process<R: AgentRepo>(
     }
 }
 
-/// Parse one stdout line as an `AgentEvent`; non-JSON is plain `Text`.
+/// Parse one stdout line as an `AgentEvent`; non-JSON is plain `Text`. The
+/// CLI-agnostic half of the stream readers in `drivers`.
 pub fn parse_line(line: &str) -> Vec<AgentEvent> {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
-    if trimmed.starts_with('{')
-        && let Ok(event) = serde_json::from_str::<AgentEvent>(trimmed)
-    {
-        return vec![event];
-    }
-    vec![AgentEvent::Text {
-        text: trimmed.to_string(),
-    }]
+    drivers::plain_line(line).events
 }
 
 /// The event variant id used as `agent_event.kind`.
@@ -770,6 +887,7 @@ mod tests {
             cli: "claude_code".to_string(),
             model: Some("sonnet".to_string()),
             prompt: "extract".to_string(),
+            target_language: "en".to_string(),
             budget: RunBudget::default(),
             env: vec![],
         }
@@ -798,7 +916,8 @@ mod tests {
                 program: PathBuf::from("/bin/sh"),
                 args: vec![
                     "-c".to_string(),
-                    "pwd; printf 'token=%s' \"$BOBA_RUN_TOKEN\"".to_string(),
+                    // Opened by the init event an untrusted run now requires.
+                    "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"tools\":[\"mcp__boba__get_task_input\"]}'; pwd; printf 'token=%s' \"$BOBA_RUN_TOKEN\"".to_string(),
                 ],
                 cwd: None,
                 env: vec![],
@@ -973,6 +1092,286 @@ mod tests {
             repo.get_run(&handle.run_id).unwrap().unwrap().status,
             RunStatus::Failed.id()
         );
+    }
+
+    /// The pack is written into the run's workspace before the CLI starts: the
+    /// system prompt plus this task's skill, in the file this CLI reads (AC1).
+    #[test]
+    fn the_runs_workspace_holds_the_rendered_agent_pack() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            )
+            .with_command_builder(Arc::new(|_, _sandbox| CommandSpec {
+                // Report the workspace's own contents, then exit.
+                program: PathBuf::from("/bin/sh"),
+                args: vec![
+                    "-c".to_string(),
+                    "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"tools\":[\"mcp__boba__get_task_input\"]}'; cat CLAUDE.md 2>/dev/null || echo NO-PACK".to_string(),
+                ],
+                cwd: None,
+                env: vec![],
+            }));
+
+        let handle = runtime.run(task());
+        let output: String = handle
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::Text { text } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            output.contains("Boba Job Find"),
+            "the system prompt is missing: {output}"
+        );
+        assert!(
+            output.contains("# extract_postings"),
+            "the task's skill is missing: {output}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// ADR-010 §1: an init event listing only this app's tools is the observation
+    /// that lets a CLI run untrusted tasks (orquestador ruling (c)).
+    #[test]
+    fn an_init_event_with_only_our_tools_is_observed() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_observer(Arc::new(move |cli: &str| {
+                sink.lock().unwrap().push(cli.to_string());
+            }))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        // `start` drives a fixture command, so the CLI id only decides which
+        // stream reader reads it: claude_code reads the recorded stream shape.
+        let handle = runtime.start(
+            task(),
+            fake_run_spec(
+                "claude-stream",
+                "mcp__boba__get_task_input,mcp__boba__propose_posting_features",
+            ),
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert_eq!(
+            observed.lock().unwrap().as_slice(),
+            ["claude_code".to_string()],
+            "the locked-down init event was not reported"
+        );
+        assert!(
+            matches!(events.last(), Some(AgentEvent::Finished { .. })),
+            "{events:?}"
+        );
+        // And the run's prose is prose, not raw JSON.
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                AgentEvent::Text { text } if text == "done"
+            )),
+            "{events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A run that reads third-party content must not continue when the CLI
+    /// reports a native tool: the tool set is the whole basis of ADR-010's
+    /// envelope, so the run fails visibly instead.
+    #[test]
+    fn an_init_event_with_a_native_tool_aborts_an_untrusted_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_observer(Arc::new(move |cli: &str| {
+                sink.lock().unwrap().push(cli.to_string());
+            }))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let handle = runtime.start(
+            task(),
+            fake_run_spec("claude-stream", "mcp__boba__get_task_input,Bash"),
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            observed.lock().unwrap().is_empty(),
+            "a CLI with a native tool was reported as locked down"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// The abort is not conditional on a runtime that happens to have an
+    /// observer mounted: no observer means nothing to report, not permission to
+    /// continue.
+    #[test]
+    fn a_native_tool_aborts_even_without_an_observer() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let handle = runtime.start(task(), fake_run_spec("claude-stream", "Bash"));
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A stream that never shows the init event cannot vouch for the tool set,
+    /// so an untrusted run stops instead of continuing on an unverified CLI.
+    #[test]
+    fn an_untrusted_run_without_an_init_event_stops() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        // The CLI answers with plain lines: the pinned lockdown is not in force.
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![("BOBA_FAKE_MODE".to_string(), "echo".to_string())],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// The same init event on a task that only reads the user's own input is the
+    /// security badge, not a refusal (ADR-010 §2): it still runs, and it still
+    /// earns the observation for the CLI.
+    #[test]
+    fn a_native_tool_does_not_abort_a_user_input_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = Arc::clone(&observed);
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_observer(Arc::new(move |cli: &str| {
+                sink.lock().unwrap().push(cli.to_string());
+            }))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let mut user_task = task();
+        user_task.kind = AgentTaskKind::ProfileImport;
+        user_task.input_trust = boba_app::ports::agent::InputTrust::User;
+
+        let handle = runtime.start(
+            user_task,
+            fake_run_spec("claude-stream", "mcp__boba__get_task_input,Bash"),
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+        assert!(
+            matches!(events.last(), Some(AgentEvent::Finished { .. })),
+            "{events:?}"
+        );
+        assert!(observed.lock().unwrap().is_empty());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// The fake CLI replaying a Claude stream, with its init event's tool list.
+    fn fake_run_spec(mode: &str, tools: &str) -> RunSpec {
+        let env = vec![
+            ("BOBA_FAKE_MODE".to_string(), mode.to_string()),
+            ("BOBA_FAKE_TOOLS".to_string(), tools.to_string()),
+        ];
+        RunSpec {
+            spec: CommandSpec {
+                program: fake_cli_path(),
+                args: vec![],
+                cwd: None,
+                env,
+            },
+        }
     }
 
     #[test]

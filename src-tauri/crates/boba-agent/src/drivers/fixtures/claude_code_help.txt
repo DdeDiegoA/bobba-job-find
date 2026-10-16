@@ -5,8 +5,10 @@ Claude Code - starts an interactive session by default.
 Options:
   -p, --print                       Print response and exit (non-interactive)
       --output-format <format>      Output format: text, json, stream-json
+      --verbose                     Verbose output (required with --print --output-format stream-json)
       --input-format <format>       Input format
       --json-schema <schema>        JSON Schema for structured output
+      --tools <tools...>            Specify the list of available tools from the built-in set. Use "" to disable all tools
       --mcp-config <file>           Load MCP servers from a JSON file
       --strict-mcp-config           Only use MCP servers from --mcp-config
       --allowedTools <tools...>     Comma-separated list of allowed tools
