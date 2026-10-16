@@ -16,3 +16,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [010](./010-untrusted-content-requires-tool-lockdown.md) | Untrusted-content tasks require verified tool lockdown; agent output untrusted | Accepted · Approved (Diego) | AD-4, AD-6, AD-7 |
 | [011](./011-audit-chain-canonical-form.md) | Audit chain: frozen canonical form and anchor semantics | Accepted | AD-12 |
 | [012](./012-composition-root-and-port-wiring.md) | Composition root and port wiring | Accepted | AD-3, AD-14 |
+| [013](./013-passphrase-kdf-record-and-session-key.md) | Passphrase KDF record (Argon2id) and the login-session key | Accepted · Approved (Diego standing OK) | AD-13, AD-18, AD-20 |

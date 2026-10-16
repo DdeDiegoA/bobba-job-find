@@ -1,1 +1,13 @@
-{}
+{
+  "title": "Unlock Boba",
+  "body": "Enter your passphrase to decrypt your data. It stays in memory for this login session only.",
+  "passphrase.label": "Passphrase",
+  "unlock": "Unlock",
+  "unlocking": "Unlocking…",
+  "retry": "Retry reading the key",
+  "retrying": "Reading the key…",
+  "ready.title": "Boba is unlocked",
+  "ready.body": "Your data is open for this login session.",
+  "continue": "Continue",
+  "checking": "Checking…"
+}

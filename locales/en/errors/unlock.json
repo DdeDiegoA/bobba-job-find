@@ -1,0 +1,8 @@
+{
+  "errors.unlock.locked": "Boba can't read the key for your data. Enter your passphrase, or retry reading the key.",
+  "errors.unlock.no_keychain": "This machine has no keychain, so Boba needs a passphrase. Pick one you will remember: it is the only way back into your data.",
+  "errors.unlock.no_passphrase": "This database was not created with a passphrase, so a passphrase can't open it.",
+  "errors.unlock.wrong_passphrase": "That passphrase doesn't open your data. Check it and try again.",
+  "errors.unlock.kdf": "Boba could not turn your passphrase into a key. Try again.",
+  "errors.unlock.store": "Boba could not open your data. Restart Boba and try again."
+}
