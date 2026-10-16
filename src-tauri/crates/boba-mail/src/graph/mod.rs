@@ -332,6 +332,10 @@ mod tests {
     async fn send_posts_to_graph_with_the_stored_bearer_token() {
         let server = MockServer::start().await;
         let expected = GraphMail::send_body(&message());
+        // One token set for both the seed and the comparison: `TokenSet::new`
+        // dates the expiry from `now_unix()`, so building it twice can straddle
+        // a second boundary and fail a loaded machine.
+        let stored = tokens(Some(3600));
         Mock::given(method("POST"))
             .and(path("/me/sendMail"))
             .and(header("authorization", "Bearer at-1"))
@@ -341,7 +345,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let secrets = FakeSecrets::with(REF, tokens(Some(3600)));
+        let secrets = FakeSecrets::with(REF, stored.clone());
         let mail = adapter(
             &server,
             secrets.clone(),
@@ -351,7 +355,7 @@ mod tests {
         // A usable token is used as-is: the stored set is not rewritten.
         assert_eq!(
             TokenSet::from_json(&secrets.value(REF).expect("stored")).expect("json"),
-            TokenSet::from_json(&tokens(Some(3600))).expect("json")
+            TokenSet::from_json(&stored).expect("json")
         );
     }
 
