@@ -31,7 +31,9 @@ const steps: WizardStep[] = [
 ];
 
 const next = () => screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
-const atStep = () => screen.getByRole("progressbar").getAttribute("aria-valuenow");
+/** The visible "Step N of M" counter (§10.3). */
+const atStep = () =>
+  /Step (\d+) of \d+/.exec(screen.getByText(/^Step \d+ of \d+$/).textContent ?? "")?.[1];
 const pick = () => screen.getByLabelText("Pick") as HTMLInputElement;
 
 afterEach(() => {
@@ -47,6 +49,32 @@ describe("wizard framework — first launch (AC1)", () => {
     expect(within(dialog).getByText("Language & theme")).toBeTruthy();
     expect(within(dialog).getByText("Step 1 of 2")).toBeTruthy();
     expect(atStep()).toBe("1");
+  });
+
+  it("marks the current step for screen readers (§10.3, P3)", () => {
+    render(<OnboardingWizard steps={steps} />);
+    const marked = document.querySelectorAll('[aria-current="step"]');
+    expect(marked).toHaveLength(1);
+    expect(marked[0].getAttribute("aria-label")).toBe("Current step");
+    expect(screen.getByLabelText("Upcoming")).toBeTruthy();
+  });
+
+  it("takes focus on open and keeps Tab inside the dialog (§10.3, P2)", () => {
+    render(<OnboardingWizard steps={steps} />);
+    const dialog = screen.getByRole("dialog", { name: "Boba setup" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // Tab on the last control wraps to the first instead of reaching the app behind.
+    const controls = [...dialog.querySelectorAll<HTMLElement>("input, button")];
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
   });
 
   it("stays out of the way once setup is done", () => {

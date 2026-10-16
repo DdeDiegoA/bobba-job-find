@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,18 +17,46 @@ import {
 import { clearProgress, isOnboarded, loadProgress, markOnboarded, saveProgress } from "./progress";
 import { WIZARD_STEPS } from "./steps";
 
+/** Focusable controls inside the dialog, in tab order. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * The overlay is the only interactive surface while it is up, so Tab wraps
+ * inside it instead of reaching the app behind (DESIGN.md §10.3, EXPERIENCE §7).
+ */
+function trapTab(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== "Tab") return;
+  const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  const first = controls[0];
+  const last = controls.at(-1);
+  if (!first || !last) return;
+
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || active === event.currentTarget)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /**
  * Resumable first-run wizard: stepper + one step panel + footer, in a modal
  * over the app (AC1). Progress is written after every step and a quit attempt
  * reopens on a resume banner (AC2). `steps` is injectable so the framework is
  * tested on its own; the app always renders the real order.
- *
- * shortcut: no focus trap — `/onboarding` renders nothing behind the overlay;
- * add one when the wizard mounts over the shell.
  */
 export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[] } = {}) {
   const { t } = useTranslation();
   const [state, setState] = useState<WizardState>(() => initialState(steps, loadProgress()));
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // The wizard answers the keyboard from the moment it opens (§10.3).
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (state.done) {
@@ -49,9 +77,12 @@ export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[
   return (
     <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-bg/95 p-6">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="onboarding-wizard-title"
+        tabIndex={-1}
+        onKeyDown={trapTab}
         className="flex w-full max-w-2xl flex-col gap-6 rounded-card border border-border bg-surface p-6 shadow-[var(--elev-2)]"
       >
         <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -63,18 +94,12 @@ export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[
           </p>
         </header>
 
-        <ol
-          role="progressbar"
-          aria-label={t("onboarding:wizard.progressAria")}
-          aria-valuemin={1}
-          aria-valuenow={state.index + 1}
-          aria-valuemax={steps.length}
-          className="flex gap-2"
-        >
+        <ol aria-label={t("onboarding:wizard.progressAria")} className="flex gap-2">
           {steps.map((item, index) => (
             <li
               key={item.id}
               aria-label={t(`onboarding:wizard.step.${stepStatus(index, state.index)}`)}
+              aria-current={index === state.index ? "step" : undefined}
               className={`h-2 flex-1 rounded-full ${
                 index <= state.index ? "bg-primary" : "bg-surface-muted"
               }`}
