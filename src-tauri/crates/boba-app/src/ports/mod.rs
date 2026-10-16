@@ -14,3 +14,4 @@ pub mod render;
 pub mod repo;
 pub mod secret;
 pub mod source;
+pub mod verify;

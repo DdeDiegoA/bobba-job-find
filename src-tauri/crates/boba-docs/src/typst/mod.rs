@@ -180,8 +180,23 @@ fn render(template: Template, document_json: &str) -> Result<Vec<u8>, RenderErro
     Ok(render_paged(template, document_json)?.0)
 }
 
-/// Compile and export, also reporting how many pages the document laid out to.
+/// Compile `template` against `document_json`, reporting how many pages it laid
+/// out to.
 fn render_paged(template: Template, document_json: &str) -> Result<(Vec<u8>, u32), RenderError> {
+    let document = compile_paged(template, document_json)?;
+    let pages = u32::try_from(document.pages().len()).unwrap_or(u32::MAX);
+    let pdf = typst_pdf::pdf(&document, &PdfOptions::default())
+        .map_err(|e| RenderError::Pdf(format!("{e:?}")))?;
+    Ok((pdf, pages))
+}
+
+/// Lay `document_json` out with `template`: the frames every layout fact comes
+/// from — the page count here, and the headings stranded at a page bottom in
+/// `crate::verify::layout` (S7.5, FR-76).
+pub(crate) fn compile_paged(
+    template: Template,
+    document_json: &str,
+) -> Result<PagedDocument, RenderError> {
     let engine = TypstEngine::builder()
         .main_file(template.source())
         .fonts(FONTS)
@@ -193,14 +208,10 @@ fn render_paged(template: Template, document_json: &str) -> Result<(Vec<u8>, u32
         Value::Bytes(Bytes::from_string(document_json.to_string())),
     );
 
-    let compiled = engine.compile_with_input::<_, PagedDocument>(inputs);
-    let document = compiled
+    engine
+        .compile_with_input::<_, PagedDocument>(inputs)
         .output
-        .map_err(|e| RenderError::Compile(e.to_string()))?;
-    let pages = u32::try_from(document.pages().len()).unwrap_or(u32::MAX);
-    let pdf = typst_pdf::pdf(&document, &PdfOptions::default())
-        .map_err(|e| RenderError::Pdf(format!("{e:?}")))?;
-    Ok((pdf, pages))
+        .map_err(|e| RenderError::Compile(e.to_string()))
 }
 
 #[cfg(test)]
