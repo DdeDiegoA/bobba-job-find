@@ -408,7 +408,7 @@ impl SystemRepo for SqliteSystemRepo {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, OnceLock};
+    use std::sync::Arc;
 
     use super::*;
     use crate::db::StoreConfig;
@@ -417,6 +417,9 @@ mod tests {
     const KEY_HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
     fn conn() -> Connection {
+        // Install the shared mock before anything can open a platform store:
+        // `append_intent`/`verify_chain` reach the keychain anchor (AD-12).
+        mock_keychain();
         let conn = Connection::open_in_memory().expect("open");
         conn.execute_batch(include_str!("../../migrations/0006_system.sql"))
             .expect("apply 0006");
@@ -424,12 +427,21 @@ mod tests {
     }
 
     fn mock_keychain() {
-        static ONCE: OnceLock<()> = OnceLock::new();
-        ONCE.get_or_init(|| {
-            let store: Arc<keyring_core::CredentialStore> =
-                keyring_core::mock::Store::new().expect("mock keychain");
-            keyring_core::set_default_store(store);
-        });
+        crate::keys::use_mock_keychain();
+    }
+
+    // The whole test binary shares one mock keychain: a second installer must
+    // not replace the default store, or a secret written by one test vanishes
+    // under another (S8.1).
+    #[test]
+    fn every_test_module_shares_one_mock_keychain() {
+        let shared = crate::keys::use_mock_keychain();
+        mock_keychain();
+        let default = keyring_core::get_default_store().expect("default store");
+        assert!(
+            Arc::ptr_eq(&shared, &default),
+            "a second mock installer replaced the shared default store"
+        );
     }
 
     fn intent(action: &str, correlation: &str) -> NewIntent {

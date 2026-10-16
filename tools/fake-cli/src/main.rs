@@ -15,7 +15,9 @@
 //!   spawn-child   — spawn a background grandchild that touches
 //!                   `BOBA_FAKE_MARKER` after `BOBA_FAKE_DELAY_MS`, then exit 0
 //!   emit-lines    — alias of replay, kept for readability in fixtures
-//!   fail-auth     — write an auth error to stderr, exit 1
+//!   fail-auth     — write an auth error to stderr, exit 1. `BOBA_FAKE_STDERR_HOLD_MS`
+//!                   also leaves a grandchild holding stderr open that long,
+//!                   so a test can prove a run waits for stderr to close
 //!   mcp-run       — open with the init event, then speak the run's MCP endpoint
 //!                   (`BOBA_IPC_ENDPOINT`/`BOBA_RUN_TOKEN`): authenticate and make
 //!                   one `tools/call` per entry in `BOBA_FAKE_CALLS` (JSON array
@@ -119,6 +121,19 @@ fn spawn_child() {
 
 fn fail_auth() {
     eprintln!("error: not authenticated, please log in");
+    // A grandchild keeps the stderr pipe open past this process (its stdio is
+    // inherited, unlike `spawn-child`). The reader only sees stderr at EOF, so
+    // this is how a test forces a run to wait for the pipe to close.
+    if let Ok(ms) = std::env::var("BOBA_FAKE_STDERR_HOLD_MS")
+        && let Ok(ms) = ms.parse::<u64>()
+    {
+        let _ = Command::new("sh")
+            .arg("-c")
+            .arg(format!("sleep {}", ms as f64 / 1000.0))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn();
+    }
     std::process::exit(1);
 }
 
