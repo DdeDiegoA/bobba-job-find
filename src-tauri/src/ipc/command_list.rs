@@ -17,6 +17,8 @@ macro_rules! boba_commands {
             crate::commands::profile::profile_save_fact,
             crate::commands::profile::profile_history,
             crate::commands::profile::profile_restore,
+            crate::commands::preferences::preferences_snapshot,
+            crate::commands::preferences::preferences_save,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

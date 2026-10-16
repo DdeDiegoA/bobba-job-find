@@ -15,5 +15,7 @@
   "errors.profile.unknown_kind": "That profile section does not exist.",
   "errors.profile.unknown_item": "That profile item no longer exists.",
   "errors.profile.unknown_revision": "That version no longer exists.",
-  "errors.profile.missing_id": "The profile item id is missing."
+  "errors.profile.missing_id": "The profile item id is missing.",
+  "errors.preferences.store": "Your preferences could not be read or saved.",
+  "errors.preferences.invalid": "Those preferences can't be saved: check the amount, currency, hours and work modes."
 }

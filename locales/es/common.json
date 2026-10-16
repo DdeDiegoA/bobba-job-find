@@ -15,5 +15,7 @@
   "errors.profile.unknown_kind": "Esa sección del perfil no existe.",
   "errors.profile.unknown_item": "Ese elemento del perfil ya no existe.",
   "errors.profile.unknown_revision": "Esa versión ya no existe.",
-  "errors.profile.missing_id": "Falta el identificador del elemento del perfil."
+  "errors.profile.missing_id": "Falta el identificador del elemento del perfil.",
+  "errors.preferences.store": "No se pudieron leer o guardar tus preferencias.",
+  "errors.preferences.invalid": "Esas preferencias no se pueden guardar: revisa el monto, la moneda, las horas y las modalidades."
 }
