@@ -9,7 +9,10 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use boba_app::ports::repo::apply::{ApplyRepo, ApplyRepoError};
-use boba_domain::application::{AppStatus, Application, PackageItem, StatusEvent, StatusSource};
+use boba_domain::application::{
+    AnswerClass, AppStatus, Application, BankAnswer, NewBankAnswer, PackageItem, StatusEvent,
+    StatusSource,
+};
 
 use crate::db::{Store, StoreError};
 
@@ -212,6 +215,119 @@ fn insert_event(conn: &Connection, event: &StatusEvent) -> Result<(), ApplyRepoE
     Ok(())
 }
 
+const ANSWER_SELECT: &str = "SELECT id, application_id, question, question_key, answer, class, \
+     fact_ids_json, needs_review, approved_at, untrusted_origin, created_at, updated_at \
+     FROM application_answer_bank";
+
+fn answer_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<BankAnswer> {
+    let class: String = r.get(5)?;
+    let fact_ids_json: String = r.get(6)?;
+    Ok(BankAnswer {
+        id: r.get(0)?,
+        application_id: r.get(1)?,
+        question: r.get(2)?,
+        question_key: r.get(3)?,
+        answer: r.get(4)?,
+        class: AnswerClass::parse(&class).ok_or_else(|| bad("class", class))?,
+        fact_ids: serde_json::from_str(&fact_ids_json).map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                6,
+                rusqlite::types::Type::Text,
+                Box::new(StoreError::Sqlite(format!("bad fact_ids_json: {e}"))),
+            )
+        })?,
+        needs_review: r.get(7)?,
+        approved_at: r.get(8)?,
+        untrusted_origin: r.get(9)?,
+        created_at: r.get(10)?,
+        updated_at: r.get(11)?,
+    })
+}
+
+/// Store one drafted screening answer (S7.8, FR-80). The row lands unapproved
+/// and `untrusted_origin = 1` (AC3), however it was written.
+pub fn insert_answer(conn: &Connection, answer: &NewBankAnswer) -> Result<(), ApplyRepoError> {
+    let fact_ids = serde_json::to_string(&answer.fact_ids).map_err(store)?;
+    conn.execute(
+        "INSERT INTO application_answer_bank (id, application_id, question, question_key, answer, \
+         class, fact_ids_json, needs_review, approved_at, untrusted_origin, created_at, \
+         updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, ?10)",
+        params![
+            answer.id,
+            answer.application_id,
+            answer.question,
+            answer.question_key,
+            answer.answer,
+            answer.class.as_str(),
+            fact_ids,
+            answer.needs_review,
+            answer.untrusted_origin,
+            answer.created_at,
+        ],
+    )
+    .map_err(store)?;
+    Ok(())
+}
+
+/// One application's bank rows, oldest first (the studio's list).
+pub fn list_answers(
+    conn: &Connection,
+    application_id: &str,
+) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{ANSWER_SELECT} WHERE application_id = ?1 ORDER BY created_at, id"
+        ))
+        .map_err(store)?;
+    stmt.query_map(params![application_id], answer_row)
+        .map_err(store)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(store)
+}
+
+/// The approved answers whose question key is one of `keys` (AC2). Only
+/// approved rows with an answer are reusable, and the key is matched whole.
+pub fn list_reusable_answers(
+    conn: &Connection,
+    keys: &[String],
+) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "{ANSWER_SELECT} WHERE approved_at IS NOT NULL AND answer IS NOT NULL \
+             ORDER BY approved_at, id"
+        ))
+        .map_err(store)?;
+    let rows = stmt
+        .query_map([], answer_row)
+        .map_err(store)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(store)?;
+    // The keys are the caller's, not SQL: the question text is third-party data
+    // and never becomes a `LIKE` pattern or a statement fragment.
+    Ok(rows
+        .into_iter()
+        .filter(|row| keys.contains(&row.question_key))
+        .collect())
+}
+
+/// Approve one row: the user confirmed it or replaced its text (AC2/AC3). Either
+/// way it stops being agent text. Returns whether a row was written.
+pub fn approve_answer(
+    conn: &Connection,
+    id: &str,
+    answer: Option<&str>,
+    approved_at: &str,
+) -> Result<bool, ApplyRepoError> {
+    let written = conn
+        .execute(
+            "UPDATE application_answer_bank SET answer = coalesce(?2, answer), approved_at = ?3, \
+             untrusted_origin = 0, updated_at = ?3 WHERE id = ?1",
+            params![id, answer, approved_at],
+        )
+        .map_err(store)?;
+    Ok(written > 0)
+}
+
 impl ApplyRepo for Store {
     fn applications(&self) -> Result<Vec<Application>, ApplyRepoError> {
         self.read(|conn| Ok(list_applications(conn)))
@@ -239,6 +355,42 @@ impl ApplyRepo for Store {
     fn append_status_event(&self, event: &StatusEvent) -> Result<(), ApplyRepoError> {
         let event = event.clone();
         self.execute(move |conn| Ok(append_status_event(conn, &event)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
+    fn answer_bank_insert(&self, answer: &NewBankAnswer) -> Result<(), ApplyRepoError> {
+        let answer = answer.clone();
+        self.execute(move |conn| Ok(insert_answer(conn, &answer)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
+    fn answer_bank_for_application(
+        &self,
+        application_id: &str,
+    ) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+        let application_id = application_id.to_string();
+        self.read(move |conn| Ok(list_answers(conn, &application_id)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
+    fn answer_bank_reusable(&self, keys: &[String]) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+        let keys = keys.to_vec();
+        self.read(move |conn| Ok(list_reusable_answers(conn, &keys)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
+    fn answer_bank_approve(
+        &self,
+        id: &str,
+        answer: Option<&str>,
+        approved_at: &str,
+    ) -> Result<bool, ApplyRepoError> {
+        let (id, answer, approved_at) = (
+            id.to_string(),
+            answer.map(str::to_string),
+            approved_at.to_string(),
+        );
+        self.execute(move |conn| Ok(approve_answer(conn, &id, answer.as_deref(), &approved_at)))
             .map_err(|e| ApplyRepoError::Store(e.to_string()))?
     }
 }
@@ -488,5 +640,160 @@ mod tests {
                 },
             ]
         );
+    }
+
+    /// A drafted answer, as the core hands it to the store (S7.8).
+    fn drafted_answer(id: &str, question: &str) -> NewBankAnswer {
+        NewBankAnswer {
+            id: id.into(),
+            application_id: "app_01".into(),
+            question: question.into(),
+            question_key: boba_domain::application::question_key(question),
+            answer: Some("Four weeks.".into()),
+            class: AnswerClass::Other,
+            fact_ids: vec!["fact_1".into()],
+            needs_review: false,
+            untrusted_origin: true,
+            created_at: "2026-10-16T09:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn the_migration_creates_the_answer_bank_with_its_marker_from_the_start() {
+        let conn = connection();
+        let class_check: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'application_answer_bank'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the table exists");
+        assert!(class_check.contains("class IN ('salary', 'eligibility', 'other')"));
+
+        // AC3: the ADR-010 marker is a column of the table from day one, and a
+        // write that forgets it still lands untrusted.
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        conn.execute(
+            "INSERT INTO application_answer_bank (id, application_id, question, question_key, \
+             class, created_at, updated_at) \
+             VALUES ('ans_raw', 'app_01', 'Notice?', 'notice', 'other', 't', 't')",
+            [],
+        )
+        .expect("a write without the marker");
+        let stored = list_answers(&conn, "app_01").expect("bank");
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].untrusted_origin, "the default is 1 (AC3)");
+        assert!(!stored[0].needs_review);
+        assert_eq!(stored[0].answer, None, "no answer, and nothing invented");
+        assert_eq!(stored[0].approved_at, None);
+        assert!(stored[0].fact_ids.is_empty());
+    }
+
+    #[test]
+    fn a_drafted_answer_round_trips_as_an_unapproved_untrusted_row() {
+        let conn = connection();
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        insert_answer(
+            &conn,
+            &drafted_answer("ans_1", "What is your notice period?"),
+        )
+        .expect("insert");
+
+        let stored = list_answers(&conn, "app_01").expect("bank");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, "ans_1");
+        assert_eq!(stored[0].question, "What is your notice period?");
+        assert_eq!(stored[0].question_key, "what is your notice period");
+        assert_eq!(stored[0].answer.as_deref(), Some("Four weeks."));
+        assert_eq!(stored[0].class, AnswerClass::Other);
+        assert_eq!(stored[0].fact_ids, vec!["fact_1".to_string()]);
+        assert!(stored[0].untrusted_origin, "ADR-010");
+        assert_eq!(stored[0].approved_at, None, "a draft is not reusable");
+        assert_eq!(stored[0].updated_at, "2026-10-16T09:00:00Z");
+
+        // A draft is not reusable, and approving it is what makes it reusable.
+        assert!(
+            list_reusable_answers(&conn, &["what is your notice period".into()])
+                .expect("reuse")
+                .is_empty()
+        );
+        assert!(approve_answer(&conn, "ans_1", None, "2026-10-16T10:00:00Z").expect("approve"));
+
+        let reusable =
+            list_reusable_answers(&conn, &["what is your notice period".into()]).expect("reuse");
+        assert_eq!(reusable.len(), 1);
+        assert_eq!(reusable[0].answer.as_deref(), Some("Four weeks."));
+        assert_eq!(
+            reusable[0].approved_at.as_deref(),
+            Some("2026-10-16T10:00:00Z")
+        );
+        assert!(
+            !reusable[0].untrusted_origin,
+            "the user confirmed it: no longer agent text (AC3)"
+        );
+        assert_eq!(reusable[0].updated_at, "2026-10-16T10:00:00Z");
+    }
+
+    #[test]
+    fn an_edited_answer_is_stored_and_only_matching_questions_reuse_it() {
+        let conn = connection();
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        insert_answer(
+            &conn,
+            &drafted_answer("ans_1", "What is your notice period?"),
+        )
+        .expect("insert");
+        insert_answer(
+            &conn,
+            &drafted_answer("ans_2", "Which city are you based in?"),
+        )
+        .expect("insert");
+
+        assert!(approve_answer(&conn, "ans_1", Some("Six weeks"), "t2").expect("edit"));
+        assert!(approve_answer(&conn, "ans_2", None, "t2").expect("confirm as it stands"));
+        assert!(
+            !approve_answer(&conn, "ans_gone", None, "t2").expect("unknown id"),
+            "an id nobody holds is false, not a written row"
+        );
+
+        let stored = list_answers(&conn, "app_01").expect("bank");
+        let edited = stored.iter().find(|row| row.id == "ans_1").expect("row");
+        assert_eq!(edited.answer.as_deref(), Some("Six weeks"));
+        assert!(!edited.untrusted_origin);
+
+        // Reuse matches the whole question key: another question never inherits
+        // this answer, and an unapproved row is never returned.
+        let reused = list_reusable_answers(
+            &conn,
+            &[
+                "which city are you based in".into(),
+                "have you managed a team".into(),
+            ],
+        )
+        .expect("reuse");
+        assert_eq!(reused.len(), 1);
+        assert_eq!(reused[0].question, "Which city are you based in?");
+    }
+
+    /// The bank goes with its application (AD-16): no row outlives the
+    /// application it was drafted for.
+    #[test]
+    fn deleting_an_application_takes_its_answers_with_it() {
+        let conn = connection();
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        insert_answer(
+            &conn,
+            &drafted_answer("ans_1", "What is your notice period?"),
+        )
+        .expect("insert");
+
+        conn.execute("DELETE FROM application WHERE id = 'app_01'", [])
+            .expect("delete");
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM application_answer_bank", [], |r| {
+                r.get(0)
+            })
+            .expect("count");
+        assert_eq!(left, 0);
     }
 }

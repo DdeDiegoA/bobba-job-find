@@ -27,6 +27,7 @@ pub enum AgentTaskKind {
     NarrateScores,
     TailorApplication,
     ReviewApplication,
+    AnswerQuestions,
     ClassifyEmails,
     TranslateProfile,
 }
@@ -35,12 +36,13 @@ impl AgentTaskKind {
     /// Every kind, in the order the UI lists them. Mirrors
     /// `boba_mcp_proto::tool::ALL_TASKS`: a task the catalog does not know is a
     /// task the core cannot run.
-    pub const ALL: [AgentTaskKind; 7] = [
+    pub const ALL: [AgentTaskKind; 8] = [
         AgentTaskKind::ProfileImport,
         AgentTaskKind::ExtractPostings,
         AgentTaskKind::NarrateScores,
         AgentTaskKind::TailorApplication,
         AgentTaskKind::ReviewApplication,
+        AgentTaskKind::AnswerQuestions,
         AgentTaskKind::ClassifyEmails,
         AgentTaskKind::TranslateProfile,
     ];
@@ -53,6 +55,7 @@ impl AgentTaskKind {
             AgentTaskKind::NarrateScores => "narrate_scores",
             AgentTaskKind::TailorApplication => "tailor_application",
             AgentTaskKind::ReviewApplication => "review_application",
+            AgentTaskKind::AnswerQuestions => "answer_questions",
             AgentTaskKind::ClassifyEmails => "classify_emails",
             AgentTaskKind::TranslateProfile => "translate_profile",
         }

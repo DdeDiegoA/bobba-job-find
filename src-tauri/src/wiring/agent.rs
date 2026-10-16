@@ -32,6 +32,7 @@ use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::repo::profile::ProfileRepo;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
 use boba_store::repos::cli_install;
@@ -369,6 +370,9 @@ impl ToolHandler for RepoTools {
             }
             // S7.4: the reviewer's critique is stored on the drafts it judged.
             Some(spec) if spec.name == "save_review" => save_review(&self.store, args),
+            // S7.8: the screening answers a run drafted, stored as drafts for
+            // the user to approve.
+            Some(spec) if spec.name == "save_answers" => save_answers(&self.store, args),
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -415,6 +419,63 @@ fn save_review(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
     Ok(json!({
         "app_id": review.application_id,
         "findings": review.findings.len(),
+    }))
+}
+
+/// `save_answers` (S7.8, FR-80): store the screening answers one run drafted,
+/// as drafts the user approves.
+///
+/// The defaults a pay or eligibility question is answered with are the user's
+/// own — the Salary Floor from Preferences, the eligibility the Profile declares
+/// — and the facts an answer may stand on are the profile's **current** ones, so
+/// a run can neither invent a value for those questions nor ground an answer in
+/// a fact the profile does not have.
+fn save_answers(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
+    let facts = store.facts_current().map_err(|error| error.to_string())?;
+    let fact_ids: Vec<String> = facts.iter().map(|fact| fact.id.clone()).collect();
+    let defaults = boba_app::answers::Defaults::from_user_settings(&facts, salary_floor(store)?);
+
+    let drafted = boba_app::answers::save_answers(
+        store.as_ref(),
+        args,
+        &defaults,
+        &fact_ids,
+        &boba_app::system::SystemClock.now_rfc3339(),
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(json!({
+        "app_id": drafted.application_id,
+        "answers": drafted.answers.len(),
+    }))
+}
+
+/// The Salary Floor the user set, as `(amount_minor, currency, period)` in the
+/// AD-17 money shape. `None` when they set none — the salary question then drops
+/// to review instead of being answered.
+///
+/// Read exactly as the Preferences step reads it: a row this build cannot parse
+/// is the defaults, never an error.
+fn salary_floor(store: &Arc<Store>) -> Result<Option<(i64, String, String)>, String> {
+    let key = crate::commands::preferences::KEY.to_string();
+    let raw = store
+        .read(move |conn| {
+            boba_store::repos::settings::get(conn, &key)
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+        })
+        .map_err(|error| error.to_string())?;
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let snapshot: crate::commands::preferences::PreferencesSnapshot =
+        serde_json::from_str(&raw).unwrap_or_default();
+    Ok(snapshot.values.salary_floor.map(|floor| {
+        let period = match floor.period {
+            crate::commands::preferences::MoneyPeriod::Year => "year",
+            crate::commands::preferences::MoneyPeriod::Month => "month",
+            crate::commands::preferences::MoneyPeriod::Hour => "hour",
+        };
+        (floor.amount_minor, floor.currency, period.to_string())
     }))
 }
 
@@ -585,9 +646,13 @@ mod tests {
     fn every_catalog_tool_is_answered_explicitly() {
         let tools = repo_tools("store");
 
-        // save_review is implemented (S7.4) and is exercised by the save_review
-        // tests below; every other catalog tool is still an explicit refusal.
-        for spec in tool::TOOLS.iter().filter(|spec| spec.name != "save_review") {
+        // save_review (S7.4) and save_answers (S7.8) are implemented and are
+        // exercised by their own tests below; every other catalog tool is still
+        // an explicit refusal.
+        for spec in tool::TOOLS
+            .iter()
+            .filter(|spec| spec.name != "save_review" && spec.name != "save_answers")
+        {
             let answer = tools.call("extract_postings", spec.name, &json!({}));
             // Never "unknown tool": every catalog entry has a real answer.
             let message = answer.expect_err("no tool has data yet");
@@ -671,15 +736,312 @@ mod tests {
         );
     }
 
+    /// One application, as S9.1 leaves it: the bank's row hangs off it (AD-16).
+    fn application(store: &Arc<Store>, id: &str) {
+        let id = id.to_string();
+        store
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT OR IGNORE INTO source (id, name, access_class, legal_tier, \
+                     apply_capability, min_interval_ms, enabled, added_at, updated_at) \
+                     VALUES ('remotive', 'Remotive', 'public_json', 'safe', 'link_out', 2000, 1, \
+                     't', 't')",
+                    [],
+                )
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))?;
+                conn.execute(
+                    "INSERT OR IGNORE INTO posting (id, source_id, external_id, title, company, \
+                     location_json, work_mode, posted_at, deadline, first_seen, last_seen, lang, \
+                     description_html, description_text, requirements_json, apply_url, apply_email, \
+                     dedup_key, simhash) VALUES ('pst_1', 'remotive', 'abc-1', 'Backend Engineer', \
+                     'Boba Labs', '[]', 'remote', NULL, NULL, 't', 't', 'en', '', '', '[]', \
+                     'https://jobs.example.com/abc-1', NULL, 'k1', NULL)",
+                    [],
+                )
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))?;
+                conn.execute(
+                    "INSERT INTO application (id, posting_id, status, offer_snapshot_json, \
+                     created_at, updated_at) VALUES (?1, 'pst_1', 'saved', '{}', 't', 't')",
+                    [id.as_str()],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the application is stored");
+    }
+
+    /// One confirmed profile fact, as S3.4 leaves it.
+    fn fact(
+        store: &Arc<Store>,
+        id: &str,
+        kind: &str,
+        text_en: Option<&str>,
+        text_es: Option<&str>,
+    ) {
+        // An absent variant is the empty string: the profile treats
+        // whitespace-only text as no text.
+        let (id, kind) = (id.to_string(), kind.to_string());
+        let (text_en, text_es) = (
+            text_en.unwrap_or_default().to_string(),
+            text_es.unwrap_or_default().to_string(),
+        );
+        store
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT INTO profile_fact (id, item_id, kind, text_en, text_es, detail_json, \
+                     profile_version, provenance, created_at) \
+                     VALUES (?1, ?1, ?2, ?3, ?4, '{}', 1, 'user', 't')",
+                    [
+                        id.as_str(),
+                        kind.as_str(),
+                        text_en.as_str(),
+                        text_es.as_str(),
+                    ],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the fact is stored");
+    }
+
+    /// The preferences document, exactly as the Preferences step stores it
+    /// (S3.7): one JSON row in `setting`.
+    fn preferences(store: &Arc<Store>, salary_minor: i64) {
+        let document = json!({
+            "version": 1,
+            "values": {
+                "roles": ["Backend Engineer"],
+                "seniority_min": null,
+                "seniority_max": null,
+                "salary_floor": {
+                    "amount_minor": salary_minor,
+                    "currency": "USD",
+                    "period": "month",
+                    "firmness": "soft"
+                },
+                "locations": [],
+                "timezone_window": {"from": 8, "to": 18},
+                "work_modes": {"remote": true, "hybrid": false, "onsite": false},
+                "working_languages": ["en"],
+                "deal_breaker_keywords": [],
+                "deal_breaker_notes": "",
+                "excluded_companies": []
+            },
+            "scores_stale": false
+        })
+        .to_string();
+        store
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT INTO setting (key, value, updated_at) VALUES (?1, ?2, 't') \
+                     ON CONFLICT(key) DO UPDATE SET value = ?2",
+                    [crate::commands::preferences::KEY, document.as_str()],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the preferences are stored");
+    }
+
+    /// The bank rows, read straight from the table as one JSON array.
+    fn stored_answers(store: &Arc<Store>) -> Vec<serde_json::Value> {
+        let raw: String = store
+            .read(|conn| {
+                conn.query_row(
+                    "SELECT coalesce(json_group_array(json_object('question', question, \
+                     'class', class, 'answer', answer, 'needs_review', needs_review, \
+                     'untrusted_origin', untrusted_origin, \
+                     'approved', approved_at IS NOT NULL)), '[]') \
+                     FROM application_answer_bank",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("read the bank");
+        serde_json::from_str(&raw).expect("the bank as JSON")
+    }
+
+    /// S7.8: `save_answers` stores what one run drafted and disposes of it the
+    /// way FR-80 says — a salary answer is the user's own Salary Floor rather
+    /// than the run's prose, a free-text answer stands on the profile's facts,
+    /// and every row lands a flagged, untrusted draft the user has to approve.
+    #[test]
+    fn save_answers_stores_the_drafts_and_the_core_disposes() {
+        let store = store("answers-ok");
+        application(&store, "app_1");
+        fact(&store, "fact_1", "skill", Some("Rust"), None);
+        fact(
+            &store,
+            "fact_2",
+            "experience",
+            None,
+            Some("Seis años en backend"),
+        );
+        preferences(&store, 600_000);
+
+        let answer = repo_tools_over(Arc::clone(&store))
+            .call(
+                "answer_questions",
+                "save_answers",
+                &json!({
+                    "app_id": "app_1",
+                    "answers": [
+                        {
+                            "question": "What are your salary expectations?",
+                            "answer": "I would like USD 9999 per month."
+                        },
+                        {
+                            "question": "Do you require visa sponsorship?",
+                            "answer": "Yes, please sponsor me."
+                        },
+                        {
+                            "question": "What is your notice period?",
+                            "answer": "Four weeks, per my contract.",
+                            "fact_ids": ["fact_2"]
+                        }
+                    ],
+                }),
+            )
+            .expect("the drafts are stored");
+
+        assert_eq!(answer["app_id"], "app_1");
+        assert_eq!(answer["answers"], 3);
+
+        let stored = stored_answers(&store);
+        assert_eq!(stored.len(), 3, "one row per question");
+
+        // FR-80: the salary value is the Preferences Salary Floor, not the run's
+        // own words, and it is flagged for review.
+        assert_eq!(stored[0]["class"], "salary");
+        assert_eq!(stored[0]["answer"], "USD 6000 per month");
+        assert_eq!(stored[0]["needs_review"], 1, "always flagged");
+
+        // Eligibility: no eligibility fact in the profile, so no answer is
+        // invented and the question drops to review.
+        assert_eq!(stored[1]["class"], "eligibility");
+        assert!(stored[1]["answer"].is_null(), "nothing is invented");
+        assert_eq!(stored[1]["needs_review"], 1);
+
+        // A free-text answer stands on the fact it names.
+        assert_eq!(stored[2]["class"], "other");
+        assert_eq!(stored[2]["answer"], "Four weeks, per my contract.");
+        assert_eq!(stored[2]["needs_review"], 0);
+
+        // AC3: every row is the run's untrusted draft, and none is approved.
+        for row in &stored {
+            assert_eq!(row["untrusted_origin"], 1, "ADR-010: the run wrote it");
+            assert_eq!(row["approved"], 0, "AC2: only the user approves");
+        }
+    }
+
+    /// AC1: the eligibility default is the eligibility the Profile declares, in
+    /// the language the user wrote it in.
+    #[test]
+    fn an_eligibility_answer_comes_from_the_profiles_own_declaration() {
+        let store = store("answers-eligibility");
+        application(&store, "app_1");
+        fact(
+            &store,
+            "fact_1",
+            "eligibility",
+            None,
+            Some("Ciudadanía UE, sin patrocinio"),
+        );
+
+        repo_tools_over(Arc::clone(&store))
+            .call(
+                "answer_questions",
+                "save_answers",
+                &json!({
+                    "app_id": "app_1",
+                    "answers": [{
+                        "question": "Are you authorized to work in the EU?",
+                        "answer": "I believe so."
+                    }],
+                }),
+            )
+            .expect("the draft is stored");
+
+        let stored = stored_answers(&store);
+        assert_eq!(stored[0]["class"], "eligibility");
+        assert_eq!(stored[0]["answer"], "Ciudadanía UE, sin patrocinio");
+        assert_eq!(
+            stored[0]["needs_review"], 1,
+            "eligibility is always flagged"
+        );
+    }
+
+    /// A payload the core cannot use is refused whole, and an application
+    /// nobody holds cannot be answered for: neither writes anything.
+    #[test]
+    fn save_answers_refuses_what_it_cannot_store() {
+        let store = store("answers-refused");
+        application(&store, "app_1");
+        fact(&store, "fact_1", "skill", Some("Rust"), None);
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let ungrounded = tools
+            .call(
+                "answer_questions",
+                "save_answers",
+                &json!({
+                    "app_id": "app_1",
+                    "answers": [{"question": "What is your notice period?", "answer": "Four weeks."}],
+                }),
+            )
+            .expect_err("an answer with no facts is refused");
+        assert!(ungrounded.contains("fact_ids"), "{ungrounded}");
+
+        let invented = tools
+            .call(
+                "answer_questions",
+                "save_answers",
+                &json!({
+                    "app_id": "app_1",
+                    "answers": [{
+                        "question": "What is your notice period?",
+                        "answer": "Four weeks.",
+                        "fact_ids": ["fact_9"]
+                    }],
+                }),
+            )
+            .expect_err("an unknown fact is refused");
+        assert!(invented.contains("fact_9"), "{invented}");
+
+        let unknown = tools
+            .call(
+                "answer_questions",
+                "save_answers",
+                &json!({
+                    "app_id": "app_gone",
+                    "answers": [{
+                        "question": "What is your notice period?",
+                        "answer": "Four weeks.",
+                        "fact_ids": ["fact_1"]
+                    }],
+                }),
+            )
+            .expect_err("no application, no answer");
+        assert!(unknown.contains("unknown application"), "{unknown}");
+
+        assert!(
+            stored_answers(&store).is_empty(),
+            "nothing was written by any refusal"
+        );
+    }
+
     /// Every catalog tool must route somewhere: reaching the fallback is a bug.
-    /// The tools answered here have no pending slice — `save_review` is S7.4's
-    /// and is implemented; `get_task_input` is the endpoint's (S2.4).
+    /// The tools answered here have no pending slice — `save_review` (S7.4) and
+    /// `save_answers` (S7.8) are implemented; `get_task_input` is the endpoint's
+    /// (S2.4).
     #[test]
     fn no_catalog_tool_falls_through_to_the_unowned_answer() {
-        for spec in tool::TOOLS
-            .iter()
-            .filter(|spec| spec.name != "get_task_input" && spec.name != "save_review")
-        {
+        for spec in tool::TOOLS.iter().filter(|spec| {
+            spec.name != "get_task_input"
+                && spec.name != "save_review"
+                && spec.name != "save_answers"
+        }) {
             assert_ne!(
                 pending_slice(spec.name),
                 UNOWNED,

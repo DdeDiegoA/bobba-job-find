@@ -8,7 +8,7 @@
 //! the check is what makes an approved Status Proposal and a user drag of the
 //! same card safe to race (AC4).
 
-use boba_domain::application::{Application, PackageItem, StatusEvent};
+use boba_domain::application::{Application, BankAnswer, NewBankAnswer, PackageItem, StatusEvent};
 
 /// A repo-level failure, stringified so the port stays free of the adapter's
 /// error types.
@@ -47,4 +47,33 @@ pub trait ApplyRepo: Send + Sync {
     /// "no expectation", which is how the row that records an application's
     /// birth is written.
     fn append_status_event(&self, event: &StatusEvent) -> Result<(), ApplyRepoError>;
+
+    /// Store one drafted screening answer (S7.8, FR-80). The row lands
+    /// `untrusted_origin = true` and unapproved: only [`Self::answer_bank_approve`]
+    /// makes it reusable (AC2, AC3).
+    fn answer_bank_insert(&self, answer: &NewBankAnswer) -> Result<(), ApplyRepoError>;
+
+    /// One application's bank rows, oldest first — the drafts the user still has
+    /// to look at and the approved answers it already owns.
+    fn answer_bank_for_application(
+        &self,
+        application_id: &str,
+    ) -> Result<Vec<BankAnswer>, ApplyRepoError>;
+
+    /// The approved answers whose question key is one of `keys` (AC2): what the
+    /// next drafting run is handed for reuse. Matching is on the whole key, so
+    /// an unrelated question never inherits an answer.
+    fn answer_bank_reusable(&self, keys: &[String]) -> Result<Vec<BankAnswer>, ApplyRepoError>;
+
+    /// Approve one row: `answer` replaces the stored text when the user edited
+    /// it, `None` confirms it as it stands. Either way the row is stamped
+    /// approved and stops being agent text (AC3). Returns whether a row was
+    /// written: an id nobody holds is `false`, not an error, so the caller says
+    /// which of the two happened.
+    fn answer_bank_approve(
+        &self,
+        id: &str,
+        answer: Option<&str>,
+        approved_at: &str,
+    ) -> Result<bool, ApplyRepoError>;
 }
