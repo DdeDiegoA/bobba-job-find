@@ -3,31 +3,42 @@ import { describe, expect, it } from "vitest";
 import "@/lib/i18n";
 import StudioCoverage, { type CoverageRequirement } from "./index";
 
-/** The UJ-3 fixture: 12 of 14 keywords covered, "terraform" and "gcp" gaps. */
+/** The UJ-3 fixture: 12 of 14 keywords covered, "terraform" and "gcp" the gaps. */
 const REQUIREMENTS: CoverageRequirement[] = [
   { requirement: "Rust and Postgres", covered: ["rust", "postgres"], gaps: [] },
-  { requirement: "Data modelling", covered: ["modelling"], gaps: [] },
-  { requirement: "Terraform", covered: [], gaps: ["terraform"] },
-  { requirement: "GCP", covered: [], gaps: ["gcp"] },
+  {
+    requirement: "Data modelling and pipelines",
+    covered: ["data", "modelling", "pipelines"],
+    gaps: [],
+  },
+  {
+    requirement: "Cloud infrastructure",
+    covered: ["cloud", "infrastructure"],
+    gaps: ["terraform"],
+  },
+  {
+    requirement: "Analytics stack",
+    covered: ["sql", "dbt", "snowflake", "airflow", "spark"],
+    gaps: ["gcp"],
+  },
 ];
 
-const row = (requirement: string) =>
-  screen.getByText(requirement).closest("li") as HTMLElement;
+const row = (requirement: string) => screen.getByText(requirement).closest("li") as HTMLElement;
 
 describe("keyword coverage and declared gaps (FR-75, AC2)", () => {
   it("shows every requirement as covered or a gap", () => {
     render(<StudioCoverage requirements={REQUIREMENTS} />);
 
     expect(row("Rust and Postgres").dataset.coverage).toBe("covered");
-    expect(row("Terraform").dataset.coverage).toBe("gap");
-    expect(within(row("Terraform")).getByText("Gap")).toBeTruthy();
+    expect(row("Cloud infrastructure").dataset.coverage).toBe("gap");
+    expect(within(row("Cloud infrastructure")).getByText("Gap")).toBeTruthy();
     expect(within(row("Rust and Postgres")).getByText("Covered")).toBeTruthy();
   });
 
   it("counts the keywords the Profile backs out of the ones the Offer names", () => {
     render(<StudioCoverage requirements={REQUIREMENTS} />);
 
-    expect(screen.getByText("Coverage 3/5")).toBeTruthy();
+    expect(screen.getByText("Coverage 12/14")).toBeTruthy();
     expect(screen.getByRole("status").textContent).toContain("2 keywords have no Profile source");
   });
 
@@ -35,10 +46,10 @@ describe("keyword coverage and declared gaps (FR-75, AC2)", () => {
     render(<StudioCoverage requirements={REQUIREMENTS} />);
 
     expect(
-      within(row("Terraform")).getByText("No Profile source for: terraform").textContent,
+      within(row("Cloud infrastructure")).getByText("No Profile source for: terraform").textContent,
     ).toBeTruthy();
     // A covered requirement lists what backs it, not a gap.
-    expect(within(row("Data modelling")).queryByText(/No Profile source/)).toBeNull();
+    expect(within(row("Data modelling and pipelines")).queryByText(/No Profile source/)).toBeNull();
   });
 
   it("says the gaps were not added, and never writes them into the draft", () => {
@@ -53,9 +64,7 @@ describe("keyword coverage and declared gaps (FR-75, AC2)", () => {
 
   it("says so when the Profile backs everything the Offer asks for", () => {
     render(
-      <StudioCoverage
-        requirements={[{ requirement: "Rust", covered: ["rust"], gaps: [] }]}
-      />,
+      <StudioCoverage requirements={[{ requirement: "Rust", covered: ["rust"], gaps: [] }]} />,
     );
 
     expect(screen.getByText("Coverage 1/1")).toBeTruthy();

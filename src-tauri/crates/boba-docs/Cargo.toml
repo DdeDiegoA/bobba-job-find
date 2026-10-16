@@ -20,6 +20,8 @@ typst-as-lib = { workspace = true }
 typst-layout = { workspace = true }
 typst-pdf = { workspace = true }
 
-[dev-dependencies]
-# Extracts the PDF text layer so tests can assert real text (S7.1, AD-14).
+# Reads the text layer back out of a PDF (S7.6, FR-77, ADR-006). Only ever on a
+# PDF this process just rendered — never on a user-supplied file.
 pdf-extract = { workspace = true }
+
+[dev-dependencies]
