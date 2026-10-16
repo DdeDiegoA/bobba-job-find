@@ -3,24 +3,27 @@
 //! Generation runs three steps per application: `tailor_application` drafts, a
 //! **fresh-context** `review_application` run critiques the drafts, and the
 //! tailor runs once more with the critique (architecture §5.5). This module owns
-//! the core's side of steps two and three:
+//! what the core must guarantee about steps two and three:
 //!
-//! * **the critique** — the findings the review run wrote with `save_review` are
-//!   parsed fail-closed and ranked, so the studio can show the reviewer's top
-//!   findings (FR-72);
+//! * **the critique** — what the review run writes with `save_review` is parsed
+//!   fail-closed, ranked, and stored on the drafts it judged, so the studio can
+//!   show the reviewer's top findings and still show them after a reload
+//!   ([`save_critique`], [`Review::top_findings`]);
 //! * **the inputs** — the review run is handed the job and the drafts and
 //!   nothing else (fresh context, FR-22), and the revision run is handed the
 //!   same job, the drafts it must revise, and the findings it must fix;
 //! * **the loop** — a revision follows only while there is something to fix and
 //!   the iteration cap is not spent, so a review can never loop.
 //!
-//! The findings themselves are **not** stored: no table is added. What the
-//! review produces is the revision, and a revision is stored as new document
-//! versions of the same application through `tailoring::save_drafts` — rows that
-//! already carry `untrusted_origin` (S7.2, ADR-010), because they are agent
-//! text written after reading the posting. The findings reach the studio in the
-//! command payload (S7.7); they are derived from the drafts and the profile, so
-//! nothing is lost by not persisting them.
+//! The critique is stored **as document data**: it lands on the `document` rows
+//! it judged ([`DocumentsRepo::set_review`]), which are the rows the studio reads
+//! the drafts from, so this slice adds no table of critiques. It carries its own
+//! `untrusted_origin` marker (migration `0014`), because it stays agent text even
+//! when the user edits the draft underneath it (ADR-010).
+//!
+//! The revision itself is an ordinary next draft: `tailoring::save_drafts` writes
+//! it as a new document version of the same application, untrusted like the first
+//! drafts. Running the three steps end to end is S7.7's.
 //!
 //! Findings are plain data, never markup: the studio renders their text as
 //! text (ADR-010).
@@ -28,6 +31,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 use crate::tailoring::Drafts;
 
 /// How many of the reviewer's findings the studio shows (FR-72: the *top*
@@ -37,6 +41,12 @@ pub const STUDIO_FINDINGS: usize = 3;
 /// How many times one application may be revised. The tailoring flow is capped
 /// so a review that keeps finding something can never loop (architecture §5.5).
 pub const MAX_REVISIONS: u32 = 1;
+
+/// The longest text one finding may carry, in characters. A message or a
+/// suggestion is a sentence or two; anything longer is a runaway answer that
+/// would bloat the studio payload and the revision prompt, so it is refused
+/// rather than stored. Far above a real finding, so nothing honest is lost.
+pub const MAX_FINDING_TEXT: usize = 500;
 
 /// How serious a finding is; the studio ranks by this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -204,26 +214,12 @@ fn parse_finding(index: usize, value: &serde_json::Value) -> Result<Finding, Rev
         .and_then(|value| value.as_str())
         .and_then(FindingTarget::parse)
         .ok_or_else(|| malformed(format!("{} must be `cv` or `cover_letter`", at("target"))))?;
-    let message = object
-        .get("message")
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| malformed(format!("{} must be a non-empty string", at("message"))))?
-        .to_string();
+    let message = text(object.get("message"), &at("message"))?;
+    // `null` is how a JSON writer says "no suggestion": the skill tells the agent
+    // to omit the field, and an agent that sends `null` means the same thing.
     let suggestion = match object.get("suggestion") {
-        None => None,
-        Some(value) => Some(
-            value
-                .as_str()
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    malformed(format!(
-                        "{} must be a non-empty string when it is present",
-                        at("suggestion")
-                    ))
-                })?
-                .to_string(),
-        ),
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(text(Some(value), &at("suggestion"))?),
     };
     Ok(Finding {
         severity,
@@ -233,10 +229,35 @@ fn parse_finding(index: usize, value: &serde_json::Value) -> Result<Finding, Rev
     })
 }
 
-/// Why a review payload could not be used.
+/// A finding's own words: a non-empty string, and no longer than
+/// [`MAX_FINDING_TEXT`].
+fn text(value: Option<&serde_json::Value>, at: &str) -> Result<String, ReviewError> {
+    let text = value
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| malformed(format!("{at} must be a non-empty string")))?;
+    if text.chars().count() > MAX_FINDING_TEXT {
+        return Err(malformed(format!(
+            "{at} is longer than {MAX_FINDING_TEXT} characters"
+        )));
+    }
+    Ok(text.to_string())
+}
+
+/// Why a critique could not be stored.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("this critique is not usable: {0}")]
-pub struct ReviewError(pub String);
+pub enum ReviewError {
+    /// The agent's payload is not a critique we can show or rank. Refused whole,
+    /// so the run retries instead of half-showing one.
+    #[error("this critique is not usable: {0}")]
+    Critique(String),
+    /// The application has no drafts, so there was nothing to review.
+    #[error("`{0}` has no drafts to review")]
+    NothingToReview(String),
+    /// The store refused the write.
+    #[error("document store error: {0}")]
+    Repo(#[from] DocumentsRepoError),
+}
 
 /// The input of the fresh-context review run (architecture §5.5 step 3, FR-22):
 /// the job and the drafts to critique, and nothing else. A review that shared
@@ -319,93 +340,69 @@ impl ReviewPass {
 
 /// A payload the core cannot use, with the field that broke it.
 fn malformed(why: impl Into<String>) -> ReviewError {
-    ReviewError(why.into())
+    ReviewError::Critique(why.into())
+}
+
+/// Store the critique a review run wrote with `save_review` (S7.4, FR-22/FR-72).
+///
+/// The findings are attached to the drafts the reviewer judged, as document
+/// data: those rows already carry `untrusted_origin` (S7.2, ADR-010), so this
+/// slice needs no table of critiques. An application with no drafts is refused —
+/// a critique of nothing is worse than a failed run — and a payload the core
+/// cannot use is refused **whole**, before anything is written, so the run
+/// retries instead of the studio half-showing a critique.
+pub fn save_critique(
+    repo: &dyn DocumentsRepo,
+    args: &serde_json::Value,
+    updated_at: &str,
+) -> Result<Review, ReviewError> {
+    let review = Review::parse(args)?;
+    // The parsed findings, not the agent's raw payload: only fields the core
+    // understands are stored.
+    let findings =
+        serde_json::to_string(&review.findings).expect("findings are plain serializable data");
+    if repo.set_review(&review.application_id, &findings, updated_at)? == 0 {
+        return Err(ReviewError::NothingToReview(review.application_id.clone()));
+    }
+    Ok(review)
 }
 
 #[cfg(test)]
 mod tests {
     use boba_domain::documents::{
-        Claim, Contact, CoverLetterDocument, CvDocument, Lang, SCHEMA_VERSION, Section,
+        Claim, Contact, CoverLetterDocument, CvDocument, Lang, SCHEMA_VERSION, Section, TemplateId,
     };
     use serde_json::json;
 
     use super::*;
-
-    use std::sync::Mutex;
-
-    use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
+    use crate::ports::repo::documents::fake::FakeDocumentsRepo;
     use crate::tailoring::{self, DraftTemplates, Drafts};
-    use boba_domain::documents::TemplateId;
-
-    /// An in-memory `DocumentsRepo` (test-only), as the tailoring tests have:
-    /// this slice's flow test stores through the same port.
-    #[derive(Default)]
-    struct FakeDocumentsRepo {
-        rows: Mutex<Vec<boba_domain::documents::NewDocument>>,
-    }
-
-    impl FakeDocumentsRepo {
-        fn rows(&self) -> Vec<boba_domain::documents::NewDocument> {
-            self.rows.lock().unwrap().clone()
-        }
-    }
-
-    impl DocumentsRepo for FakeDocumentsRepo {
-        fn insert(
-            &self,
-            new: &boba_domain::documents::NewDocument,
-        ) -> Result<i64, DocumentsRepoError> {
-            self.rows.lock().unwrap().push(new.clone());
-            Ok(1)
-        }
-
-        fn get(
-            &self,
-            _id: &str,
-        ) -> Result<Option<boba_domain::documents::DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn list_for_application(
-            &self,
-            _application_id: &str,
-        ) -> Result<Vec<boba_domain::documents::DocumentRecord>, DocumentsRepoError> {
-            Ok(vec![])
-        }
-
-        fn latest(
-            &self,
-            _application_id: &str,
-            _kind: boba_domain::documents::DocumentKind,
-        ) -> Result<Option<boba_domain::documents::DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn set_pdf(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn set_docx(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn mark_verified(&self, _: &str, _: &str, _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn pdf(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn docx(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
-        }
-    }
 
     fn templates() -> DraftTemplates {
         DraftTemplates {
             cv: TemplateId::new("cv-classic"),
             cover: TemplateId::new("cover-classic"),
+        }
+    }
+
+    /// Store both drafts of one application, as a tailoring run leaves them.
+    fn drafts_for(repo: &FakeDocumentsRepo, application_id: &str) {
+        tailoring::save_drafts(
+            repo,
+            application_id,
+            &Lang::for_offer("en", None),
+            &templates(),
+            &drafts(),
+            "2026-10-16T09:00:00Z",
+        )
+        .expect("the drafts are stored");
+    }
+
+    /// The reason a payload was refused, for assertions.
+    fn why(error: &ReviewError) -> String {
+        match error {
+            ReviewError::Critique(why) => why.clone(),
+            other => panic!("expected a refused payload, got {other}"),
         }
     }
 
@@ -543,11 +540,11 @@ mod tests {
         }))
         .expect_err("unknown severity");
         assert!(
-            unknown_severity.0.contains("findings[0].severity"),
+            why(&unknown_severity).contains("findings[0].severity"),
             "{unknown_severity}"
         );
         let missing_app = Review::parse(&json!({"findings": []})).expect_err("no app id");
-        assert!(missing_app.0.contains("app_id"), "{missing_app}");
+        assert!(why(&missing_app).contains("app_id"), "{missing_app}");
     }
 
     /// AC1: the *top* findings are what the studio shows — the most serious
@@ -779,6 +776,135 @@ mod tests {
             rows[2].model_json
         );
         assert_eq!(pass.revisions(), 1);
+    }
+
+    /// The skill tells the agent to omit `suggestion` when it cannot name one; a
+    /// JSON `null` says the same thing and must not throw the critique away.
+    #[test]
+    fn a_null_suggestion_is_the_same_as_no_suggestion() {
+        let review = Review::parse(&json!({
+            "app_id": "app_1",
+            "findings": [
+                {"severity": "low", "target": "cv", "message": "x", "suggestion": null},
+            ],
+        }))
+        .expect("null is absent, not invalid");
+        assert_eq!(review.findings[0].suggestion, None);
+    }
+
+    /// A finding's text reaches the studio payload and comes back in the
+    /// revision prompt, so it is bounded: a runaway blob is refused, not stored.
+    #[test]
+    fn finding_text_is_bounded() {
+        let long = "a".repeat(MAX_FINDING_TEXT);
+        assert!(
+            Review::parse(&json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "low", "target": "cv", "message": long}],
+            }))
+            .is_ok(),
+            "a finding of exactly the cap is accepted"
+        );
+
+        let too_long = "a".repeat(MAX_FINDING_TEXT + 1);
+        for field in ["message", "suggestion"] {
+            let mut finding = json!({"severity": "low", "target": "cv", "message": "x"});
+            finding[field] = json!(too_long);
+            let error = Review::parse(&json!({"app_id": "app_1", "findings": [finding]}))
+                .expect_err(&format!("an over-long {field} is refused"));
+            assert!(why(&error).contains(field), "{error}");
+        }
+
+        // The cap counts characters, so a message in any language is measured
+        // the same way.
+        let accented = "á".repeat(MAX_FINDING_TEXT);
+        assert!(
+            Review::parse(&json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "low", "target": "cv", "message": accented}],
+            }))
+            .is_ok()
+        );
+    }
+
+    /// `save_review`, at the use-case layer: the critique lands on the drafts
+    /// the reviewer judged, as document data the studio can read after a reload.
+    #[test]
+    fn saving_a_critique_stores_it_on_the_drafts_it_judged() {
+        let repo = FakeDocumentsRepo::default();
+        drafts_for(&repo, "app_1");
+        drafts_for(&repo, "app_2");
+
+        let review = save_critique(
+            &repo,
+            &json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+            }),
+            "2026-10-16T10:00:00Z",
+        )
+        .expect("the critique is stored");
+
+        assert_eq!(review.application_id, "app_1");
+        let stored = repo.reviews();
+        assert_eq!(stored.len(), 1, "one critique, on one application");
+        assert_eq!(stored[0].0, "app_1");
+        let findings: serde_json::Value =
+            serde_json::from_str(&stored[0].1).expect("the stored critique is JSON");
+        assert_eq!(findings[0]["message"], "unsupported claim");
+        assert_eq!(findings[0]["severity"], "high");
+        assert_eq!(findings[0]["target"], "cv");
+    }
+
+    /// A critique of an application with no drafts is refused: there is nothing
+    /// the reviewer could have read, and storing it would be a critique of
+    /// nothing.
+    #[test]
+    fn a_critique_of_an_application_with_no_drafts_is_refused() {
+        let repo = FakeDocumentsRepo::default();
+        let error = save_critique(
+            &repo,
+            &json!({
+                "app_id": "app_unknown",
+                "findings": [{"severity": "low", "target": "cv", "message": "typo"}],
+            }),
+            "t",
+        )
+        .expect_err("no drafts to review");
+        assert!(
+            matches!(&error, ReviewError::NothingToReview(app) if app == "app_unknown"),
+            "{error}"
+        );
+        assert!(repo.reviews().is_empty(), "nothing was written");
+    }
+
+    /// A malformed critique is refused whole: the store is never called, so no
+    /// half a critique reaches the studio.
+    #[test]
+    fn a_malformed_critique_is_refused_whole() {
+        let repo = FakeDocumentsRepo::default();
+        drafts_for(&repo, "app_1");
+        let error = save_critique(
+            &repo,
+            &json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "urgent", "target": "cv", "message": "x"}],
+            }),
+            "t",
+        )
+        .expect_err("unknown severity");
+        assert!(matches!(error, ReviewError::Critique(_)), "{error}");
+        assert!(repo.reviews().is_empty(), "nothing was written");
+    }
+
+    /// A store failure reaches the caller instead of looking like a stored
+    /// critique.
+    #[test]
+    fn a_failed_review_write_reaches_the_caller() {
+        let repo = FakeDocumentsRepo::failing();
+        let error = save_critique(&repo, &json!({"app_id": "app_1", "findings": []}), "t")
+            .expect_err("the store refused the write");
+        assert!(matches!(error, ReviewError::Repo(_)), "{error}");
     }
 
     /// The two enums round-trip exactly the values the agent writes.

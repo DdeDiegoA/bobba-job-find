@@ -31,10 +31,11 @@ use boba_agent::mcp::server::ToolHandler;
 use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
+use boba_app::ports::clock::ClockPort;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
 use boba_store::repos::cli_install;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_specta::Event as _;
 
@@ -57,7 +58,7 @@ pub fn agent_runtime<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) -> Agen
         .with_sandbox(
             sandbox_config(app, resolved.as_deref()),
             Arc::new(RepoTools {
-                _store: Arc::clone(store),
+                store: Arc::clone(store),
             }),
         )
         .with_command_builder(Arc::new(command_builder(shim.clone())))
@@ -353,11 +354,11 @@ fn refusal(task: &AgentTask, why: &str) -> CommandSpec {
 /// the `untrusted_content` envelope — is enforced by the endpoint before this
 /// handler is reached (S2.3a), so nothing here has to re-check it.
 pub struct RepoTools {
-    _store: Arc<Store>,
+    store: Arc<Store>,
 }
 
 impl ToolHandler for RepoTools {
-    fn call(&self, _task: &str, tool_name: &str, _args: &Value) -> Result<Value, String> {
+    fn call(&self, _task: &str, tool_name: &str, args: &Value) -> Result<Value, String> {
         match tool::find(tool_name) {
             // Defence in depth: the endpoint already refuses unknown names.
             None => Err(format!("no tool `{tool_name}`")),
@@ -366,6 +367,8 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == "get_task_input" => {
                 Err("the run's own input is served by the MCP endpoint itself".to_string())
             }
+            // S7.4: the reviewer's critique is stored on the drafts it judged.
+            Some(spec) if spec.name == "save_review" => save_review(&self.store, args),
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -375,8 +378,9 @@ impl ToolHandler for RepoTools {
     }
 }
 
-/// The slice that brings each tool's data. Every catalog tool must appear here:
-/// [`tests::every_catalog_tool_is_answered_explicitly`] fails otherwise.
+/// The slice that brings each tool's data, for the tools still waiting for one.
+/// A tool answered in [`RepoTools::call`] — `get_task_input`, `save_review` — is
+/// not listed, and the tests keep both sets in step.
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
         "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
@@ -389,13 +393,29 @@ fn pending_slice(tool_name: &str) -> &'static str {
         "get_score_card" => "S6.3 (scoring)",
         "save_score_narration" => "S6.5 (narration)",
         "save_document_draft" => "S7.2 (documents)",
-        "save_review" => "S7.4 (reviewer pass)",
         "get_email_batch" => "S8.1 (mail)",
         "propose_status_change" => "S8.4 (status proposals)",
         // Never panic on a request path: an unmapped catalog tool is a bug, and
         // the test below fails when one appears.
         _ => UNOWNED,
     }
+}
+
+/// `save_review` (S7.4, FR-22/FR-72): store the fresh-context reviewer's
+/// critique on the drafts it judged. The core decides that — the agent only
+/// describes what is wrong — and a payload it cannot use is refused whole, so
+/// the run retries instead of the studio half-showing a critique.
+fn save_review(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
+    let review = boba_app::review::save_critique(
+        store.as_ref(),
+        args,
+        &boba_app::system::SystemClock.now_rfc3339(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(json!({
+        "app_id": review.application_id,
+        "findings": review.findings.len(),
+    }))
 }
 
 /// Answer for a catalog tool nobody claimed yet; the tests refuse to let a
@@ -475,7 +495,49 @@ mod tests {
     /// A handler over a real (encrypted, temp) store: the same construction the
     /// composition root does, without the keychain.
     fn repo_tools(tag: &str) -> RepoTools {
-        RepoTools { _store: store(tag) }
+        repo_tools_over(store(tag))
+    }
+
+    /// The same handler over a store the test already holds.
+    fn repo_tools_over(store: Arc<Store>) -> RepoTools {
+        RepoTools { store }
+    }
+
+    /// Store both drafts of one application, as a tailoring run leaves them.
+    /// Raw SQL on purpose: this crate does not depend on `boba-domain`, and the
+    /// document repository's own tests cover the SQL.
+    fn drafts(store: &Arc<Store>, application_id: &str) {
+        for (id, kind) in [("doc_cv_1", "cv"), ("doc_cover_1", "cover_letter")] {
+            let (id, kind, application_id) =
+                (id.to_string(), kind.to_string(), application_id.to_string());
+            store
+                .execute(move |conn| {
+                    conn.execute(
+                        "INSERT INTO document (id, application_id, kind, lang, template, \
+                         model_json, created_at, updated_at) \
+                         VALUES (?1, ?2, ?3, 'en', 'cv-classic', '{\"schema_version\":1}', 't', 't')",
+                        [id.as_str(), application_id.as_str(), kind.as_str()],
+                    )
+                    .map(|_| ())
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+                })
+                .expect("the draft is stored");
+        }
+    }
+
+    /// The critique stored on a document, read straight from its column.
+    fn critique(store: &Arc<Store>, id: &str) -> Option<String> {
+        let id = id.to_string();
+        store
+            .read(move |conn| {
+                conn.query_row(
+                    "SELECT review_json FROM document WHERE id = ?1",
+                    [id.as_str()],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("read the critique")
     }
 
     /// An open store with every migration applied.
@@ -523,7 +585,9 @@ mod tests {
     fn every_catalog_tool_is_answered_explicitly() {
         let tools = repo_tools("store");
 
-        for spec in tool::TOOLS {
+        // save_review is implemented (S7.4) and is exercised by the save_review
+        // tests below; every other catalog tool is still an explicit refusal.
+        for spec in tool::TOOLS.iter().filter(|spec| spec.name != "save_review") {
             let answer = tools.call("extract_postings", spec.name, &json!({}));
             // Never "unknown tool": every catalog entry has a real answer.
             let message = answer.expect_err("no tool has data yet");
@@ -542,10 +606,80 @@ mod tests {
         }
     }
 
+    /// S7.4: `save_review` stores the fresh-context reviewer's critique on the
+    /// drafts it judged, where the studio reads it back with them.
+    #[test]
+    fn save_review_stores_the_critique_on_the_drafts() {
+        let store = store("review-ok");
+        drafts(&store, "app_1");
+
+        let answer = repo_tools_over(Arc::clone(&store))
+            .call("review_application", "save_review", &json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+            }))
+            .expect("the critique is stored");
+
+        assert_eq!(answer["app_id"], "app_1");
+        assert_eq!(answer["findings"], 1, "the critique it stored");
+        let cv = critique(&store, "doc_cv_1").expect("the CV carries the critique");
+        assert!(cv.contains("unsupported claim"), "{cv}");
+        assert!(
+            critique(&store, "doc_cover_1").is_some(),
+            "both drafts carry the critique"
+        );
+    }
+
+    /// A payload the core cannot use is refused whole, and a critique of an
+    /// application with no drafts is refused too: neither writes anything.
+    #[test]
+    fn save_review_refuses_what_it_cannot_store() {
+        let store = store("review-refused");
+        drafts(&store, "app_1");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let unusable = tools
+            .call(
+                "review_application",
+                "save_review",
+                &json!({
+                    "app_id": "app_1",
+                    "findings": [{"severity": "urgent", "target": "cv", "message": "x"}],
+                }),
+            )
+            .expect_err("an unknown severity is refused");
+        assert!(unusable.contains("not usable"), "{unusable}");
+
+        let nothing_to_review = tools
+            .call(
+                "review_application",
+                "save_review",
+                &json!({
+                    "app_id": "app_unknown",
+                    "findings": [],
+                }),
+            )
+            .expect_err("no drafts to review");
+        assert!(
+            nothing_to_review.contains("no drafts"),
+            "{nothing_to_review}"
+        );
+
+        assert!(
+            critique(&store, "doc_cv_1").is_none(),
+            "nothing was written by either refusal"
+        );
+    }
+
     /// Every catalog tool must route somewhere: reaching the fallback is a bug.
+    /// The tools answered here have no pending slice — `save_review` is S7.4's
+    /// and is implemented; `get_task_input` is the endpoint's (S2.4).
     #[test]
     fn no_catalog_tool_falls_through_to_the_unowned_answer() {
-        for spec in tool::TOOLS {
+        for spec in tool::TOOLS
+            .iter()
+            .filter(|spec| spec.name != "get_task_input" && spec.name != "save_review")
+        {
             assert_ne!(
                 pending_slice(spec.name),
                 UNOWNED,

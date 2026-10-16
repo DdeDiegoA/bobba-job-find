@@ -349,6 +349,14 @@ pub struct DocumentRecord {
     pub verified_at: Option<String>,
     /// See [`NewDocument::language_fallback_from`].
     pub language_fallback_from: Option<String>,
+    /// The fresh-context reviewer's critique of this document (S7.4): the
+    /// findings JSON, exactly as the review run wrote it, or `None` when no
+    /// review ran. It is agent text and is rendered as data only (ADR-010).
+    pub review_json: Option<String>,
+    /// Whether [`Self::review_json`] is agent text (ADR-010). The critique has
+    /// its own flag because it stays agent-written even when the user edits the
+    /// draft it sits on; only a review run writes 1.
+    pub review_untrusted_origin: bool,
     pub untrusted_origin: bool,
     pub created_at: String,
     pub updated_at: String,

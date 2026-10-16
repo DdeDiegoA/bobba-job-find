@@ -56,9 +56,149 @@ pub trait DocumentsRepo: Send + Sync {
         verified_at: &str,
     ) -> Result<(), DocumentsRepoError>;
 
+    /// Attach a review run's critique (`save_review`, S7.4) to the drafts it
+    /// judged: the newest version of each kind for `application_id`. Returns how
+    /// many rows were annotated, so a caller can tell an application with no
+    /// drafts — 0 — from one that was annotated. The critique is agent text
+    /// (ADR-010), so it only ever lands on a row the store already marks
+    /// untrusted.
+    fn set_review(
+        &self,
+        application_id: &str,
+        review_json: &str,
+        updated_at: &str,
+    ) -> Result<u32, DocumentsRepoError>;
+
     /// Read the rendered PDF blob, `None` until it is rendered.
     fn pdf(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError>;
 
     /// Read the rendered DOCX blob, `None` until it is rendered.
     fn docx(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError>;
+}
+
+/// An in-memory [`DocumentsRepo`] for the use cases under test. It lives here,
+/// next to the trait, so every `boba-app` module that needs a document store in
+/// a test shares one; the real SQL lives behind the adapter, `boba-store`.
+#[cfg(test)]
+pub(crate) mod fake {
+    use std::sync::Mutex;
+
+    use boba_domain::documents::{DocumentKind, DocumentRecord, NewDocument};
+
+    use super::{DocumentsRepo, DocumentsRepoError};
+
+    #[derive(Default)]
+    pub(crate) struct FakeDocumentsRepo {
+        rows: Mutex<Vec<NewDocument>>,
+        /// Every critique `set_review` was handed, with the application it judged.
+        reviews: Mutex<Vec<(String, String)>>,
+        /// When set, every write fails the way a full disk would.
+        pub(crate) fail: bool,
+    }
+
+    impl FakeDocumentsRepo {
+        /// The documents written so far, in order.
+        pub(crate) fn rows(&self) -> Vec<NewDocument> {
+            self.rows.lock().unwrap().clone()
+        }
+
+        /// The critiques written so far, as `(application_id, json)`.
+        pub(crate) fn reviews(&self) -> Vec<(String, String)> {
+            self.reviews.lock().unwrap().clone()
+        }
+
+        /// A fake whose writes fail, the way a full disk would.
+        pub(crate) fn failing() -> Self {
+            Self {
+                fail: true,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl DocumentsRepo for FakeDocumentsRepo {
+        fn insert(&self, new: &NewDocument) -> Result<i64, DocumentsRepoError> {
+            if self.fail {
+                return Err(DocumentsRepoError::new("disk gone"));
+            }
+            let mut rows = self.rows.lock().unwrap();
+            // Versions are per (application, kind), like the real store's.
+            let version = rows
+                .iter()
+                .filter(|row| row.application_id == new.application_id && row.kind == new.kind)
+                .count() as i64
+                + 1;
+            rows.push(new.clone());
+            Ok(version)
+        }
+
+        fn get(&self, _id: &str) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
+            Ok(None)
+        }
+
+        fn list_for_application(
+            &self,
+            _application_id: &str,
+        ) -> Result<Vec<DocumentRecord>, DocumentsRepoError> {
+            Ok(vec![])
+        }
+
+        fn latest(
+            &self,
+            _application_id: &str,
+            _kind: DocumentKind,
+        ) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
+            Ok(None)
+        }
+
+        fn set_pdf(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
+            Ok(())
+        }
+
+        fn set_docx(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
+            Ok(())
+        }
+
+        fn mark_verified(&self, _: &str, _: &str, _: &str) -> Result<(), DocumentsRepoError> {
+            Ok(())
+        }
+
+        fn set_review(
+            &self,
+            application_id: &str,
+            review_json: &str,
+            _updated_at: &str,
+        ) -> Result<u32, DocumentsRepoError> {
+            if self.fail {
+                return Err(DocumentsRepoError::new("disk gone"));
+            }
+            let annotated = {
+                let rows = self.rows.lock().unwrap();
+                [DocumentKind::Cv, DocumentKind::CoverLetter]
+                    .iter()
+                    .filter(|kind| {
+                        rows.iter()
+                            .any(|row| row.application_id == application_id && row.kind == **kind)
+                    })
+                    .count()
+            };
+            // No row matched: there is nothing to annotate and nothing is
+            // written, exactly like the real `UPDATE` (S7.4 refuses the critique).
+            if annotated > 0 {
+                self.reviews
+                    .lock()
+                    .unwrap()
+                    .push((application_id.to_string(), review_json.to_string()));
+            }
+            Ok(annotated as u32)
+        }
+
+        fn pdf(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+            Ok(None)
+        }
+
+        fn docx(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+            Ok(None)
+        }
+    }
 }
