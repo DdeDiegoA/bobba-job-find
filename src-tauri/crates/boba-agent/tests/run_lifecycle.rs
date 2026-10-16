@@ -9,10 +9,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use boba_agent::lockdown::TaskSupport;
+use boba_agent::mcp::config::{RunSandbox, SandboxConfig};
+use boba_agent::mcp::server::ToolHandler;
 use boba_agent::runtime::{AgentRuntime, RunSpec, classify_failure};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{
-    AgentEvent, AgentTask, AgentTaskKind, CancelToken, FailureReason, InputTrust, RunBudget,
+    AgentEvent, AgentPort, AgentTask, AgentTaskKind, CancelToken, FailureReason, InputTrust,
+    RunBudget,
 };
 use boba_app::ports::repo::agent::{
     AgentEventRecord, AgentRepo, AgentRepoError, AgentRunRecord, FinishAgentRun, NewAgentRun,
@@ -303,9 +306,9 @@ fn tool_call_limit_fails_with_limit_exceeded() {
     let lines = [
         // A Claude `stream-json` run opens with its init event (ADR-010 §1).
         r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
-        r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
-        r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
-        r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
+        r#"{"type":"tool_call","name":"mcp__boba__get_posting","input":{}}"#,
+        r#"{"type":"tool_call","name":"mcp__boba__get_posting","input":{}}"#,
+        r#"{"type":"tool_call","name":"mcp__boba__get_posting","input":{}}"#,
         r#"{"type":"finished","exit_code":0}"#,
     ]
     .join("\n");
@@ -369,4 +372,121 @@ fn classify_failure_maps_quota_and_not_found() {
         FailureReason::NotFound
     );
     assert!(!FailureReason::NotFound.pauses_ai());
+}
+
+// --- CH8: the run's own MCP endpoint, driven end to end by the fake CLI. ---
+
+/// Accepts every call: this test is about the path, not the tool data.
+struct NoTools;
+
+impl ToolHandler for NoTools {
+    fn call(
+        &self,
+        _task: &str,
+        _tool: &str,
+        _args: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({}))
+    }
+}
+
+/// A short root: the run's Unix socket lives here, and a `sockaddr_un` path is
+/// capped (S2.2 uses the same trick).
+fn scratch(tag: &str) -> PathBuf {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = PathBuf::from(format!("/tmp/boba-e2e-{tag}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// The text the run reported, joined, for a readable assertion message.
+fn text_of(events: &[AgentEvent]) -> String {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// CH8 end-to-end through `AgentPort::run` and the real MCP endpoint: the
+/// runtime furnishes the run's workspace, the endpoint authenticates the CLI and
+/// serves the run's own input, an untrusted run passes its init-event check, and
+/// a write is validated against the catalog's schema before it could be stored.
+#[test]
+fn a_run_drives_its_own_mcp_endpoint_end_to_end() {
+    let root = scratch("mcp");
+    let repo = Arc::new(FakeRepo::default());
+    let calls = serde_json::json!([
+        {"name": "get_task_input"},
+        {"name": "propose_posting_features", "arguments": {"features": {}}},
+    ])
+    .to_string();
+    let runtime = AgentRuntime::new(Arc::clone(&repo))
+        // The gate allows the untrusted task here; the run's own init event is
+        // still what the runtime checks (ADR-010 §1).
+        .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+        .with_sandbox(
+            SandboxConfig {
+                runs_root: root.join("runs"),
+                app_data: root.clone(),
+                shim: root.join("boba-mcp"),
+            },
+            Arc::new(NoTools),
+        )
+        .with_command_builder(Arc::new(move |_task: &AgentTask, _sandbox: &RunSandbox| {
+            CommandSpec {
+                program: fake_cli(),
+                args: vec![],
+                cwd: None,
+                env: vec![
+                    ("BOBA_FAKE_MODE".to_string(), "mcp-run".to_string()),
+                    (
+                        "BOBA_FAKE_TOOLS".to_string(),
+                        "mcp__boba__get_task_input".to_string(),
+                    ),
+                    ("BOBA_FAKE_CALLS".to_string(), calls.clone()),
+                    // A clean run: no limit to fire, so it exits by itself.
+                    ("BOBA_FAKE_HOLD_MS".to_string(), "0".to_string()),
+                ],
+            }
+        }));
+
+    let mut run_task = task(RunBudget::default());
+    run_task.budget.wall_clock = Some(Duration::from_secs(15));
+    let handle = runtime.run(run_task);
+    let (run_id, events) = drain(handle);
+
+    assert!(
+        matches!(events.last(), Some(AgentEvent::Finished { .. })),
+        "{events:?}"
+    );
+    assert_eq!(
+        repo.get_run(&run_id).unwrap().expect("run").status,
+        "finished"
+    );
+
+    let text = text_of(&events);
+    // Furnished workspace: the agent pack and the run's own MCP config.
+    assert!(
+        text.contains("pack=true"),
+        "the pack was not furnished: {text}"
+    );
+    assert!(
+        text.contains("mcp=true"),
+        "the run config was not written: {text}"
+    );
+    // The endpoint authenticated this run and served its own input.
+    assert!(text.contains("auth -> ok"), "{text}");
+    assert!(text.contains("get_task_input -> ok"), "{text}");
+    // The write was validated: the schema refused it (never stored).
+    assert!(
+        text.contains("propose_posting_features -> -32602"),
+        "an invalid output was not refused: {text}"
+    );
+
+    std::fs::remove_dir_all(root).ok();
 }

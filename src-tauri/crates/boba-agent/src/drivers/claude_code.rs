@@ -34,6 +34,7 @@ impl CliDriver for ClaudeCodeDriver {
 /// {"type":"system","subtype":"hook_started"|"hook_response"|…}      (the user's own hooks)
 /// {"type":"assistant","message":{"content":[{"type":"text","text":"…"}]}}
 /// {"type":"assistant","message":{"content":[{"type":"tool_use","id":…,"name":…,"input":…}]}}
+/// {"type":"assistant","message":{"content":[{"type":"server_tool_use","id":…,"name":…,"input":…}]}}
 /// {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":…,"content":…}]}}
 /// {"type":"result","subtype":"success","result":"…","total_cost_usd":…,"usage":{…}}
 /// {"type":"rate_limit_event","rate_limit_info":{…}}
@@ -43,6 +44,11 @@ impl CliDriver for ClaudeCodeDriver {
 /// results. The init event is where ADR-010 §1's tool list comes from, and the
 /// CLI's own hook and rate-limit traffic is dropped rather than shown as the
 /// agent's output.
+///
+/// Both tool-invoking block types are tool calls. `server_tool_use` is the CLI's
+/// other one — a native tool it runs itself — so dropping it would hide a native
+/// call from the untrusted-run gate; a new tool-invoking block type must be
+/// added here (CH8).
 #[derive(Debug, Default)]
 pub struct Stream {
     /// `tool_use` id → tool name, so a later `tool_result` can name its tool.
@@ -101,7 +107,9 @@ impl Stream {
                         });
                     }
                 }
-                Some("tool_use") => {
+                // Both tool-invoking block types, so the untrusted-run gate sees
+                // a native tool whichever block the CLI used to call it (CH8).
+                Some("tool_use" | "server_tool_use") => {
                     let name = block
                         .get("name")
                         .and_then(Value::as_str)
@@ -297,6 +305,35 @@ mod tests {
                     cost_usd: Some(0.035308),
                 },
             ]
+        );
+    }
+
+    /// CH8: a stream block that invokes a tool is a tool call whatever its type
+    /// — `server_tool_use` is the CLI's other tool-invoking block, and dropping
+    /// it would hide a native tool from the untrusted-run gate.
+    #[test]
+    fn a_server_tool_use_block_is_a_tool_call_too() {
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"srv1","name":"WebSearch","input":{"query":"x"}}]}}"#;
+        let parsed = Stream::default().line(line);
+        assert_eq!(
+            parsed.events,
+            vec![AgentEvent::ToolCall {
+                name: "WebSearch".to_string(),
+                input: serde_json::json!({"query": "x"}),
+            }]
+        );
+        // And its result resolves to the same name, from the id the call recorded.
+        let mut stream = Stream::default();
+        stream.line(line);
+        let result = stream.line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"srv1","content":"ok"}]}}"#,
+        );
+        assert_eq!(
+            result.events,
+            vec![AgentEvent::ToolResult {
+                name: "WebSearch".to_string(),
+                output: "ok".to_string(),
+            }]
         );
     }
 

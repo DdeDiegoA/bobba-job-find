@@ -602,6 +602,22 @@ fn run_process<R: AgentRepo>(
                     opened = true;
                 }
                 for event in parsed.events {
+                    // ADR-010 §1, defence in depth (CH8): the init list is not
+                    // the only word. Any later tool_use this app does not own
+                    // means the pinned tool set did not hold, so an untrusted run
+                    // stops here — before the call is emitted as the agent's
+                    // work. `lockdown` owns what "ours" means; asking it about
+                    // this one tool reuses that answer rather than restating it.
+                    if state.task.reads_untrusted()
+                        && matches!(
+                            &event,
+                            AgentEvent::ToolCall { name, .. }
+                                if !lockdown::init_event_is_locked_down(std::slice::from_ref(name))
+                        )
+                    {
+                        proc.kill();
+                        return Outcome::Failed(FailureReason::Unsupported);
+                    }
                     match &event {
                         AgentEvent::Usage {
                             tokens_in,
@@ -1339,6 +1355,125 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// CH8 (defence in depth): the init event is not the only word. A tool_use
+    /// that arrives *after* a clean init — a CLI that slipped a native tool past
+    /// the list it reported — aborts an untrusted run just the same, before the
+    /// call is ever emitted as the agent's own work.
+    #[test]
+    fn a_native_tool_use_after_a_clean_init_aborts_an_untrusted_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let lines = [
+            r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"done","usage":{}}"#,
+        ]
+        .join("\n");
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "replay".to_string()),
+                        ("BOBA_FAKE_LINES".to_string(), lines),
+                    ],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::ToolCall { name, .. } if name == "Bash")),
+            "the native tool call was emitted as the agent's own work: {events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// CH8: `server_tool_use` is a tool call too, so a CLI that opens cleanly and
+    /// then reaches for a native tool *through that block type* still aborts an
+    /// untrusted run — the block must not be a way around the gate.
+    #[test]
+    fn a_server_tool_use_after_a_clean_init_aborts_an_untrusted_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let lines = [
+            r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"server_tool_use","id":"s1","name":"WebSearch","input":{}}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"done","usage":{}}"#,
+        ]
+        .join("\n");
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "replay".to_string()),
+                        ("BOBA_FAKE_LINES".to_string(), lines),
+                    ],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            !events.iter().any(
+                |event| matches!(event, AgentEvent::ToolCall { name, .. } if name == "WebSearch")
+            ),
+            "the native tool call was emitted as the agent's own work: {events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
     /// A run that reads third-party content must not continue when the CLI
     /// reports a native tool: the tool set is the whole basis of ADR-010's
     /// envelope, so the run fails visibly instead.
@@ -1406,6 +1541,88 @@ mod tests {
         assert!(
             matches!(events.last(), Some(AgentEvent::Finished { .. })),
             "{events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// The calls the fake CLI makes over the run's MCP endpoint (`mcp-run`):
+    /// writes whose arguments the catalog's schema refuses, spending the output
+    /// budget (AC2).
+    fn output_budget_calls() -> String {
+        serde_json::json!([
+            {"name": "propose_posting_features", "arguments": {"features": {}}},
+            {"name": "propose_posting_features", "arguments": {"features": {}}},
+            {"name": "propose_posting_features", "arguments": {"features": {}}},
+        ])
+        .to_string()
+    }
+
+    /// CH8: the runtime ends a run whose output stayed invalid (`InvalidOutput`)
+    /// instead of letting the CLI finish work the core has already refused — and
+    /// the endpoint serves no further call in the window before that kill.
+    #[test]
+    fn a_run_whose_output_stayed_invalid_is_killed_as_invalid_output() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let mut task = task();
+        // A backstop so a broken kill fails as Timeout instead of hanging.
+        task.budget.wall_clock = Some(Duration::from_secs(5));
+        let handle = runtime.start(
+            task,
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "mcp-run".to_string()),
+                        (
+                            "BOBA_FAKE_TOOLS".to_string(),
+                            "mcp__boba__get_task_input".to_string(),
+                        ),
+                        ("BOBA_FAKE_CALLS".to_string(), output_budget_calls()),
+                    ],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::InvalidOutput,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        // The invalid writes were refused by the endpoint, never stored: the run
+        // is recorded invalid_output and never reached a result.
+        assert_eq!(
+            repo.get_run(&handle.run_id)
+                .unwrap()
+                .unwrap()
+                .failure_reason
+                .as_deref(),
+            Some("invalid_output")
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::Finished { .. })),
+            "an invalid-output run must not report success: {events:?}"
         );
         std::fs::remove_dir_all(root).ok();
     }

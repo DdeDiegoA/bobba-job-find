@@ -16,11 +16,20 @@
 //!                   `BOBA_FAKE_MARKER` after `BOBA_FAKE_DELAY_MS`, then exit 0
 //!   emit-lines    — alias of replay, kept for readability in fixtures
 //!   fail-auth     — write an auth error to stderr, exit 1
+//!   mcp-run       — open with the init event, then speak the run's MCP endpoint
+//!                   (`BOBA_IPC_ENDPOINT`/`BOBA_RUN_TOKEN`): authenticate and make
+//!                   one `tools/call` per entry in `BOBA_FAKE_CALLS` (JSON array
+//!                   of `{"name":…,"arguments":…}`), reporting each reply as a
+//!                   text line. It then holds so the **runtime's** own limit —
+//!                   output failure or wall clock — is what ends the run.
 //!
 //! ponytail: modes are tiny on purpose; add one only when a test needs it.
 
+use std::io::{BufReader, Write};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+
+use boba_mcp_proto::schema as wire;
 
 fn main() {
     let mode = std::env::var("BOBA_FAKE_MODE").unwrap_or_else(|_| "echo".to_string());
@@ -32,6 +41,7 @@ fn main() {
         "claude-stream" => claude_stream(),
         "spawn-child" => spawn_child(),
         "fail-auth" => fail_auth(),
+        "mcp-run" => mcp_run(),
         other => {
             eprintln!("unknown BOBA_FAKE_MODE: {other}");
             std::process::exit(2);
@@ -74,8 +84,10 @@ fn replay() {
             );
             println!(r#"{{"type":"started","cli":"claude_code","model":"sonnet"}}"#);
             println!(r#"{{"type":"text","text":"Working on it"}}"#);
-            println!(r#"{{"type":"tool_call","name":"get_posting","input":{{"id":"01H"}}}}"#);
-            println!(r#"{{"type":"tool_result","name":"get_posting","output":"ok"}}"#);
+            println!(
+                r#"{{"type":"tool_call","name":"mcp__boba__get_posting","input":{{"id":"01H"}}}}"#
+            );
+            println!(r#"{{"type":"tool_result","name":"mcp__boba__get_posting","output":"ok"}}"#);
             println!(r#"{{"type":"usage","tokens_in":120,"tokens_out":40,"cost_usd":0.002}}"#);
             println!(r#"{{"type":"finished","exit_code":0}}"#);
         }
@@ -108,4 +120,122 @@ fn spawn_child() {
 fn fail_auth() {
     eprintln!("error: not authenticated, please log in");
     std::process::exit(1);
+}
+
+/// A fake run that talks to its own MCP endpoint, so a test can drive the whole
+/// chain — workspace, endpoint, init-event check, tool policy and output
+/// validation — end to end.
+fn mcp_run() {
+    let tools = std::env::var("BOBA_FAKE_TOOLS")
+        .unwrap_or_else(|_| "mcp__boba__get_task_input".to_string());
+    let tools: Vec<String> = tools
+        .split(',')
+        .filter(|tool| !tool.is_empty())
+        .map(|tool| format!("\"{tool}\""))
+        .collect();
+    println!(
+        r#"{{"type":"system","subtype":"init","cwd":".","tools":[{}],"mcp_servers":[{{"name":"boba","status":"connected"}}],"claude_code_version":"2.1.301"}}"#,
+        tools.join(",")
+    );
+
+    // What the runtime put in this run's workspace: the agent pack it furnished
+    // and the MCP config it wrote.
+    let cwd = std::env::current_dir().unwrap_or_default();
+    println!(
+        "{}",
+        serde_json::json!({
+            "type": "text",
+            "text": format!(
+                "cwd={} pack={} mcp={}",
+                cwd.display(),
+                std::path::Path::new("CLAUDE.md").exists(),
+                std::path::Path::new("mcp.json").exists(),
+            ),
+        })
+    );
+
+    let calls: Vec<serde_json::Value> = std::env::var("BOBA_FAKE_CALLS")
+        .ok()
+        .and_then(|blob| serde_json::from_str(&blob).ok())
+        .unwrap_or_default();
+    match mcp_calls(&calls) {
+        Ok(replies) => {
+            for reply in replies {
+                println!("{}", serde_json::json!({"type": "text", "text": reply}));
+            }
+        }
+        Err(error) => println!(
+            "{}",
+            serde_json::json!({"type": "text", "text": format!("mcp-error: {error}")})
+        ),
+    }
+
+    // Hold: the runtime's own limit (output failure, wall clock) must be what
+    // ends this run, so a passing test proves that limit fired rather than an
+    // orderly exit. `BOBA_FAKE_HOLD_MS=0` lets a clean run exit instead.
+    let hold_ms: u64 = std::env::var("BOBA_FAKE_HOLD_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(10_000);
+    if hold_ms > 0 {
+        std::thread::sleep(Duration::from_millis(hold_ms));
+    }
+    println!(
+        r#"{{"type":"result","subtype":"success","result":"done","num_turns":1,"total_cost_usd":0.0,"usage":{{"input_tokens":0,"output_tokens":0}}}}"#
+    );
+}
+
+/// Authenticate with the run's endpoint, then one `tools/call` per entry.
+fn mcp_calls(calls: &[serde_json::Value]) -> std::io::Result<Vec<String>> {
+    let endpoint = std::env::var(wire::ENV_ENDPOINT).unwrap_or_default();
+    let token = std::env::var(wire::ENV_TOKEN).unwrap_or_default();
+    let mut core = BufReader::new(wire::connect(&endpoint)?);
+
+    let mut replies = Vec::new();
+    let auth = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": wire::METHOD_AUTH,
+        "params": {"token": token},
+    });
+    replies.push(format!("auth -> {}", outcome(&request(&mut core, &auth)?)));
+    for (index, call) in calls.iter().enumerate() {
+        let message = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": index + 2,
+            "method": wire::METHOD_TOOLS_CALL,
+            "params": {
+                "name": call.get("name").cloned().unwrap_or(serde_json::Value::Null),
+                "arguments": call.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
+            },
+        });
+        let reply = request(&mut core, &message)?;
+        replies.push(format!(
+            "{} -> {}",
+            call["name"].as_str().unwrap_or("?"),
+            outcome(&reply)
+        ));
+    }
+    Ok(replies)
+}
+
+/// Send one request and read its reply.
+fn request(
+    core: &mut BufReader<wire::Stream>,
+    message: &serde_json::Value,
+) -> std::io::Result<serde_json::Value> {
+    let stream = core.get_mut();
+    stream.write_all(message.to_string().as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    let line = wire::read_message_line(core)?.unwrap_or_default();
+    Ok(serde_json::from_str(&line).unwrap_or(serde_json::Value::Null))
+}
+
+/// A reply's error code, or `ok` when it succeeded.
+fn outcome(reply: &serde_json::Value) -> String {
+    match reply["error"]["code"].as_i64() {
+        Some(code) => code.to_string(),
+        None => "ok".to_string(),
+    }
 }
