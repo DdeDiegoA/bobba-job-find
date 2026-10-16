@@ -42,5 +42,10 @@
   "errors.tracker.same_status": "La tarjeta ya está en esa Etapa.",
   "errors.tracker.unknown_status": "Esa Etapa no es una que Boba conozca.",
   "errors.tracker.missing_id": "No se indicó ninguna postulación.",
-  "errors.tracker.source_not_allowed": "Ese cambio lo registra la app; el tablero solo puede mover una tarjeta como tú."
+  "errors.tracker.source_not_allowed": "Ese cambio lo registra la app; el tablero solo puede mover una tarjeta como tú.",
+  "errors.email.client_secret": "Tu propio client ID también necesita su client secret. Google lo pide cuando Boba renueva el acceso.",
+  "errors.email.probe_credentials": "El servidor de correo no aceptó esa contraseña o token.",
+  "errors.email.probe_unreachable": "Boba no pudo alcanzar ese servidor de correo. Revisa el host y el puerto.",
+  "errors.email.probe_refused": "Ese servidor de correo rechazó la prueba de conexión. Revisa el cifrado y el puerto.",
+  "errors.email.probe_settings": "Faltan datos de la cuenta."
 }

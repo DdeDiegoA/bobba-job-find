@@ -42,5 +42,6 @@
   "scopes.gmail.send": "Enviar correo como tú — nada más",
   "client_secret": "Avanzado: tu client secret",
   "client_secret.placeholder": "GOCSPX-…",
-  "client_secret.hint": "Google lo muestra junto a tu client ID y lo exige cuando Boba renueva el acceso. No es confidencial."
+  "client_secret.hint": "Google lo muestra junto a tu client ID y lo exige cuando Boba renueva el acceso. No es confidencial.",
+  "list.imap_smtp": "Acceso de solo lectura y envío: Boba nunca cambia nada en el servidor, y la conexión se probó antes de guardarse."
 }

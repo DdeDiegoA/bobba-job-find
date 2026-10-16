@@ -83,37 +83,45 @@ function ConnectedMailbox({ account }: { account: ConnectionView }) {
         </span>
       </div>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium text-fg">{t("mode")}</legend>
-        {MODES.map((mode) => (
-          <label key={mode} className="flex items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name={`mode-${account.id}`}
-              value={mode}
-              checked={account.mode === mode}
-              disabled={setMode.isPending}
-              onChange={() => setMode.mutate({ id: account.id, mode })}
-            />
-            <span>
-              <span className="text-fg">{t(MODE_LABELS[mode].label)}</span>
-              <span className="block text-fg-subtle">{t(MODE_LABELS[mode].hint)}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
+      {/* An IMAP/SMTP account has no OAuth grant to switch, so there is no mode
+          control: it reads read-only and it sends (AC2). */}
+      {account.provider === "imap_smtp" ? (
+        <p className="text-sm text-fg-muted">{t("list.imap_smtp")}</p>
+      ) : (
+        <>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-sm font-medium text-fg">{t("mode")}</legend>
+            {MODES.map((mode) => (
+              <label key={mode} className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`mode-${account.id}`}
+                  value={mode}
+                  checked={account.mode === mode}
+                  disabled={setMode.isPending}
+                  onChange={() => setMode.mutate({ id: account.id, mode })}
+                />
+                <span>
+                  <span className="text-fg">{t(MODE_LABELS[mode].label)}</span>
+                  <span className="block text-fg-subtle">{t(MODE_LABELS[mode].hint)}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
 
-      {modeError ? (
-        <p role="alert" className="text-sm text-danger">
-          {modeError}
-        </p>
-      ) : null}
+          {modeError ? (
+            <p role="alert" className="text-sm text-danger">
+              {modeError}
+            </p>
+          ) : null}
 
-      <div className="flex flex-col gap-1">
-        <span className="text-sm text-fg-muted">{t("list.scopes")}</span>
-        {/* What the provider actually granted, in plain language (AC1). */}
-        <ScopeList scopes={account.scopes} />
-      </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-fg-muted">{t("list.scopes")}</span>
+            {/* What the provider actually granted, in plain language (AC1). */}
+            <ScopeList scopes={account.scopes} />
+          </div>
+        </>
+      )}
 
       {confirming ? (
         <div className="flex flex-wrap items-center gap-2">

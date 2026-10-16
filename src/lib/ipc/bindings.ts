@@ -64,6 +64,18 @@ export const commands = {
       __TAURI_INVOKE("email_connect_gmail", { input }),
     ),
   /**
+   *  Connect an IMAP/SMTP account (AC2).
+   *
+   *  The connection test runs **before anything is saved**: the IMAP probe opens
+   *  `INBOX` read-only and the submission probe authenticates, and only when both
+   *  pass are the endpoints and the credential written to the keychain and the
+   *  connection to the store. A wrong password therefore leaves no trace.
+   */
+  emailConnectImapSmtp: (input: ConnectImapSmtpInput) =>
+    typedError<ConnectionView, AppError_Serialize>(
+      __TAURI_INVOKE("email_connect_imap_smtp", { input }),
+    ),
+  /**
    *  Switch a connection between send-only and read+send (AC3).
    *
    *  Reading is only switched on when the granted scopes cover it (NFR-5): a
@@ -233,6 +245,30 @@ export type ConnectGmailInput = {
   client_secret: string | null;
 };
 
+/**  The Connect IMAP/SMTP form (AC2). */
+export type ConnectImapSmtpInput = {
+  /**  The mailbox address, as typed by the user. */
+  address: string;
+  /**  The login both protocols use, usually the address itself. */
+  username: string;
+  /**  The app password, or the access token for `XOAUTH2`. */
+  credential: string;
+  /**  Which of the two that is. */
+  credential_kind: MailCredentialKind;
+  /**  IMAP host. */
+  imap_host: string;
+  /**  IMAP port: 993 for TLS, 143 for `STARTTLS`. */
+  imap_port: number;
+  /**  How the IMAP socket is protected. */
+  imap_security: MailSecurity;
+  /**  Submission host. */
+  smtp_host: string;
+  /**  Submission port: 465 for TLS, 587 for `STARTTLS`. */
+  smtp_port: number;
+  /**  How the submission socket is protected. */
+  smtp_security: MailSecurity;
+};
+
 /**  The Connect Outlook form: address, mode, and an optional BYO client id (AC1). */
 export type ConnectOutlookInput = {
   /**
@@ -343,6 +379,13 @@ export type FactView = {
   from_agent_run: boolean;
 };
 
+/**  How an IMAP/SMTP account authenticates (AC2). */
+export type MailCredentialKind =
+  /**  The provider's app password. */
+  | "password"
+  /**  An OAuth 2.0 access token, offered as `XOAUTH2`. */
+  | "x_o_auth2";
+
 /**  Which mailbox provider a connection belongs to (architecture §11). */
 export type MailProvider =
   /**  Outlook.com / Microsoft 365 over Microsoft Graph. */
@@ -351,6 +394,13 @@ export type MailProvider =
   | "gmail"
   /**  Any provider over IMAP/SMTP (S8.2). */
   | "imap_smtp";
+
+/**  Whether the socket is secured from the first byte or upgraded (AC2). */
+export type MailSecurity =
+  /**  Implicit TLS (IMAP 993, SMTP 465). */
+  | "tls"
+  /**  Plain TCP upgraded with `STARTTLS` (IMAP 143, SMTP 587). */
+  | "start_tls";
 
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";

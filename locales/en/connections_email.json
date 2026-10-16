@@ -42,5 +42,6 @@
   "scopes.gmail.send": "Send mail as you — nothing else",
   "client_secret": "Advanced: your client secret",
   "client_secret.placeholder": "GOCSPX-…",
-  "client_secret.hint": "Google prints this next to your client ID and requires it when Boba renews access. It is not confidential."
+  "client_secret.hint": "Google prints this next to your client ID and requires it when Boba renews access. It is not confidential.",
+  "list.imap_smtp": "Read-only mail access and sending: Boba never changes anything on the server, and the connection was tested before it was saved."
 }

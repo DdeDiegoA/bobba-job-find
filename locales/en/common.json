@@ -42,5 +42,10 @@
   "errors.tracker.same_status": "The card is already in that Stage.",
   "errors.tracker.unknown_status": "That Stage is not one Boba knows.",
   "errors.tracker.missing_id": "No application was named.",
-  "errors.tracker.source_not_allowed": "The app records that change itself; the board can only move a card as you."
+  "errors.tracker.source_not_allowed": "The app records that change itself; the board can only move a card as you.",
+  "errors.email.client_secret": "Your own client ID needs its client secret too. Google asks for it when Boba renews access.",
+  "errors.email.probe_credentials": "The mail server did not accept that password or token.",
+  "errors.email.probe_unreachable": "Boba could not reach that mail server. Check the host and port.",
+  "errors.email.probe_refused": "That mail server refused the connection test. Check the encryption setting and the port.",
+  "errors.email.probe_settings": "The account details are incomplete."
 }
