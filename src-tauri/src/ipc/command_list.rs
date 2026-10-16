@@ -13,6 +13,10 @@ macro_rules! boba_commands {
         tauri_specta::collect_commands![
             crate::ipc::app_info,
             crate::ipc::task_cancel,
+            crate::commands::profile::profile_snapshot,
+            crate::commands::profile::profile_save_fact,
+            crate::commands::profile::profile_history,
+            crate::commands::profile::profile_restore,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

@@ -10,6 +10,23 @@ export const commands = {
   /**  Cancel an in-flight long task by id (AD-3). Returns whether it was found. */
   taskCancel: (taskId: string) =>
     typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("task_cancel", { taskId })),
+  /**
+   *  The current profile: facts with their language gaps, the version and the
+   *  pending proposal count (AC1/AC2).
+   */
+  profileSnapshot: () =>
+    typedError<ProfileSnapshot, AppError_Serialize>(__TAURI_INVOKE("profile_snapshot")),
+  /**  Save a new fact or an edit as a new revision (AC1/AC2/AC3). */
+  profileSaveFact: (input: FactRevisionInput) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(__TAURI_INVOKE("profile_save_fact", { input })),
+  /**  Every revision of one fact, newest first (AC3 History). */
+  profileHistory: (itemId: string) =>
+    typedError<FactView[], AppError_Serialize>(__TAURI_INVOKE("profile_history", { itemId })),
+  /**  Restore an earlier revision by appending its text as the newest one (AC3). */
+  profileRestore: (itemId: string, revisionId: string) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("profile_restore", { itemId, revisionId }),
+    ),
 };
 
 /** Events */
@@ -88,6 +105,62 @@ export type ErrorCode =
   | "cancelled"
   /**  The capability is not supported on this build/host. */
   | "unsupported";
+
+/**  What the editor sends when the user saves a fact (AC1/AC3). */
+export type FactRevisionInput = {
+  /**  `None` creates a new item; `Some(item_id)` edits that item (AC3). */
+  item_id: string | null;
+  /**  Section id, as in [`FactView::kind`]. */
+  kind: string;
+  text_en: string | null;
+  text_es: string | null;
+  evidence: string | null;
+  /**  Kind-specific fields as JSON; `None` means `{}`. */
+  detail_json: string | null;
+};
+
+/**
+ *  One fact item as the editor shows it: the current text, the gap it still has
+ *  and where the text came from (AC1/AC2).
+ */
+export type FactView = {
+  /**  Stable ULID of the item, kept by every revision (AC1). */
+  item_id: string;
+  /**  ULID of the revision currently in force. */
+  revision_id: string;
+  /**
+   *  Section id: `identity`, `experience`, `skill`, `education`,
+   *  `certification`, `language` or `eligibility`.
+   */
+  kind: string;
+  text_en: string | null;
+  text_es: string | null;
+  /**  Evidence quote (skills carry one, AC1). */
+  evidence: string | null;
+  /**  Kind-specific fields (organisation, dates, CEFR level, …) as JSON. */
+  detail_json: string;
+  /**
+   *  `en` or `es` when the fact has only one variant, `None` when it has both.
+   *  The UI flags it; it is never filled in automatically (AC2).
+   */
+  missing_variant: string | null;
+  /**  The profile version this revision created (AC3). */
+  profile_version: number;
+  /**  `user` or `agent_proposal`. */
+  provenance: string;
+  /**  Whether an agent run proposed this text (its run is audited in the DB). */
+  from_agent_run: boolean;
+};
+
+/**  The whole Profile screen in one read (AC1/AC2). */
+export type ProfileSnapshot = {
+  /**  The current profile version (AC3). */
+  profile_version: number;
+  /**  The current revision of every fact, in editor order. */
+  facts: FactView[];
+  /**  Facts an agent proposed that the user has not confirmed yet (S3.5). */
+  pending_proposals: number;
+};
 
 /**  Terminal event for a long task, emitted as `task.finished`. */
 export type TaskFinished = {

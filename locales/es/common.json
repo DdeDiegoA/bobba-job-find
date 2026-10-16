@@ -1,12 +1,11 @@
 {
-  "errors.unknown": "Algo salió mal.",
-  "errors.task.missing_id": "Falta el identificador de la tarea.",
-  "errors.agent.auth_expired": "Tu herramienta de IA necesita que vuelvas a iniciar sesión. El resto del trabajo continúa.",
-  "errors.agent.quota_exceeded": "Tu herramienta de IA alcanzó su límite de uso. Se reanudará cuando el límite se restablezca.",
-  "errors.agent.not_found": "No se encontró el modelo o la herramienta de IA.",
-  "errors.agent.timeout": "La tarea de IA tardó demasiado y se detuvo.",
-  "errors.agent.limit_exceeded": "La tarea de IA llegó a su límite y se detuvo antes de terminar.",
-  "errors.agent.cancelled": "La tarea de IA se canceló.",
-  "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa.",
-  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar."
+  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar.",
+  "errors.profile.store": "No se pudo leer o guardar tu perfil.",
+  "errors.profile.no_variant": "Escribe el texto en inglés o español.",
+  "errors.profile.blank_variant": "Ese texto está vacío.",
+  "errors.profile.unknown_kind": "Esa sección del perfil no existe.",
+  "errors.profile.unknown_item": "Ese elemento del perfil ya no existe.",
+  "errors.profile.unknown_revision": "Esa versión ya no existe.",
+  "errors.profile.version_overflow": "La versión de tu perfil está fuera de rango.",
+  "errors.profile.missing_id": "Falta el identificador del elemento del perfil."
 }
