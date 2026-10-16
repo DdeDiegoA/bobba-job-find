@@ -12,6 +12,18 @@ const catalogs = import.meta.glob<{ default: Record<string, unknown> }>("/locale
   eager: true,
 });
 
+/**
+ * Core error keys live one file per area under `errors/` (CH7) so two slices never
+ * append to the same catalog. They stay in the default namespace with their flat
+ * dotted key, so they are merged into `common` and `t("errors.<area>.<x>")` resolves.
+ */
+const errorFragments = import.meta.glob<{ default: Record<string, unknown> }>(
+  "/locales/*/errors/*.json",
+  { eager: true },
+);
+
+export const defaultNS = "common";
+
 const resources: Record<string, Record<string, Record<string, unknown>>> = {};
 for (const [path, mod] of Object.entries(catalogs)) {
   const match = /\/locales\/([^/]+)\/([^/]+)\.json$/.exec(path);
@@ -20,8 +32,14 @@ for (const [path, mod] of Object.entries(catalogs)) {
   resources[lng] ??= {};
   resources[lng][ns] = mod.default;
 }
+for (const [path, mod] of Object.entries(errorFragments)) {
+  const match = /\/locales\/([^/]+)\/errors\/[^/]+\.json$/.exec(path);
+  if (!match) continue;
+  const [, lng] = match;
+  resources[lng] ??= {};
+  resources[lng][defaultNS] = { ...resources[lng][defaultNS], ...mod.default };
+}
 
-export const defaultNS = "common";
 export const namespaces = Object.keys(resources.en ?? {});
 
 /** Persisted UI language (AC2). The settings table (S1.7) may own this later. */

@@ -1,0 +1,4 @@
+{
+  "errors.preferences.store": "No se pudieron leer o guardar tus preferencias.",
+  "errors.preferences.invalid": "Esas preferencias no se pueden guardar: revisa el monto, la moneda, las horas y las modalidades."
+}

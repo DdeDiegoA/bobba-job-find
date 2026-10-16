@@ -9,9 +9,15 @@
 //   4. a `message_key` the core emits has no catalog entry (AC4), or
 //   5. a catalog key is referenced by no source file (`unused key`).
 //
+// CH7: core error keys live in one file per area, `locales/<lang>/errors/<area>.json`,
+// so two slices never edit the same catalog. They are still resolved namespace-less
+// from the default `common` namespace (the key keeps its flat dotted `errors.<area>.<x>`
+// form), so this gate merges them into `common` and rejects an error key left in a
+// plain catalog file.
+//
 // Run from the repo root: `node scripts/check-i18n.mjs` (CI runs the same).
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import i18next from "i18next";
@@ -68,13 +74,70 @@ const esNs = namespacesOf("es");
 for (const ns of enNs) if (!esNs.has(ns)) fail(`locales/es/${ns}.json: namespace missing (in en)`);
 for (const ns of esNs) if (!enNs.has(ns)) fail(`locales/en/${ns}.json: namespace missing (in es)`);
 
-// catalog[lang][ns] = Map(dotted key -> raw value)
+/** Error fragments of `lang`: `locales/<lang>/errors/<area>.json` (CH7). */
+const errorAreasOf = (lang) => {
+  const dir = join(LOCALES, lang, "errors");
+  if (!existsSync(dir)) return new Set();
+  return new Set(
+    readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => f.slice(0, -5)),
+  );
+};
+
+const enAreas = errorAreasOf("en");
+const esAreas = errorAreasOf("es");
+for (const area of enAreas) if (!esAreas.has(area)) fail(`locales/es/errors/${area}.json: file missing (in en)`);
+for (const area of esAreas) if (!enAreas.has(area)) fail(`locales/en/errors/${area}.json: file missing (in es)`);
+
+// catalog[lang][ns] = Map(dotted key -> raw value); source[lang][ns] = Map(key -> file
+// it came from, so a message points at `errors/<area>.json` and not at `common.json`).
 const catalog = {};
+const source = {};
+// A key missing on one side is named after the other side's file, so the message
+// points at `errors/<area>.json` rather than at an almost-empty `common.json`.
+const originOf = (lang, ns, key) => {
+  const own = source[lang]?.[ns]?.get(key);
+  if (own) return own;
+  for (const other of LANGS) {
+    const src = source[other]?.[ns]?.get(key);
+    if (src) return src.replace(`locales/${other}/`, `locales/${lang}/`);
+  }
+  return `locales/${lang}/${ns}.json`;
+};
+
 for (const lang of LANGS) {
   catalog[lang] = {};
+  source[lang] = {};
   for (const ns of namespacesOf(lang)) {
+    const rel = `locales/${lang}/${ns}.json`;
     const json = readJson(join(LOCALES, lang, `${ns}.json`));
-    if (json) catalog[lang][ns] = new Map(leafEntries(json));
+    if (!json) continue;
+    const keys = new Map(leafEntries(json));
+    if (ns === DEFAULT_NS) {
+      for (const key of keys.keys()) {
+        if (key.startsWith("errors.")) {
+          const area = key.split(".")[1];
+          fail(`${rel}: error key "${key}" belongs in locales/${lang}/errors/${area}.json (CH7)`);
+        }
+      }
+    }
+    catalog[lang][ns] = keys;
+    source[lang][ns] = new Map([...keys.keys()].map((key) => [key, rel]));
+  }
+  for (const area of errorAreasOf(lang)) {
+    const rel = `locales/${lang}/errors/${area}.json`;
+    const json = readJson(join(LOCALES, lang, "errors", `${area}.json`));
+    if (!json) continue;
+    catalog[lang][DEFAULT_NS] ??= new Map();
+    source[lang][DEFAULT_NS] ??= new Map();
+    for (const [key, value] of leafEntries(json)) {
+      if (key !== `errors.${area}` && !key.startsWith(`errors.${area}.`)) {
+        fail(`${rel}: key "${key}" is not in this file's area ("errors.${area}.")`);
+      }
+      catalog[lang][DEFAULT_NS].set(key, value);
+      source[lang][DEFAULT_NS].set(key, rel);
+    }
   }
 }
 
@@ -82,8 +145,8 @@ for (const ns of enNs) {
   if (!esNs.has(ns)) continue;
   const en = catalog.en[ns] ?? new Map();
   const es = catalog.es[ns] ?? new Map();
-  for (const key of en.keys()) if (!es.has(key)) fail(`locales/es/${ns}.json: missing key "${key}"`);
-  for (const key of es.keys()) if (!en.has(key)) fail(`locales/en/${ns}.json: missing key "${key}"`);
+  for (const key of en.keys()) if (!es.has(key)) fail(`${originOf("es", ns, key)}: missing key "${key}"`);
+  for (const key of es.keys()) if (!en.has(key)) fail(`${originOf("en", ns, key)}: missing key "${key}"`);
 }
 
 // --- 3. ICU syntax ----------------------------------------------------------
@@ -102,7 +165,7 @@ if (typeof IntlMessageFormat !== "function") {
         try {
           new IntlMessageFormat(value, lang);
         } catch (e) {
-          fail(`locales/${lang}/${ns}.json: ICU syntax error in "${key}": ${e.message}`);
+          fail(`${originOf(lang, ns, key)}: ICU syntax error in "${key}": ${e.message}`);
         }
       }
     }
@@ -165,7 +228,7 @@ for (const raw of coreKeys) {
   const [ns, key] = splitKey(raw);
   for (const lang of LANGS) {
     if (!(catalog[lang]?.[ns]?.has(key) ?? false)) {
-      fail(`locales/${lang}/${ns}.json: emitted message_key "${raw}" has no entry`);
+      fail(`${originOf(lang, ns, key)}: emitted message_key "${raw}" has no entry`);
     }
   }
 }
@@ -179,7 +242,7 @@ for (const lang of LANGS) {
   for (const [ns, keys] of Object.entries(catalog[lang] ?? {})) {
     for (const key of keys.keys()) {
       if (!bare.has(key) && !qualified.has(`${ns}:${key}`)) {
-        fail(`locales/${lang}/${ns}.json: unused key "${key}"`);
+        fail(`${originOf(lang, ns, key)}: unused key "${key}"`);
       }
     }
   }
@@ -190,4 +253,6 @@ if (errors.length > 0) {
   for (const message of new Set(errors)) console.error(`::error::${message}`);
   process.exit(1);
 }
-console.log(`i18n ok: ${enNs.size} namespaces, EN/ES aligned, ICU valid, no unused keys`);
+console.log(
+  `i18n ok: ${enNs.size} namespaces + ${enAreas.size} error areas, EN/ES aligned, ICU valid, no unused keys`,
+);

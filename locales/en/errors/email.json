@@ -1,0 +1,23 @@
+{
+  "errors.email.address": "Enter the mailbox address you want to connect.",
+  "errors.email.no_bundled_client": "This build ships no bundled Microsoft client. Add your own client ID under “Advanced”.",
+  "errors.email.browser": "Boba could not open your browser. Open it yourself and try again.",
+  "errors.email.timeout": "The sign-in was not finished in time. Start again when you are ready.",
+  "errors.email.listen": "Boba could not open its local sign-in listener. Check that no other app is blocking it, then try again.",
+  "errors.email.refused": "Microsoft refused the request. Start again; if it repeats, use your own client ID or IMAP.",
+  "errors.email.state": "That sign-in response did not belong to this attempt. Start again.",
+  "errors.email.no_code": "Microsoft returned no authorisation code. Start again.",
+  "errors.email.offline": "Microsoft could not be reached. Check your connection and try again.",
+  "errors.email.rejected": "Microsoft rejected the sign-in. Check your client ID and try again.",
+  "errors.email.tokens": "The sign-in reply could not be read. Start again.",
+  "errors.email.internal": "Something went wrong while connecting.",
+  "errors.email.keychain": "Boba could not reach your keychain, so nothing was changed.",
+  "errors.email.store": "Your connections could not be read or saved.",
+  "errors.email.unknown_connection": "That connection no longer exists.",
+  "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”.",
+  "errors.email.client_secret": "Your own client ID needs its client secret too. Google asks for it when Boba renews access.",
+  "errors.email.probe_credentials": "The mail server did not accept that password or token.",
+  "errors.email.probe_unreachable": "Boba could not reach that mail server. Check the host and port.",
+  "errors.email.probe_refused": "That mail server refused the connection test. Check the encryption setting and the port.",
+  "errors.email.probe_settings": "The account details are incomplete."
+}
