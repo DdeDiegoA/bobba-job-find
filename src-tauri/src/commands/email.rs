@@ -320,19 +320,37 @@ pub fn email_set_mode(
 pub async fn email_disconnect(app: tauri::AppHandle, id: String) -> AppResult<bool> {
     let accounts = wiring::port::<dyn EmailRepo>(&app)?;
     let secrets = wiring::port::<dyn SecretPort>(&app)?;
+    Ok(disconnect(accounts.as_ref(), secrets.as_ref(), &id).await?)
+}
+
+/// The disconnect itself, over the two ports (so it is testable without an app).
+///
+/// Order matters: revoke where the provider can, delete the keychain entry, and
+/// only then delete the row — the row is the reference to that entry, so losing
+/// it while the entry remains would strand the tokens (AC4, FR-40).
+async fn disconnect(
+    accounts: &dyn EmailRepo,
+    secrets: &dyn SecretPort,
+    id: &str,
+) -> Result<bool, EmailFailure> {
     let account = accounts
-        .get_account(&id)
+        .get_account(id)
         .map_err(EmailFailure::Store)?
         .ok_or(EmailFailure::UnknownConnection)?;
 
-    revoke_tokens(secrets.as_ref(), &account).await?;
+    revoke_tokens(secrets, &account).await?;
 
-    if let Err(error) = secrets.delete(&account.secret_ref) {
-        // The connection still goes — the user asked to disconnect — but a
-        // keychain entry that outlived it is reported, never hidden (AC4/FR-40).
-        tracing::warn!(?error, "the stored tokens could not be deleted");
+    // AC4: the tokens go before the row does. If the keychain refuses the
+    // delete, the row is kept — it holds the only reference to the entry — so
+    // Disconnect can be retried instead of stranding the tokens (FR-40).
+    // Nothing stored (`Ok(false)`) is a successful disconnect, not a failure.
+    if secrets
+        .delete(&account.secret_ref)
+        .map_err(|_| EmailFailure::Keychain)?
+    {
+        tracing::debug!("the stored tokens were deleted");
     }
-    let removed = accounts.delete_account(&id).map_err(EmailFailure::Store)?;
+    let removed = accounts.delete_account(id).map_err(EmailFailure::Store)?;
     Ok(removed)
 }
 
@@ -374,4 +392,155 @@ fn open_in_browser(app: &tauri::AppHandle, url: &str) -> AppResult<()> {
     app.opener()
         .open_url(url.to_string(), None::<&str>)
         .map_err(|_| EmailFailure::Browser.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use boba_app::ports::secret::SecretError;
+    use boba_store::db::{Store, StoreConfig};
+    use boba_store::keys::DbKey;
+
+    use super::*;
+
+    /// Fixed key, so nothing touches the OS keychain (S8.1, like the wiring tests).
+    const KEY_HEX: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+
+    fn open_store(tag: &str) -> Arc<Store> {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir: PathBuf =
+            std::env::temp_dir().join(format!("boba-email-{tag}-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let key = DbKey::from_hex(KEY_HEX).expect("test key");
+        let config = StoreConfig::new(dir.join("boba.db"), dir.join("snapshots"));
+        Arc::new(Store::open_with_key(config, key).expect("store opens"))
+    }
+
+    fn connection() -> EmailAccount {
+        EmailAccount {
+            id: "01ACC".into(),
+            provider: MailProvider::MicrosoftGraph,
+            address: "me@example.com".into(),
+            mode: EmailMode::ReadSend,
+            client_id: "client-1".into(),
+            client_id_kind: ClientIdKind::Bundled,
+            scopes: vec!["Mail.Read".into(), "Mail.Send".into()],
+            secret_ref: "mail:01ACC".into(),
+            connected_at: "2026-10-16T00:00:00Z".into(),
+            updated_at: "2026-10-16T00:00:00Z".into(),
+        }
+    }
+
+    /// A keychain stub: `get` and `delete` answer from the fields.
+    struct StubSecrets {
+        stored: Option<String>,
+        delete: Result<bool, SecretError>,
+    }
+
+    impl SecretPort for StubSecrets {
+        fn put(&self, _reference: &str, _value: &str) -> Result<(), SecretError> {
+            unimplemented!("connect is not exercised here")
+        }
+
+        fn get(&self, _reference: &str) -> Result<Option<String>, SecretError> {
+            Ok(self.stored.clone())
+        }
+
+        fn delete(&self, _reference: &str) -> Result<bool, SecretError> {
+            self.delete.clone()
+        }
+    }
+
+    fn seeded(tag: &str) -> (Arc<Store>, EmailAccount) {
+        let store = open_store(tag);
+        let account = connection();
+        store.upsert_account(&account).expect("seed");
+        (store, account)
+    }
+
+    /// F1: a keychain that refuses the delete must not strand the tokens. The row
+    /// keeps the reference, so Disconnect can be retried (AC4, FR-40).
+    #[tokio::test]
+    async fn a_keychain_that_refuses_the_delete_keeps_the_connection() {
+        let (store, account) = seeded("refuse");
+        let secrets = StubSecrets {
+            stored: None,
+            delete: Err(SecretError::Keychain),
+        };
+
+        let failure = disconnect(store.as_ref(), &secrets, &account.id)
+            .await
+            .expect_err("a refused delete must fail the command");
+
+        let error = AppError::from(failure);
+        assert_eq!(error.message_key, "errors.email.keychain");
+        assert_eq!(error.code, ErrorCode::Internal);
+        assert_eq!(
+            store.get_account(&account.id).expect("read").map(|a| a.id),
+            Some(account.id.clone()),
+            "the row survives, so the orphaned tokens can still be deleted"
+        );
+    }
+
+    /// A keychain with nothing stored is a successful disconnect, not a failure.
+    #[tokio::test]
+    async fn an_absent_keychain_entry_still_disconnects() {
+        let (store, account) = seeded("absent");
+        let secrets = StubSecrets {
+            stored: None,
+            delete: Ok(false),
+        };
+
+        assert!(
+            disconnect(store.as_ref(), &secrets, &account.id)
+                .await
+                .expect("disconnect")
+        );
+        assert!(store.get_account(&account.id).expect("read").is_none());
+    }
+
+    /// A provider without a revocation endpoint (Graph) still deletes the tokens
+    /// and the row: revocation is best effort, deletion is not (AC4).
+    #[tokio::test]
+    async fn stored_tokens_are_deleted_even_without_a_revoke_endpoint() {
+        let (store, account) = seeded("stored");
+        let tokens = TokenSet {
+            access_token: "at".into(),
+            refresh_token: Some("rt".into()),
+            expires_at_unix: 0,
+            scopes: vec!["Mail.Send".into()],
+        };
+        let secrets = StubSecrets {
+            stored: Some(tokens.to_json()),
+            delete: Ok(true),
+        };
+
+        assert!(
+            disconnect(store.as_ref(), &secrets, &account.id)
+                .await
+                .expect("disconnect")
+        );
+        assert!(store.get_account(&account.id).expect("read").is_none());
+    }
+
+    /// An unknown id is a typed NotFound, never a panic (AD-3).
+    #[tokio::test]
+    async fn disconnecting_an_unknown_connection_is_not_found() {
+        let store = open_store("unknown");
+        let secrets = StubSecrets {
+            stored: None,
+            delete: Ok(false),
+        };
+
+        let failure = disconnect(store.as_ref(), &secrets, "ghost")
+            .await
+            .expect_err("unknown");
+        let error = AppError::from(failure);
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.message_key, "errors.email.unknown_connection");
+    }
 }

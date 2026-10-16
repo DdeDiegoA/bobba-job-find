@@ -30,7 +30,7 @@
   "errors.email.rejected": "Microsoft rechazó el inicio de sesión. Revisa tu client ID y vuelve a intentarlo.",
   "errors.email.tokens": "No se pudo leer la respuesta del inicio de sesión. Vuelve a empezar.",
   "errors.email.internal": "Algo falló al conectar.",
-  "errors.email.keychain": "Boba no pudo guardar el acceso en tu llavero, así que no se guardó nada.",
+  "errors.email.keychain": "Boba no pudo acceder a tu llavero, así que no se cambió nada.",
   "errors.email.store": "No se pudieron leer ni guardar tus conexiones.",
   "errors.email.unknown_connection": "Esa conexión ya no existe.",
   "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar»."

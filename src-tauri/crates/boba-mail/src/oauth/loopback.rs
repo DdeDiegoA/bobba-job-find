@@ -21,6 +21,11 @@ pub const CALLBACK_PATH: &str = "/cb";
 /// Longest request line and header block accepted from the callback connection.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 
+/// How long one connection may take to say something. A browser on loopback
+/// answers in well under this; a connection that stays silent (a stray probe)
+/// costs the flow at most this long before the next one is accepted.
+const READ_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// The browser page shown after the redirect. It is served before any app UI can
 /// render and outside the running app's i18n resources, so the one line is
 /// written in both shipped languages (AD-17 EN/ES) rather than in a catalog.
@@ -75,7 +80,7 @@ pub fn accept_callback(
 /// Serve one connection: `/cb…` is the callback, anything else is a 404 that the
 /// caller keeps waiting past. `None` means "not the callback".
 fn serve(mut stream: TcpStream) -> Option<CallbackQuery> {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
     let target = read_request_target(&mut stream)?;
     let path = target.split_once('?').map(|(p, _)| p).unwrap_or(&target);
 

@@ -146,7 +146,7 @@ pub fn now_unix() -> u64 {
 
 /// The PKCE pair (RFC 7636). The verifier never leaves the process; only its
 /// `S256` challenge travels in the authorisation URL.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Pkce {
     verifier: String,
     challenge: String,
@@ -185,6 +185,17 @@ impl Pkce {
     /// The `S256` challenge, sent in the authorisation URL.
     pub fn challenge(&self) -> &str {
         &self.challenge
+    }
+}
+
+impl std::fmt::Debug for Pkce {
+    /// The verifier is a secret and never reaches a log; the challenge is public
+    /// by construction (it travels in the authorisation URL).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pkce")
+            .field("verifier", &"<redacted>")
+            .field("challenge", &self.challenge)
+            .finish()
     }
 }
 
@@ -300,6 +311,8 @@ impl PendingFlow {
         if already_used || stale {
             return Err(OAuthError::StateExpired);
         }
+        // Not constant-time on purpose: the state is 256 random bits, single-use
+        // and local, so a timing side channel has nothing to work with.
         if query.state.as_deref() != Some(self.state.token.as_str()) {
             return Err(OAuthError::StateMismatch);
         }
@@ -341,7 +354,7 @@ impl CallbackQuery {
 
 /// The wire shape of a token response (`grant_type=authorization_code` or
 /// `refresh_token`).
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 pub struct TokenResponse {
     /// The bearer token for API calls.
     pub access_token: String,
@@ -357,6 +370,21 @@ pub struct TokenResponse {
     pub scope: Option<String>,
 }
 
+impl std::fmt::Debug for TokenResponse {
+    /// Tokens are secrets: no `{:?}` may print one (AD-13, FR-40).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenResponse")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_in", &self.expires_in)
+            .field("scope", &self.scope)
+            .finish()
+    }
+}
+
 impl TokenResponse {
     /// The granted scopes, falling back to what was requested.
     pub fn granted_scopes(&self, requested: &[String]) -> Vec<String> {
@@ -369,7 +397,7 @@ impl TokenResponse {
 
 /// What the keychain holds for one connection (AD-13, FR-40). Serialized as
 /// JSON so one keychain entry carries the whole token set.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenSet {
     /// The current bearer token.
     pub access_token: String,
@@ -380,6 +408,21 @@ pub struct TokenSet {
     pub expires_at_unix: u64,
     /// The scopes this token set was granted.
     pub scopes: Vec<String>,
+}
+
+impl std::fmt::Debug for TokenSet {
+    /// Tokens are secrets: no `{:?}` may print one (AD-13, FR-40).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenSet")
+            .field("access_token", &"<redacted>")
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_at_unix", &self.expires_at_unix)
+            .field("scopes", &self.scopes)
+            .finish()
+    }
 }
 
 impl TokenSet {

@@ -30,7 +30,7 @@
   "errors.email.rejected": "Microsoft rejected the sign-in. Check your client ID and try again.",
   "errors.email.tokens": "The sign-in reply could not be read. Start again.",
   "errors.email.internal": "Something went wrong while connecting.",
-  "errors.email.keychain": "Boba could not save the access to your keychain, so nothing was stored.",
+  "errors.email.keychain": "Boba could not reach your keychain, so nothing was changed.",
   "errors.email.store": "Your connections could not be read or saved.",
   "errors.email.unknown_connection": "That connection no longer exists.",
   "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”."
