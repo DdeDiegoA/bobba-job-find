@@ -183,6 +183,16 @@ fn name(endpoint: &str) -> io::Result<interprocess::local_socket::Name<'static>>
     }
 }
 
+/// The owner-only DACL every Windows endpoint is created with, as an [SDDL][sdsf]
+/// string: a **protected** DACL (no inherited ACEs) granting full access to
+/// `OWNER RIGHTS` (`S-1-3-4`), which is the well-known SID for whoever owns the
+/// object. Using `OW` avoids reading the current process token's user SID, and
+/// the protected bit keeps a parent's ACEs from widening it.
+///
+/// [sdsf]: https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-string-format
+#[cfg(windows)]
+const ENDPOINT_PIPE_SDDL: &str = "D:P(A;;GA;;;OW)";
+
 /// Bind the run's MCP endpoint, reachable only by the owning user (AD-6).
 ///
 /// A pre-existing file at the endpoint path is removed first: the transport
@@ -196,11 +206,13 @@ fn name(endpoint: &str) -> io::Result<interprocess::local_socket::Name<'static>>
 /// there the owner-only directory is the protection, and a Unix socket can be
 /// connected to only by a process that may write to it.
 ///
-/// Windows: the pipe keeps the process token's default DACL, which grants the
-/// creating user and no other unprivileged principal.
+/// Windows: the named pipe is created with an explicit owner-only DACL
+/// ([`ENDPOINT_PIPE_SDDL`]) instead of relying on the process token's default
+/// DACL, which also carries the groups of whoever launched the app.
 ///
-/// shortcut: no explicit owner-only SDDL on the Windows pipe; add one when a
-/// Windows runner can test it (S2.3b candidate).
+/// shortcut: the Windows DACL is compiled and checked in CI's windows build,
+/// but no Windows runner exercises it yet (the CI rust job is Linux-only); the
+/// DACL itself needs a Windows test job, not more code here.
 pub fn listener(endpoint: &str) -> io::Result<Listener> {
     #[cfg(unix)]
     {
@@ -237,9 +249,37 @@ pub fn listener(endpoint: &str) -> io::Result<Listener> {
             Err(e) => return Err(e),
         }
     }
-    interprocess::local_socket::ListenerOptions::new()
-        .name(name(endpoint)?)
-        .create_sync()
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::ListenerOptions;
+        use interprocess::os::windows::local_socket::ListenerOptionsExt;
+
+        return ListenerOptions::new()
+            .name(name(endpoint)?)
+            .security_descriptor(owner_only_descriptor()?)
+            .create_sync();
+    }
+    // Unix falling through the file-mode branch above (macOS rejects `0600` on a
+    // socket), and any other platform: the owner-only directory is the
+    // protection. Windows returned from its own branch.
+    #[cfg(not(windows))]
+    {
+        interprocess::local_socket::ListenerOptions::new()
+            .name(name(endpoint)?)
+            .create_sync()
+    }
+}
+
+/// The owner-only Windows security descriptor every endpoint is created with.
+#[cfg(windows)]
+fn owner_only_descriptor()
+-> io::Result<interprocess::os::windows::security_descriptor::SecurityDescriptor> {
+    use interprocess::os::windows::security_descriptor::SecurityDescriptor;
+    use widestring::U16CString;
+
+    let sddl = U16CString::from_str(ENDPOINT_PIPE_SDDL)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    SecurityDescriptor::deserialize(&sddl)
 }
 
 /// Connect to the run's MCP endpoint (the shim side).
@@ -322,6 +362,25 @@ mod tests {
 
         drop(listener);
         fs::remove_dir_all(dir).ok();
+    }
+
+    /// The Windows half of the same guarantee: the pipe is created with our
+    /// explicit owner-only DACL, not the process token's default one (S2.3a
+    /// residual). Compiled by CI's Windows build; runs on a Windows machine.
+    #[cfg(windows)]
+    #[test]
+    fn the_endpoint_pipe_dacl_is_the_owner_only_one() {
+        use interprocess::os::windows::security_descriptor::AsSecurityDescriptorExt as _;
+
+        let descriptor = owner_only_descriptor().expect("the pinned SDDL parses");
+        let (dacl, _defaulted) = descriptor
+            .dacl()
+            .expect("a readable DACL")
+            .expect("an explicit DACL");
+        assert!(
+            !dacl.is_null(),
+            "a null DACL grants every principal full access"
+        );
     }
 
     #[cfg(unix)]

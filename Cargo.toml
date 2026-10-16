@@ -99,6 +99,9 @@ cron = "0.17"
 # AD-1 requires for kill-tree. Was tokio1 pre-S2.2; no crate depended on it yet.
 process-wrap = { version = "10.0", default-features = false, features = ["std", "process-group", "job-object", "creation-flags"] }
 interprocess = "2.4"
+# Windows named-pipe security descriptors: interprocess takes an SDDL string as
+# UTF-16, and `widestring` is what its own Windows backend uses (AD-6).
+widestring = "1"
 which = "8.0"
 dirs = "7.0"
 sys-locale = "0.3"

@@ -129,12 +129,15 @@ struct Evidence {
 
 fn verified_evidence(cli: CliKind) -> Option<Evidence> {
     match cli {
-        // Pinned config: `--mcp-config` plus `--strict-mcp-config` (only the
-        // servers in our config, i.e. `boba` alone) and the stream-json init
-        // event, which is what confirms no native tool survived the pinning.
+        // A per-version pinned config, both halves documented in the recorded
+        // `--help` and checked in the test below: `--strict-mcp-config` (only
+        // the servers in our config, i.e. `boba` alone) and `--allowedTools`
+        // restricted to the run's own boba tools, so no native tool survives.
+        // `init_event_is_locked_down` is the confirming observation once the
+        // runtime can read the CLI's init event (S2.4).
         CliKind::ClaudeCode => Some(Evidence {
-            method: LockdownMethod::InitEventToolList,
-            required: |caps| caps.stream_json && caps.mcp,
+            method: LockdownMethod::PinnedLockdownConfig,
+            required: |caps| caps.mcp && caps.tool_allowlist,
             verified: (2, 1),
         }),
         // Codex's `--sandbox read-only`, OpenCode's permission deny and Aider's
@@ -147,16 +150,29 @@ fn verified_evidence(cli: CliKind) -> Option<Evidence> {
     }
 }
 
-/// The flags that pin this CLI's lockdown, or `None` when this build has no
-/// verified way to pin it.
+/// The flags that pin this CLI's lockdown for one run's task, or `None` when
+/// this build has no verified way to pin it.
 ///
 /// Every flag here is checked against the driver's recorded `--help` fixture in
 /// the test below: nothing is guessed (AD-4). The caller must add them to the
-/// run's argv, and a task is only `Verified` once
-/// [`init_event_is_locked_down`] confirms the result at run start.
-pub fn pinned_args(cli: CliKind) -> Option<&'static [&'static str]> {
+/// run's argv, together with [`LockdownMethod::PinnedLockdownConfig`]'s version
+/// line, and the run is only as locked down as these flags make it: an unknown
+/// flag or an unknown tool name fails the launch instead of widening it.
+pub fn pinned_args(cli: CliKind, task_id: &str) -> Option<Vec<String>> {
     match cli {
-        CliKind::ClaudeCode => Some(&["--strict-mcp-config"]),
+        CliKind::ClaudeCode => {
+            // Comma-separated, as its `--help` documents.
+            let allowed = boba_mcp_proto::tool::tools_for_task(task_id)
+                .into_iter()
+                .map(|spec| boba_tool_name(spec.name))
+                .collect::<Vec<_>>()
+                .join(",");
+            Some(vec![
+                "--strict-mcp-config".to_string(),
+                "--allowedTools".to_string(),
+                allowed,
+            ])
+        }
         CliKind::GeminiCli | CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
     }
 }
@@ -171,6 +187,11 @@ pub fn pinned_args(cli: CliKind) -> Option<&'static [&'static str]> {
 /// tools, runs are refused (loudly) instead of silently unprotected.
 pub fn init_event_is_locked_down(tools: &[String]) -> bool {
     !tools.is_empty() && tools.iter().all(|tool| is_boba_tool(tool))
+}
+
+/// How this app's MCP tool is named in a CLI's argv and init event.
+fn boba_tool_name(tool: &str) -> String {
+    format!("mcp__{}__{tool}", boba_mcp_proto::tool::SERVER_NAME)
 }
 
 /// Whether the CLI reported one of this app's MCP tools.
@@ -226,7 +247,7 @@ mod tests {
     fn the_recorded_cli_versions_are_inside_their_verified_range() {
         assert!(matches!(
             tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &claude_caps()),
-            Lockdown::Verified(LockdownMethod::InitEventToolList)
+            Lockdown::Verified(LockdownMethod::PinnedLockdownConfig)
         ));
         // Gemini's `--exclude-tools` values are not pinned by a recorded fixture
         // yet, so its lockdown is not verified however good its version is.
@@ -239,23 +260,42 @@ mod tests {
     #[test]
     fn the_pinned_lockdown_flags_are_the_ones_the_cli_documents() {
         // Evidence, not invention: a flag may be pinned only if the CLI's
-        // recorded help lists it.
+        // recorded help lists it, and every tool named must be one of our own.
         let claude_help = include_str!("../drivers/fixtures/claude_code_help.txt");
-        let pinned = pinned_args(CliKind::ClaudeCode).expect("claude pins its lockdown");
-        assert_eq!(pinned, ["--strict-mcp-config"]);
-        for flag in pinned {
+        for flag in ["--strict-mcp-config", "--allowedTools"] {
             assert!(
                 claude_help.contains(flag),
                 "claude does not document {flag}"
             );
         }
+        assert!(
+            claude_help.contains("Comma-separated list of allowed tools"),
+            "the allowlist separator is documented"
+        );
+
+        let pinned = pinned_args(CliKind::ClaudeCode, "extract_postings").expect("pinned");
+        assert_eq!(pinned[0], "--strict-mcp-config");
+        assert_eq!(pinned[1], "--allowedTools");
+        let allowed: Vec<&str> = pinned[2].split(',').collect();
+        let expected: Vec<String> = boba_mcp_proto::tool::tools_for_task("extract_postings")
+            .into_iter()
+            .map(|spec| format!("mcp__{}__{}", boba_mcp_proto::tool::SERVER_NAME, spec.name))
+            .collect();
+        assert_eq!(allowed, expected, "the allowlist is this task's own tools");
+        assert_eq!(pinned.len(), 3, "{pinned:?}");
+
         for cli in [
             CliKind::GeminiCli,
             CliKind::Codex,
             CliKind::OpenCode,
             CliKind::Aider,
         ] {
-            assert_eq!(pinned_args(cli), None, "{}", cli.display_name());
+            assert_eq!(
+                pinned_args(cli, "extract_postings"),
+                None,
+                "{}",
+                cli.display_name()
+            );
         }
     }
 
@@ -322,13 +362,13 @@ mod tests {
             ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
-        // Without the stream-json init event there is nothing to confirm with.
-        let no_stream_json = Capabilities {
+        // Without the documented allowlist flag there is nothing to pin.
+        let no_allowlist = Capabilities {
             mcp: true,
             ..Capabilities::default()
         };
         assert_eq!(
-            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &no_stream_json),
+            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &no_allowlist),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
     }
@@ -434,5 +474,22 @@ mod tests {
         );
         assert!(TaskSupport::Supported.is_supported());
         assert!(TaskSupport::SupportedWithBadge(Unverified::NoVerifiedConfig).is_supported());
+    }
+
+    /// The two tables that decide a run's safety must agree: a CLI whose
+    /// lockdown counts as verified is exactly one with a pinned config, so no
+    /// task can ever run on a "verified" CLI that has nothing to pin (the caller
+    /// refuses an untrusted task without flags, but this is what makes it
+    /// impossible in the first place).
+    #[test]
+    fn the_evidence_tables_agree_so_no_verified_cli_can_run_unpinned() {
+        for cli in CliKind::ALL {
+            assert_eq!(
+                verified_evidence(cli).is_some(),
+                pinned_args(cli, "extract_postings").is_some(),
+                "{}: verified evidence and pinned flags disagree",
+                cli.display_name()
+            );
+        }
     }
 }

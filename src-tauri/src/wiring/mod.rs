@@ -54,6 +54,22 @@ fn config(app: &AppHandle<impl Runtime>) -> Result<StoreConfig, String> {
 /// Never panics: a failed open leaves the app running in [`StoreStatus::Locked`],
 /// where every [`port`] lookup reports the typed Locked error.
 pub fn mount(app: &AppHandle<impl Runtime>) {
+    // ADR-010 §4: a run that died without cleaning up (panic-abort, SIGKILL,
+    // power loss) leaves its workspace and endpoint behind. Nothing is running
+    // during setup, so everything under `runs/` and `ipc/` is a leftover and is
+    // swept before any port can start one. Disk hygiene only: a sweep that fails
+    // must not stop the launch, and this does not read the store.
+    match boba_agent::sweep::sweep_orphans(&agent::sandbox_config(app, None)) {
+        Ok(report) => tracing::info!(
+            workspaces = report.workspaces,
+            endpoints = report.endpoints,
+            "startup sweep"
+        ),
+        Err(error) => {
+            tracing::warn!(%error, "startup sweep failed; leftover run workspaces stay on disk")
+        }
+    }
+
     let opened = config(app).and_then(|c| Store::open(c).map(Arc::new).map_err(|e| e.to_string()));
     match opened {
         Ok(store) => {
