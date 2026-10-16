@@ -23,8 +23,9 @@ recorded answer:
 ## Decision
 
 1. **The KDF record is a file next to the database**: `boba.db.kdf` (same path plus
-   `.kdf`), owner-only `0600` on unix (Windows: the app-data directory is already
-   user-scoped, as accepted in S1.2a). It is JSON, versioned, and holds **only** the
+   `.kdf`), created owner-only `0600` from its first byte (no chmod window; Windows:
+   the app-data directory is already user-scoped, as accepted in S1.2a) and never
+   over an existing file. It is JSON, versioned, and holds **only** the
    salt (16 random bytes, hex), the algorithm (`argon2id`), the parameters
    (`m_cost = 19456` KiB, `t_cost = 2`, `p_cost = 1`, the OWASP-recommended
    Argon2id profile) and the output length (32 bytes). **No key material is ever
@@ -48,9 +49,13 @@ recorded answer:
    *idle* (transparent) when the keychain opened the store, and holding the derived
    key zeroized while unlocked. The idle timeout is **lazy**: every port lookup
    counts as activity, reads of the status do not, and a lookup after the window
-   drops the key, flips the store state to `Locked` and returns the typed Locked
-   error. Quit and logout drop the key through the same path (`lock`). So no timer
+   drops the session's key, flips the store state to `Locked` and returns the typed
+   Locked error. Quit and logout drop it through the same path (`lock`). So no timer
    thread is needed, and the key is gone before the next command can see it.
+   Re-unlocking does **not** re-open the store: the ports are already mounted, so
+   the composition root only re-arms the session and reports the store `Ready`
+   again (`mount_with_key` decides from the mounted ports, never from the status,
+   because a second mount panics).
 6. **Restoring from a recovery backup stays where it belongs** (S10.2): the unlock
    screen offers the keychain retry and the passphrase; the third option
    (ADR-009 §3) lands with the backup file.
@@ -64,13 +69,18 @@ recorded answer:
   re-derived. The recovery backup (FR-111, S10.2) is the answer, which is why
   onboarding forces one on builds without Apple Developer ID or Authenticode.
 - The idle timeout is enforced at the port boundary, so it holds for every command
-  and for the MCP path. It does not close the already-open SQLite connections: an
-  attacker with code execution inside the process is out of scope (they can read
-  memory anyway).
+  and for the MCP path. It does not close the already-open SQLite connections, and a
+  caller that already holds an `Arc<P>` keeps using it: an attacker with code
+  execution inside the process is out of scope (they can read memory anyway). Long
+  running work must therefore not cache port handles across an idle window (S5.1).
+- The KDF parameters are bounded on read (1 GiB, 16 passes, 8 lanes): a tampered
+  record is refused instead of making unlock allocate until the machine dies. They
+  are never clamped — clamping would derive a different key.
 - The pool manager and the writer hold the key hex for the process lifetime; they
-  are `zeroize`d buffers (S1.2a) and are only dropped at quit. A future slice that
-  wants "lock the store and truly close the connections" needs a mount/unmount
-  redesign (ADR-012 §4), not a bigger session.
+  are `zeroize`d buffers (S1.2a) and are only dropped at quit. So "dropped on idle
+  timeout" means **the session's copy**: the open store keeps its own until quit. A
+  future slice that wants "lock the store and truly close the connections" needs a
+  mount/unmount redesign (ADR-012 §4), not a bigger session.
 
 ## Alternatives considered
 

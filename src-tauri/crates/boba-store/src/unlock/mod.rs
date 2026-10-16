@@ -14,8 +14,11 @@
 //! not come from this path has no record, and the passphrase path refuses it: it
 //! never mints a key over existing data (ADR-009 §2).
 //!
-//! A derived key is held for the login session only, in zeroized memory, and is
-//! dropped on idle timeout, quit or logout ([`KeySession`]).
+//! A derived key is held for the login session only, in zeroized memory, and the
+//! session's copy is dropped on idle timeout, quit or logout ([`KeySession`]).
+//! The open store keeps its own copy until quit (see ADR-013 §Consequences): what
+//! closing the session really does is close the gate every port lookup goes
+//! through, so an idle app can no longer be driven without the passphrase.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -39,6 +42,16 @@ const P_COST: u32 = 1;
 
 /// Salt length in bytes; the Argon2id minimum is 8.
 const SALT_LEN: usize = 16;
+
+/// Parameter range accepted from the record. A record is a local file, so a
+/// tampered one must not be able to make unlock allocate until the machine dies:
+/// 1 GiB of memory, 16 passes and 8 lanes are far above anything this app writes.
+/// A record outside the range is refused, never clamped: clamping would derive a
+/// different key and lock the user out of data that is otherwise fine.
+const MIN_M_COST: u32 = 8;
+const MAX_M_COST: u32 = 1024 * 1024;
+const MAX_T_COST: u32 = 16;
+const MAX_P_COST: u32 = 8;
 
 /// Key length in bytes (AD-13: 256-bit).
 const KEY_LEN: usize = 32;
@@ -183,6 +196,17 @@ fn parse_record(raw: &str) -> Result<KdfRecord, UnlockError> {
     if record.kdf != "argon2id" || record.output_len != KEY_LEN as u32 {
         return Err(UnlockError::Kdf("unexpected kdf or key length".to_string()));
     }
+    if !(MIN_M_COST..=MAX_M_COST).contains(&record.m_cost)
+        || record.t_cost == 0
+        || record.t_cost > MAX_T_COST
+        || record.p_cost == 0
+        || record.p_cost > MAX_P_COST
+    {
+        return Err(UnlockError::Kdf(format!(
+            "kdf parameters out of range (m={}, t={}, p={})",
+            record.m_cost, record.t_cost, record.p_cost
+        )));
+    }
     salt_bytes(&record.salt)?;
     Ok(record)
 }
@@ -202,10 +226,26 @@ fn new_record() -> Result<KdfRecord, UnlockError> {
     })
 }
 
+/// Write the record owner-only from its first byte, and never over an existing
+/// one: the salt is what makes a passphrase reproducible, so it is written once.
+/// `create_new` is also the guard against minting a record while another process
+/// is doing the same.
 fn write_record(path: &Path, record: &KdfRecord) -> Result<(), UnlockError> {
+    use std::io::Write as _;
+
     let json = serde_json::to_string_pretty(record).map_err(|e| UnlockError::Kdf(e.to_string()))?;
-    std::fs::write(path, json)?;
-    owner_only(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(json.as_bytes())?;
+    // The record is what makes the passphrase path reproducible: make it durable
+    // before the store it belongs to is created.
+    file.sync_all()?;
     Ok(())
 }
 
@@ -249,20 +289,6 @@ fn to_hex(bytes: &[u8]) -> Zeroizing<String> {
     out
 }
 
-/// The KDF record is a user secret-adjacent file: owner-only on unix. On Windows
-/// the app-data directory is already user-scoped (accepted, S1.2a).
-#[cfg(unix)]
-fn owner_only(path: &Path) -> Result<(), UnlockError> {
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn owner_only(_path: &Path) -> Result<(), UnlockError> {
-    Ok(())
-}
-
 /// The passphrase-derived key of this login session (ADR-009 §3).
 ///
 /// * [`KeySession::peek`] / [`KeySession::poll`] report whether gated work may
@@ -270,7 +296,9 @@ fn owner_only(_path: &Path) -> Result<(), UnlockError> {
 ///   not in play (a keychain-opened store), so nothing is gated.
 /// * Once unlocked, the key is held here and dropped when the idle timeout
 ///   elapses, or on [`KeySession::lock`] (quit, logout, explicit lock). A dropped
-///   key never comes back: the user types the passphrase again.
+///   key never comes back: the user types the passphrase again, and until then
+///   every port lookup reports the typed Locked error. The open store keeps its
+///   own copy of the key until quit (ADR-013 §Consequences).
 pub struct KeySession {
     idle: Duration,
     state: std::sync::Mutex<Session>,
@@ -448,6 +476,75 @@ mod tests {
 
     /// Owner-only on unix, like the pre-migration snapshot (AD-20).
     #[cfg(unix)]
+    /// A tampered record is refused before it can be expensive: a local file must
+    /// not be able to make unlock allocate gigabytes or spin for hours.
+    #[test]
+    fn a_tampered_kdf_record_is_refused_before_any_derivation() {
+        let dir = dir();
+        let config = config(dir.path());
+        passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")).expect("derive");
+        let path = kdf_path(&config.db_path);
+        let record: serde_json::Value = serde_json::from_str(&read(&path)).expect("record parses");
+
+        let tampered: [(&str, serde_json::Value); 6] = [
+            ("version", serde_json::json!(99)),
+            ("kdf", serde_json::json!("pbkdf2")),
+            ("output_len", serde_json::json!(16)),
+            ("m_cost", serde_json::json!(MAX_M_COST + 1)),
+            ("t_cost", serde_json::json!(MAX_T_COST + 1)),
+            ("p_cost", serde_json::json!(0)),
+        ];
+        for (field, value) in tampered {
+            let mut next = record.clone();
+            next[field] = value;
+            std::fs::write(&path, next.to_string()).expect("write");
+            assert!(
+                matches!(
+                    passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")),
+                    Err(UnlockError::Kdf(_))
+                ),
+                "{field} was accepted"
+            );
+        }
+
+        // A truncated salt is refused too, and the range accepts what we write.
+        let mut next = record.clone();
+        next["salt"] = serde_json::json!("00");
+        std::fs::write(&path, next.to_string()).expect("write");
+        assert!(
+            passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")).is_err()
+        );
+
+        std::fs::write(&path, record.to_string()).expect("write");
+        passphrase_key(&config.db_path, &Passphrase::new("correct horse battery"))
+            .expect("the real record still works");
+    }
+
+    /// The record is written once and never replaced: a new salt would derive a
+    /// key that opens nothing, so it is not even written under an existing store.
+    #[test]
+    fn an_existing_record_is_never_replaced() {
+        let dir = dir();
+        let config = config(dir.path());
+        passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")).expect("derive");
+        let path = kdf_path(&config.db_path);
+
+        // A record this build refuses stays exactly as the user's file was.
+        std::fs::write(&path, "{\"version\":99}").expect("tamper");
+        assert!(
+            passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")).is_err()
+        );
+        assert_eq!(read(&path), "{\"version\":99}");
+
+        // And nothing is minted over the database that record belonged to.
+        drop(Store::open_with_key(config.clone(), DbKey::generate().expect("key")).expect("opens"));
+        let before = read(&path);
+        assert!(
+            passphrase_key(&config.db_path, &Passphrase::new("correct horse battery")).is_err()
+        );
+        assert_eq!(read(&path), before);
+    }
+
     #[test]
     fn the_kdf_record_is_owner_only() {
         use std::os::unix::fs::PermissionsExt as _;

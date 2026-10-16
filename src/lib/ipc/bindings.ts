@@ -118,6 +118,26 @@ export const commands = {
   /**  Add an Offer from pasted text (AC2). */
   ingestManualText: (text: string) =>
     typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_text", { text })),
+  /**  Whether the store is open or the unlock screen must act (AC2). */
+  unlockStatus: () =>
+    typedError<UnlockStatus_Serialize, AppError_Serialize>(__TAURI_INVOKE("unlock_status")),
+  /**
+   *  Retry the keychain in the foreground, where the OS prompt can be answered
+   *  (AC2). It re-runs the composition root, so a successful read mounts the store.
+   */
+  unlockRetryKeychain: () =>
+    typedError<UnlockStatus_Serialize, AppError_Serialize>(__TAURI_INVOKE("unlock_retry_keychain")),
+  /**
+   *  Unlock with the passphrase and hold the derived key for this login session
+   *  (AC1/AC2). The key is never written to disk, and the session's copy is dropped
+   *  on idle timeout, quit or logout — from then on every port lookup reports the
+   *  typed Locked error until the passphrase is entered again. The open store keeps
+   *  its own copy of the key until quit (ADR-013 §Consequences).
+   */
+  unlockWithPassphrase: (passphrase: string) =>
+    typedError<UnlockStatus_Serialize, AppError_Serialize>(
+      __TAURI_INVOKE("unlock_with_passphrase", { passphrase }),
+    ),
 };
 
 /** Events */
@@ -582,6 +602,26 @@ export type TransitionInput = {
   /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
   source: string;
   reason: string | null;
+};
+
+/**  Whether the store is open or the unlock screen must act (AC2). */
+export type UnlockState = "ready" | "locked";
+
+/**  What the unlock screen renders (AC1/AC2). */
+export type UnlockStatus = UnlockStatus_Serialize | UnlockStatus_Deserialize;
+
+/**  What the unlock screen renders (AC1/AC2). */
+export type UnlockStatus_Deserialize = {
+  state: UnlockState;
+  /**  The locked copy to show; absent when the store is open. */
+  message_key?: string | null;
+};
+
+/**  What the unlock screen renders (AC1/AC2). */
+export type UnlockStatus_Serialize = {
+  state: UnlockState;
+  /**  The locked copy to show; absent when the store is open. */
+  message_key?: string | null;
 };
 
 /**  Work modes the user accepts at all (FR-7). */

@@ -138,8 +138,10 @@ pub fn unlock_retry_keychain(app: tauri::AppHandle) -> AppResult<UnlockStatus> {
 }
 
 /// Unlock with the passphrase and hold the derived key for this login session
-/// (AC1/AC2). The key is never written to disk; it is dropped on idle timeout,
-/// quit or logout.
+/// (AC1/AC2). The key is never written to disk, and the session's copy is dropped
+/// on idle timeout, quit or logout — from then on every port lookup reports the
+/// typed Locked error until the passphrase is entered again. The open store keeps
+/// its own copy of the key until quit (ADR-013 §Consequences).
 #[tauri::command]
 #[specta::specta]
 pub fn unlock_with_passphrase(
