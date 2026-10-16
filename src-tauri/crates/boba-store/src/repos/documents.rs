@@ -6,6 +6,8 @@
 //! [`DocumentsRepo`] trait and conformed this adapter to it, and the
 //! `untrusted_origin` column: a draft comes from an agent run, so the store
 //! records that its content is untrusted (ADR-010) instead of guessing later.
+//! S7.4 adds `review_json`: the fresh-context reviewer's critique of a document,
+//! with its own untrusted marker, so the studio can show it after a reload.
 
 use boba_app::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 use boba_domain::documents::{DocumentKind, DocumentRecord, Lang, NewDocument, TemplateId};
@@ -32,7 +34,8 @@ fn bad_value(column: &'static str, value: String) -> rusqlite::Error {
 
 const SELECT: &str = "SELECT id, application_id, kind, lang, template, version, model_json, \
      pdf_blob IS NOT NULL, docx_blob IS NOT NULL, verification_json, verified_at, \
-     language_fallback_from, untrusted_origin, created_at, updated_at \
+     language_fallback_from, review_json, review_untrusted_origin, untrusted_origin, \
+     created_at, updated_at \
      FROM document";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<DocumentRecord> {
@@ -51,9 +54,11 @@ fn row(r: &Row<'_>) -> rusqlite::Result<DocumentRecord> {
         verification_json: r.get(9)?,
         verified_at: r.get(10)?,
         language_fallback_from: r.get(11)?,
-        untrusted_origin: r.get::<_, i64>(12)? != 0,
-        created_at: r.get(13)?,
-        updated_at: r.get(14)?,
+        review_json: r.get(12)?,
+        review_untrusted_origin: r.get::<_, i64>(13)? != 0,
+        untrusted_origin: r.get::<_, i64>(14)? != 0,
+        created_at: r.get(15)?,
+        updated_at: r.get(16)?,
     })
 }
 
@@ -159,6 +164,29 @@ pub fn mark_verified(
     Ok(())
 }
 
+/// Attach a review run's critique to the drafts it judged: the newest version of
+/// each kind for `application_id` (S7.4). Returns how many rows were annotated,
+/// so 0 tells the caller there were no drafts to review.
+///
+/// The critique is agent text and is stored with its own `untrusted_origin`
+/// marker (ADR-010); nothing here reads or evaluates the JSON.
+pub fn set_review(
+    conn: &Connection,
+    application_id: &str,
+    review_json: &str,
+    updated_at: &str,
+) -> Result<u32, StoreError> {
+    let annotated = conn.execute(
+        "UPDATE document SET review_json = ?2, review_untrusted_origin = 1, updated_at = ?3 \
+         WHERE application_id = ?1 \
+           AND version = (SELECT MAX(version) FROM document AS newest \
+                           WHERE newest.application_id = document.application_id \
+                             AND newest.kind = document.kind)",
+        params![application_id, review_json, updated_at],
+    )?;
+    Ok(u32::try_from(annotated).unwrap_or(u32::MAX))
+}
+
 /// Read the rendered PDF blob.
 pub fn pdf(conn: &Connection, id: &str) -> Result<Option<Vec<u8>>, StoreError> {
     blob(conn, id, "pdf_blob")
@@ -255,6 +283,21 @@ impl DocumentsRepo for Store {
             verified_at.to_owned(),
         );
         self.execute(move |conn| mark_verified(conn, &id, &verification_json, &verified_at))
+            .map_err(repo)
+    }
+
+    fn set_review(
+        &self,
+        application_id: &str,
+        review_json: &str,
+        updated_at: &str,
+    ) -> Result<u32, DocumentsRepoError> {
+        let (application_id, review_json, updated_at) = (
+            application_id.to_owned(),
+            review_json.to_owned(),
+            updated_at.to_owned(),
+        );
+        self.execute(move |conn| set_review(conn, &application_id, &review_json, &updated_at))
             .map_err(repo)
     }
 
@@ -409,6 +452,125 @@ mod tests {
             )
             .expect("the column exists");
         assert_eq!(default, "1", "the migration's default is untrusted");
+    }
+
+    // S7.4 (FR-22/FR-72): the reviewer's critique is stored on the drafts it
+    // judged — the newest version of each kind — and read back with them.
+    #[test]
+    fn a_critique_is_stored_on_the_newest_version_of_each_kind() {
+        let conn = connection();
+        insert(&conn, &new("doc_1", DocumentKind::Cv, "cv-classic")).unwrap();
+        insert(
+            &conn,
+            &new("doc_2", DocumentKind::CoverLetter, "cover-classic"),
+        )
+        .unwrap();
+        insert(&conn, &new("doc_3", DocumentKind::Cv, "cv-modern")).unwrap();
+
+        assert_eq!(
+            set_review(&conn, "app_1", "[{\"severity\":\"high\"}]", "t1").unwrap(),
+            2,
+            "the newest CV and the cover letter"
+        );
+        let cv = get(&conn, "doc_3").unwrap().expect("the newest cv");
+        assert_eq!(cv.review_json.as_deref(), Some("[{\"severity\":\"high\"}]"));
+        assert!(cv.review_untrusted_origin, "the critique is agent text");
+        assert_eq!(cv.updated_at, "t1");
+        assert_eq!(
+            get(&conn, "doc_1")
+                .unwrap()
+                .expect("the old cv")
+                .review_json,
+            None,
+            "the superseded version keeps no critique"
+        );
+        assert_eq!(
+            get(&conn, "doc_2")
+                .unwrap()
+                .expect("the letter")
+                .review_json
+                .as_deref(),
+            Some("[{\"severity\":\"high\"}]")
+        );
+        assert_eq!(
+            latest(&conn, "app_1", DocumentKind::Cv)
+                .unwrap()
+                .expect("the newest cv")
+                .review_json
+                .as_deref(),
+            Some("[{\"severity\":\"high\"}]"),
+            "the studio reads it through the same queries as the draft"
+        );
+    }
+
+    /// An application with no drafts has nothing to annotate: the critique is
+    /// refused by the caller, and no row is touched.
+    #[test]
+    fn a_critique_of_an_application_with_no_drafts_touches_nothing() {
+        let conn = connection();
+        insert(&conn, &new("doc_1", DocumentKind::Cv, "cv-classic")).unwrap();
+        assert_eq!(set_review(&conn, "app_none", "[]", "t1").unwrap(), 0);
+        assert_eq!(
+            get(&conn, "doc_1").unwrap().expect("the row").review_json,
+            None
+        );
+        assert_eq!(
+            get(&conn, "doc_1").unwrap().expect("the row").updated_at,
+            "2026-10-05T00:00:00Z",
+            "an untouched row keeps its timestamp"
+        );
+    }
+
+    /// ADR-010: a critique carries its own untrusted marker from the start, so
+    /// the studio renders it as data whether or not the row it sits on is
+    /// flagged.
+    #[test]
+    fn the_critique_column_is_untrusted_by_default() {
+        let conn = connection();
+        let (default, notnull): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT dflt_value, \"notnull\" FROM pragma_table_info('document') \
+                 WHERE name = 'review_untrusted_origin'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("the column exists");
+        assert_eq!(
+            default.as_deref(),
+            Some("1"),
+            "the migration's default is untrusted"
+        );
+        assert_eq!(notnull, 1);
+
+        // A critique written without a marker takes that default.
+        insert(&conn, &new("doc_1", DocumentKind::Cv, "cv-classic")).unwrap();
+        set_review(&conn, "app_1", "[]", "t1").unwrap();
+        assert!(
+            get(&conn, "doc_1")
+                .unwrap()
+                .expect("the row")
+                .review_untrusted_origin
+        );
+
+        // The CHECK keeps it a flag, not a value.
+        let out_of_range = conn.execute(
+            "UPDATE document SET review_untrusted_origin = 2 WHERE id = 'doc_1'",
+            [],
+        );
+        assert!(out_of_range.is_err(), "CHECK rejects anything but 0 or 1");
+
+        // And a user's own words are the only thing that writes 0.
+        conn.execute(
+            "UPDATE document SET review_untrusted_origin = 0 WHERE id = 'doc_1'",
+            [],
+        )
+        .expect("0 is a writable value");
+        assert!(
+            !get(&conn, "doc_1")
+                .unwrap()
+                .expect("the row")
+                .review_untrusted_origin
+        );
     }
 
     // FR-70: the reason a draft is not in the Offer's language is stored with the

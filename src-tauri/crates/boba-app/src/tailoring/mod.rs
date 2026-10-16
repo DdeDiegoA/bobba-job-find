@@ -124,77 +124,10 @@ fn json(model: &impl serde::Serialize) -> Result<String, TailorError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
-    use boba_domain::documents::{
-        Claim, Contact, DocumentRecord, Lang, Link, SCHEMA_VERSION, Section,
-    };
+    use boba_domain::documents::{Claim, Contact, Lang, Link, SCHEMA_VERSION, Section};
 
     use super::*;
-
-    /// An in-memory `DocumentsRepo` (test-only). The real SQL and the adapter are
-    /// tested against an encrypted database in `boba-store`.
-    #[derive(Default)]
-    struct FakeDocumentsRepo {
-        rows: Mutex<Vec<NewDocument>>,
-        /// When set, `insert` fails the way a full disk would.
-        fail: bool,
-    }
-
-    impl FakeDocumentsRepo {
-        fn rows(&self) -> Vec<NewDocument> {
-            self.rows.lock().unwrap().clone()
-        }
-    }
-
-    impl DocumentsRepo for FakeDocumentsRepo {
-        fn insert(&self, new: &NewDocument) -> Result<i64, DocumentsRepoError> {
-            if self.fail {
-                return Err(DocumentsRepoError::new("disk gone"));
-            }
-            self.rows.lock().unwrap().push(new.clone());
-            Ok(1)
-        }
-
-        fn get(&self, _id: &str) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn list_for_application(
-            &self,
-            _application_id: &str,
-        ) -> Result<Vec<DocumentRecord>, DocumentsRepoError> {
-            Ok(vec![])
-        }
-
-        fn latest(
-            &self,
-            _application_id: &str,
-            _kind: DocumentKind,
-        ) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn set_pdf(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn set_docx(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn mark_verified(&self, _: &str, _: &str, _: &str) -> Result<(), DocumentsRepoError> {
-            Ok(())
-        }
-
-        fn pdf(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
-        }
-
-        fn docx(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
-        }
-    }
+    use crate::ports::repo::documents::fake::FakeDocumentsRepo;
 
     fn contact() -> Contact {
         Contact {
@@ -371,10 +304,7 @@ mod tests {
 
     #[test]
     fn a_failed_insert_reaches_the_caller() {
-        let repo = FakeDocumentsRepo {
-            fail: true,
-            ..Default::default()
-        };
+        let repo = FakeDocumentsRepo::failing();
         let error = save_drafts(
             &repo,
             "app_1",
