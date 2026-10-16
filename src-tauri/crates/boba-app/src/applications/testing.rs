@@ -7,7 +7,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use boba_domain::application::{AppStatus, Application, PackageItem, StatusEvent};
+use boba_domain::application::{
+    AppStatus, Application, BankAnswer, NewBankAnswer, PackageItem, StatusEvent,
+};
 
 use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 
@@ -15,6 +17,8 @@ use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 pub struct FakeApplyRepo {
     /// Shared, so a test keeps a handle after the service takes one.
     state: Arc<Mutex<State>>,
+    /// When set, every write fails, the way a full disk would.
+    pub fail: bool,
 }
 
 #[derive(Default)]
@@ -22,6 +26,7 @@ struct State {
     applications: Vec<Application>,
     events: Vec<StatusEvent>,
     package: Vec<(String, PackageItem)>,
+    answers: Vec<BankAnswer>,
 }
 
 impl FakeApplyRepo {
@@ -60,6 +65,19 @@ impl FakeApplyRepo {
         let mut state = self.state.lock().unwrap();
         if let Some(row) = state.applications.iter_mut().find(|a| a.id == id) {
             row.status = status;
+        }
+    }
+
+    /// Every answer-bank row written, oldest first (S7.8).
+    pub fn answers(&self) -> Vec<BankAnswer> {
+        self.state.lock().unwrap().answers.clone()
+    }
+
+    /// A fake whose writes fail, the way a full disk would.
+    pub fn failing() -> Self {
+        Self {
+            fail: true,
+            ..Self::default()
         }
     }
 }
@@ -127,5 +145,76 @@ impl ApplyRepo for FakeApplyRepo {
         row.updated_at = event.created_at.clone();
         state.events.push(event.clone());
         Ok(())
+    }
+
+    fn answer_bank_insert(&self, answer: &NewBankAnswer) -> Result<(), ApplyRepoError> {
+        if self.fail {
+            return Err(ApplyRepoError::Store("disk gone".to_string()));
+        }
+        self.state.lock().unwrap().answers.push(BankAnswer {
+            id: answer.id.clone(),
+            application_id: answer.application_id.clone(),
+            question: answer.question.clone(),
+            question_key: answer.question_key.clone(),
+            answer: answer.answer.clone(),
+            class: answer.class,
+            fact_ids: answer.fact_ids.clone(),
+            needs_review: answer.needs_review,
+            untrusted_origin: answer.untrusted_origin,
+            approved_at: None,
+            created_at: answer.created_at.clone(),
+            updated_at: answer.created_at.clone(),
+        });
+        Ok(())
+    }
+
+    fn answer_bank_for_application(
+        &self,
+        application_id: &str,
+    ) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .answers
+            .iter()
+            .filter(|row| row.application_id == application_id)
+            .cloned()
+            .collect())
+    }
+
+    fn answer_bank_reusable(&self, keys: &[String]) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+        Ok(self
+            .state
+            .lock()
+            .unwrap()
+            .answers
+            .iter()
+            .filter(|row| row.is_reusable() && keys.contains(&row.question_key))
+            .cloned()
+            .collect())
+    }
+
+    fn answer_bank_approve(
+        &self,
+        id: &str,
+        answer: Option<&str>,
+        approved_at: &str,
+    ) -> Result<bool, ApplyRepoError> {
+        if self.fail {
+            return Err(ApplyRepoError::Store("disk gone".to_string()));
+        }
+        let mut state = self.state.lock().unwrap();
+        let Some(row) = state.answers.iter_mut().find(|row| row.id == id) else {
+            return Ok(false);
+        };
+        if let Some(text) = answer {
+            row.answer = Some(text.to_string());
+        }
+        row.approved_at = Some(approved_at.to_string());
+        row.updated_at = approved_at.to_string();
+        // The user made this text theirs by confirming or editing it (AC3).
+        row.untrusted_origin = false;
+        Ok(true)
     }
 }

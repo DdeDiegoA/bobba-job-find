@@ -20,16 +20,18 @@ pub const EXTRACT_POSTINGS: &str = "extract_postings";
 pub const NARRATE_SCORES: &str = "narrate_scores";
 pub const TAILOR_APPLICATION: &str = "tailor_application";
 pub const REVIEW_APPLICATION: &str = "review_application";
+pub const ANSWER_QUESTIONS: &str = "answer_questions";
 pub const CLASSIFY_EMAILS: &str = "classify_emails";
 pub const TRANSLATE_PROFILE: &str = "translate_profile";
 
 /// Every task kind, in the order the UI lists them.
-pub const ALL_TASKS: [&str; 7] = [
+pub const ALL_TASKS: [&str; 8] = [
     PROFILE_IMPORT,
     EXTRACT_POSTINGS,
     NARRATE_SCORES,
     TAILOR_APPLICATION,
     REVIEW_APPLICATION,
+    ANSWER_QUESTIONS,
     CLASSIFY_EMAILS,
     TRANSLATE_PROFILE,
 ];
@@ -86,6 +88,7 @@ pub const TOOLS: &[ToolSpec] = &[
             PROFILE_IMPORT,
             TAILOR_APPLICATION,
             REVIEW_APPLICATION,
+            ANSWER_QUESTIONS,
             TRANSLATE_PROFILE,
         ],
         untrusted: false,
@@ -99,6 +102,7 @@ pub const TOOLS: &[ToolSpec] = &[
             PROFILE_IMPORT,
             TAILOR_APPLICATION,
             REVIEW_APPLICATION,
+            ANSWER_QUESTIONS,
             TRANSLATE_PROFILE,
         ],
         untrusted: false,
@@ -192,6 +196,14 @@ pub const TOOLS: &[ToolSpec] = &[
         untrusted: false,
         about: "Save a CV or cover-letter draft for an application.",
         input_schema: r#"{"type":"object","properties":{"app_id":{"type":"string"},"doc":{"type":"object"}},"required":["app_id","doc"],"additionalProperties":false}"#,
+    },
+    ToolSpec {
+        name: "save_answers",
+        kind: ToolKind::WriteDraft,
+        tasks: &[ANSWER_QUESTIONS],
+        untrusted: false,
+        about: "Save the drafted screening answers for an application.",
+        input_schema: r#"{"type":"object","properties":{"app_id":{"type":"string"},"answers":{"type":"array","items":{"type":"object"}}},"required":["app_id","answers"],"additionalProperties":false}"#,
     },
     ToolSpec {
         name: "save_review",
@@ -305,7 +317,7 @@ mod tests {
         }
         let writes = TOOLS.iter().filter(|tool| tool.kind.is_write()).count();
         let reads = TOOLS.len() - writes;
-        assert_eq!((reads, writes), (8, 7));
+        assert_eq!((reads, writes), (8, 8));
     }
 
     #[test]

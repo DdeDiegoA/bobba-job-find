@@ -262,6 +262,127 @@ pub enum RuleError {
     SameStatus,
 }
 
+/// What a screening question is about, as the **core** decided it (S7.8,
+/// FR-80). The run never picks this: the class is what makes a salary or
+/// eligibility answer come from Preferences and carry `needs_review` for good,
+/// while a free-text answer has to stand on profile facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerClass {
+    Salary,
+    Eligibility,
+    Other,
+}
+
+impl AnswerClass {
+    /// Every class, in the order the UI lists them.
+    pub const ALL: [AnswerClass; 3] = [
+        AnswerClass::Salary,
+        AnswerClass::Eligibility,
+        AnswerClass::Other,
+    ];
+
+    /// The value stored in `application_answer_bank.class`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            AnswerClass::Salary => "salary",
+            AnswerClass::Eligibility => "eligibility",
+            AnswerClass::Other => "other",
+        }
+    }
+
+    /// Read the stored value back, `None` for anything else.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|class| class.as_str() == value)
+    }
+
+    /// Whether the answer's value comes from Preferences rather than from the
+    /// run's own words (FR-80): salary and eligibility.
+    pub const fn comes_from_preferences(self) -> bool {
+        matches!(self, AnswerClass::Salary | AnswerClass::Eligibility)
+    }
+}
+
+/// The reuse key of a question: its words, lower-cased with runs of whitespace
+/// collapsed and trailing punctuation dropped. Two forms of the same question
+/// (a board's wording, a pasted copy) reuse one bank row; an accent is part of
+/// the word, so questions that differ only there stay apart.
+pub fn question_key(question: &str) -> String {
+    question
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .trim_matches(|ch: char| {
+            matches!(ch, '?' | '!' | '.' | ':' | ';' | ',' | '¿' | '¡') || ch.is_whitespace()
+        })
+        .to_string()
+}
+
+/// A fresh ULID for an answer-bank row, prefixed by type (AD-17: `ans_…`).
+pub fn new_answer_id() -> String {
+    format!("ans_{}", ulid::Ulid::generate())
+}
+
+/// A screening answer the core stored for an application (S7.8, FR-80, AD-16).
+///
+/// A row is a **draft** while `approved_at` is `None`: the run drafted it, the
+/// user has not looked at it yet, and `untrusted_origin` is `true` (ADR-010).
+/// Approving it — confirming it as it stands or editing it — stamps
+/// `approved_at` and clears `untrusted_origin`, because the user has made the
+/// text theirs, and only approved rows are reused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewBankAnswer {
+    pub id: String,
+    pub application_id: String,
+    /// The question as the form (or the user) wrote it. Third-party text: shown
+    /// as data only (ADR-010).
+    pub question: String,
+    /// [`question_key`] of `question`; the store matches reuse on it.
+    pub question_key: String,
+    /// The answer, `None` when the core has no confident one (a salary question
+    /// with no Salary Floor set): the row waits for the user instead of the run
+    /// inventing a value (FR-80).
+    pub answer: Option<String>,
+    pub class: AnswerClass,
+    /// The profile facts the answer stands on. Empty for salary and
+    /// eligibility, whose value is the user's own Preferences, not a claim.
+    pub fact_ids: Vec<String>,
+    /// Whether the user has to look at this row before it may be used. Always
+    /// true for salary and eligibility (AC1), which are never auto-answered.
+    pub needs_review: bool,
+    /// ADR-010: `true` for the run's draft, `false` once the user edited or
+    /// confirmed it (AC3).
+    pub untrusted_origin: bool,
+    pub created_at: String,
+}
+
+/// A stored bank row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BankAnswer {
+    pub id: String,
+    pub application_id: String,
+    pub question: String,
+    pub question_key: String,
+    pub answer: Option<String>,
+    pub class: AnswerClass,
+    pub fact_ids: Vec<String>,
+    pub needs_review: bool,
+    pub untrusted_origin: bool,
+    /// When the user approved it, `None` while it is still a draft.
+    pub approved_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl BankAnswer {
+    /// Whether this row may be reused for another application (AC2): only what
+    /// the user approved, and only once there is an answer to reuse.
+    pub fn is_reusable(&self) -> bool {
+        self.approved_at.is_some() && self.answer.is_some()
+    }
+}
+
 /// Whether a move is allowed (AC4). Only a no-op is invalid: the four terminal
 /// columns collapse for display (FR-93) but never trap the user, because Undo
 /// (AC2) and a mis-drop both need a way back.
@@ -275,6 +396,50 @@ pub fn can_transition(from: AppStatus, to: AppStatus) -> Result<(), RuleError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn answer_classes_round_trip_and_parse_nothing_else() {
+        assert_eq!(AnswerClass::ALL.len(), 3);
+        for class in AnswerClass::ALL {
+            assert_eq!(AnswerClass::parse(class.as_str()), Some(class));
+        }
+        assert_eq!(AnswerClass::parse("visa"), None, "the class is not a topic");
+        assert_eq!(
+            AnswerClass::parse("Salary"),
+            None,
+            "the stored form is lower case"
+        );
+    }
+
+    #[test]
+    fn a_question_key_ignores_case_spacing_and_trailing_punctuation() {
+        assert_eq!(
+            question_key("What are your salary expectations?"),
+            question_key("  what are   your salary expectations  ")
+        );
+        assert_eq!(
+            question_key("¿Cuál es tu pretensión salarial?"),
+            "cuál es tu pretensión salarial"
+        );
+        assert_ne!(
+            question_key("Are you authorized to work in the US?"),
+            question_key("What is your notice period?"),
+            "different questions never reuse each other's answer"
+        );
+        // Accents are part of the words: two questions that differ only there
+        // are two questions.
+        assert_ne!(question_key("¿Tienes auto?"), question_key("¿Tienes autó?"));
+        assert_eq!(question_key("   "), "");
+    }
+
+    #[test]
+    fn bank_answer_ids_are_prefixed_ulids() {
+        let first = new_answer_id();
+        let second = new_answer_id();
+        assert!(first.starts_with("ans_"));
+        assert_ne!(first, second);
+        assert_eq!(first.len(), "ans_".len() + 26);
+    }
 
     #[test]
     fn every_status_round_trips_and_parses_nothing_else() {

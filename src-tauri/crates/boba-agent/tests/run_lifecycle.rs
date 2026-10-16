@@ -416,6 +416,7 @@ impl ToolHandler for NoTools {
     fn call(
         &self,
         _task: &str,
+        _application_id: Option<&str>,
         _tool: &str,
         _args: &serde_json::Value,
     ) -> Result<serde_json::Value, String> {
