@@ -14,3 +14,7 @@ path = "src/main.rs"
 [dependencies]
 boba-mcp-proto = { path = "../boba-mcp-proto" }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+interprocess = { workspace = true }
+tempfile = { workspace = true }
