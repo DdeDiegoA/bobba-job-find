@@ -153,6 +153,8 @@ These rules are what make the `files` sets disjoint. S1.1 sets them up, and the 
 
 **Standing guard (CH2, 2026-10-05; extended by CH3, 2026-10-15):** a slice that adds Typst `#cite` / `#bibliography`, or parses untrusted or user-supplied fonts or YAML data files, must re-assess the cargo-deny ignores RUSTSEC-2026-0194/0195 (quick-xml via citationberg), RUSTSEC-2026-0192 (ttf-parser) and RUSTSEC-2024-0449 (unsafe-libyaml via serde_yaml/hayagriva, Diego-approved 2026-10-15) before merge. Those ignores rest on that code being unreachable. This applies to every E7 (docs) slice and is recorded in their notes.
 
+**Standing guard — `zip@4.6.1` (CH3, 2026-10-15; Diego-approved):** the one crate-spec ignore in `deny.toml`. Every `zip` 4.x release is yanked upstream, so the lock cannot be re-resolved (`cargo update -p zip` fails to select a version), and every `tauri-plugin-updater` release up to `3.0.0-alpha.3` requires `zip ^4`, so no bump avoids it. It is reachable only through updater bundle extraction, and the updater is unused until **S10.5**; the global `yanked = "deny"` is untouched. **S10.5 owns the revisit:** when it wires the updater and update keys, drop the ignore if a non-yanked `zip` 4.x exists or if `tauri-plugin-updater` drops the dependency, and re-run `cargo deny check`.
+
 | Slice | Why |
 |---|---|
 | S1.2a | DB encryption key creation and keychain custody (crypto/key change, ADR-009). *Not in the orquestador's 2026-10-05 list; kept gated by PM as a crypto/key change. Confirm or drop.* |
