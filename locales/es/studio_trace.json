@@ -1,1 +1,12 @@
-{}
+{
+  "title": "Trazabilidad de afirmaciones",
+  "hint": "Pasa el cursor o enfoca una frase para ver los datos de tu perfil que la respaldan.",
+  "status": {
+    "ready": "Tu perfil respalda todas las frases.",
+    "blocked": "{count, plural, one {# frase necesita tu atención} other {# frases necesitan tu atención}} — Listo y Enviar siguen bloqueados hasta que la corrijas o la confirmes en tu perfil."
+  },
+  "unlinked": "Sin fuente en tu perfil",
+  "fix": "Corregir",
+  "sources": "De tu perfil",
+  "unknown": "No está en tu perfil: {ids}"
+}
