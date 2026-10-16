@@ -869,12 +869,9 @@ mod tests {
         assert_eq!(findings[0]["target"], "cv");
     }
 
-    /// A critique of an application with no drafts is refused: there is nothing
-    /// the reviewer could have read, and storing it would be a critique of
-    /// nothing.
-    /// A critique of an application with no drafts is refused: there is nothing
-    /// the reviewer could have read, and storing it would be a critique of
-    /// nothing.
+    /// The application is the **core's** to name, not the payload's: a review run
+    /// started for one application cannot annotate another, whatever its
+    /// arguments say (the orquestador's app_id-binding rule).
     #[test]
     fn a_critique_naming_another_application_is_refused() {
         let repo = FakeDocumentsRepo::default();
