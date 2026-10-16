@@ -364,13 +364,17 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
-    /// The Windows half of the same guarantee: the pipe is created with our
-    /// explicit owner-only DACL, not the process token's default one (S2.3a
+    /// The Windows half of the same guarantee: our SDDL yields an explicit,
+    /// **protected** owner-only DACL, not the token's default one (S2.3a
     /// residual). Compiled by CI's Windows build; runs on a Windows machine.
     #[cfg(windows)]
     #[test]
-    fn the_endpoint_pipe_dacl_is_the_owner_only_one() {
+    fn the_endpoint_pipe_sddl_is_a_protected_owner_only_dacl() {
         use interprocess::os::windows::security_descriptor::AsSecurityDescriptorExt as _;
+
+        // `SE_DACL_PRESENT` and `SE_DACL_PROTECTED`, from winnt.h.
+        const SE_DACL_PRESENT: u16 = 0x0004;
+        const SE_DACL_PROTECTED: u16 = 0x1000;
 
         let descriptor = owner_only_descriptor().expect("the pinned SDDL parses");
         let (dacl, _defaulted) = descriptor
@@ -380,6 +384,18 @@ mod tests {
         assert!(
             !dacl.is_null(),
             "a null DACL grants every principal full access"
+        );
+
+        let (control, _revision) = descriptor.control_and_revision().expect("control bits");
+        assert_eq!(
+            control & SE_DACL_PRESENT,
+            SE_DACL_PRESENT,
+            "the descriptor has no DACL"
+        );
+        assert_eq!(
+            control & SE_DACL_PROTECTED,
+            SE_DACL_PROTECTED,
+            "the DACL is not protected: a parent could widen it ({control:#x})"
         );
     }
 

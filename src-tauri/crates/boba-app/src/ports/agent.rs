@@ -85,6 +85,16 @@ pub struct AgentTask {
     pub env: Vec<(String, String)>,
 }
 
+impl AgentTask {
+    /// Whether this task reads content nobody in this app vouched for: its kind
+    /// reads third-party text, or it declares untrusted input outright. Such
+    /// tasks require a verified tool lockdown (ADR-010 §2); everything that
+    /// gates or refuses a run asks this one question.
+    pub fn reads_untrusted(&self) -> bool {
+        self.kind.reads_untrusted() || self.input_trust == InputTrust::Untrusted
+    }
+}
+
 /// A normalised event streamed from a run (AD-4). The wire form is JSON with a
 /// `type` tag; drivers that emit plain text degrade to [`AgentEvent::Text`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -135,6 +145,9 @@ pub enum FailureReason {
     LimitExceeded,
     /// The user or the kill switch cancelled the run.
     Cancelled,
+    /// The CLI cannot run this task safely (ADR-010's tool-lockdown gate): the
+    /// task is unsupported on this install, with no user override.
+    Unsupported,
     /// The CLI crashed or exited nonzero for an unclassified reason.
     Crashed,
 }
@@ -148,6 +161,7 @@ impl FailureReason {
             FailureReason::Timeout => "timeout",
             FailureReason::LimitExceeded => "limit_exceeded",
             FailureReason::Cancelled => "cancelled",
+            FailureReason::Unsupported => "unsupported",
             FailureReason::Crashed => "crashed",
         }
     }
@@ -161,6 +175,7 @@ impl FailureReason {
             FailureReason::Timeout => "errors.agent.timeout",
             FailureReason::LimitExceeded => "errors.agent.limit_exceeded",
             FailureReason::Cancelled => "errors.agent.cancelled",
+            FailureReason::Unsupported => "errors.agent.unsupported",
             FailureReason::Crashed => "errors.agent.crashed",
         }
     }
@@ -217,6 +232,22 @@ mod tests {
         assert!(!AgentTaskKind::TranslateProfile.reads_untrusted());
         assert!(AgentTaskKind::NarrateScores.reads_untrusted());
         assert!(AgentTaskKind::TailorApplication.reads_untrusted());
+    }
+
+    #[test]
+    fn a_task_that_declares_untrusted_input_is_treated_as_one() {
+        let mut task = AgentTask {
+            kind: AgentTaskKind::TranslateProfile,
+            input_trust: InputTrust::User,
+            cli: "claude_code".to_string(),
+            model: None,
+            prompt: "translate".to_string(),
+            budget: RunBudget::default(),
+            env: Vec::new(),
+        };
+        assert!(!task.reads_untrusted());
+        task.input_trust = InputTrust::Untrusted;
+        assert!(task.reads_untrusted());
     }
 
     #[test]

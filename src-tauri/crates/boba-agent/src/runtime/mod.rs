@@ -14,6 +14,7 @@ use boba_app::ports::agent::{
 use boba_app::ports::repo::agent::{AgentRepo, FinishAgentRun, NewAgentRun, RunStatus};
 
 use crate::drivers::{CliKind, HealthStatus};
+use crate::lockdown::{TaskSupport, Unverified};
 use crate::mcp::config::{self, RunSandbox, SandboxConfig};
 use crate::mcp::server::{Limits, McpEndpoint, ToolHandler};
 use crate::supervisor::{CommandSpec, Stream, SupervisedProcess};
@@ -39,6 +40,12 @@ pub type CommandBuilder = dyn Fn(&AgentTask, &RunSandbox) -> CommandSpec + Send 
 /// Event sink, e.g. the Tauri `agent.run.progressed` emitter.
 pub type Emitter = dyn Fn(&str, i64, &AgentEvent) + Send + Sync;
 
+/// Whether a task may run at all (ADR-010 §2). The composition root injects it —
+/// it owns the probed CLI evidence — and it is consulted before a run gets a
+/// workspace, so no caller can reach a CLI the gate holds back. A runtime
+/// without a gate runs what it is given; production always mounts one.
+pub type TaskGate = dyn Fn(&AgentTask) -> TaskSupport + Send + Sync;
+
 /// Runs tasks on a chosen CLI, persisting each run and its events (AD-4).
 pub struct AgentRuntime<R: AgentRepo + 'static> {
     repo: Arc<R>,
@@ -51,6 +58,8 @@ pub struct AgentRuntime<R: AgentRepo + 'static> {
     sandbox: Option<(SandboxConfig, Arc<dyn ToolHandler>)>,
     /// Turns a task into a CLI command, for [`AgentPort::run`].
     builder: Option<Arc<CommandBuilder>>,
+    /// ADR-010's gate, consulted before anything is created for a run.
+    gate: Option<Arc<TaskGate>>,
     /// Bounds the endpoint puts on its peers.
     limits: Limits,
 }
@@ -63,6 +72,7 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             max_polls: None,
             sandbox: None,
             builder: None,
+            gate: None,
             limits: Limits::default(),
         }
     }
@@ -78,6 +88,12 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
     /// How a task becomes a CLI command, for [`AgentPort::run`].
     pub fn with_command_builder(mut self, builder: Arc<CommandBuilder>) -> Self {
         self.builder = Some(builder);
+        self
+    }
+
+    /// The hard gate every task goes through (ADR-010 §2).
+    pub fn with_gate(mut self, gate: Arc<TaskGate>) -> Self {
+        self.gate = Some(gate);
         self
     }
 
@@ -113,6 +129,10 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         build: impl FnOnce(&AgentTask, Option<&RunSandbox>) -> Option<RunSpec>,
     ) -> RunHandle {
         let run_id = ulid::Ulid::generate().to_string();
+
+        if let Some(refused) = self.held_back(task.clone(), run_id.clone()) {
+            return refused;
+        }
 
         let sandbox = match self
             .sandbox
@@ -213,6 +233,30 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             events,
             cancel,
         }
+    }
+
+    /// Hold a task back before it gets a workspace, a token or a CLI (ADR-010
+    /// §2). Returns the finished handle when the gate refuses, `None` when the
+    /// task may run.
+    ///
+    /// With no gate mounted — a fixture, or a composition that forgot one — a
+    /// task that reads third-party content is refused anyway: nothing has
+    /// vouched for it, so the default is refusal, never a quiet run.
+    fn held_back(&self, task: AgentTask, run_id: String) -> Option<RunHandle> {
+        let verdict = match self.gate.as_ref() {
+            Some(gate) => gate(&task),
+            None if task.reads_untrusted() => TaskSupport::Unsupported {
+                reason: Unverified::NoVerifiedConfig,
+                fallback: None,
+            },
+            None => TaskSupport::Supported,
+        };
+        let TaskSupport::Unsupported { .. } = verdict else {
+            return None;
+        };
+        // Recorded and reported like any other failure: the reason carries the
+        // i18n key the UI explains the refusal with.
+        Some(self.failed(task, run_id, FailureReason::Unsupported))
     }
 
     /// Record and report a run that never started. The port features call has
@@ -739,6 +783,9 @@ mod tests {
         let root = scratch();
         let repo = Arc::new(FakeRepo::default());
         let runtime = AgentRuntime::new(Arc::clone(&repo))
+            // This fixture is about the sandbox, not the gate: it allows the
+            // untrusted task it runs.
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
             .with_sandbox(
                 SandboxConfig {
                     runs_root: root.join("runs"),
@@ -795,12 +842,122 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// A task the gate holds back is reported unsupported, and nothing is
+    /// created or spawned for it (ADR-010 §2: a hard gate, before any workspace).
+    #[test]
+    fn a_task_the_gate_holds_back_never_reaches_a_cli() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            )
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Unsupported {
+                reason: Unverified::Unobserved,
+                fallback: None,
+            }))
+            .with_command_builder(Arc::new(|_task, _sandbox| CommandSpec {
+                program: PathBuf::from("/bin/echo"),
+                args: vec!["should not run".to_string()],
+                cwd: None,
+                env: vec![],
+            }));
+
+        let handle = runtime.run(task());
+
+        let reason = handle
+            .events
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::Failed { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .expect("a failed event");
+        assert_eq!(reason, FailureReason::Unsupported);
+        assert_eq!(
+            repo.get_run(&handle.run_id)
+                .unwrap()
+                .unwrap()
+                .failure_reason,
+            Some("unsupported".to_string()),
+            "the refusal is recorded, not silent"
+        );
+        assert!(
+            !root.join("runs").exists(),
+            "a refused task must not get a workspace"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// No gate mounted is not "no gate to pass": a task that reads third-party
+    /// content is refused, because nothing has vouched for it.
+    #[test]
+    fn without_a_gate_an_untrusted_task_is_still_refused() {
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo));
+
+        let handle = runtime.run(task());
+        assert!(
+            handle.events.iter().any(|event| matches!(
+                event,
+                AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                }
+            )),
+            "an ungated untrusted task was not refused"
+        );
+    }
+
+    /// The gate lets the ordinary task through: it is not a blanket refusal.
+    #[test]
+    fn a_task_the_gate_allows_runs() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            )
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_max_polls(200);
+
+        let handle = runtime.run(task());
+        let finished = handle
+            .events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Started { .. }));
+        assert!(finished, "an allowed task still starts");
+        assert!(
+            !handle.events.iter().any(|event| matches!(
+                event,
+                AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                }
+            )),
+            "an allowed task must not be refused"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
     /// Without a command builder the port reports a failure instead of the
     /// panic it used to carry (ADR-012).
     #[test]
     fn a_run_without_an_engine_is_reported_not_panicked() {
         let repo = Arc::new(FakeRepo::default());
-        let runtime = AgentRuntime::new(Arc::clone(&repo));
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            // About the missing engine, not the gate.
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported));
 
         let handle = runtime.run(task());
         let failed = handle

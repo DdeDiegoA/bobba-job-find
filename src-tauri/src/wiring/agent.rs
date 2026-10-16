@@ -25,12 +25,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use boba_agent::drivers::{Capabilities, CliKind};
-use boba_agent::lockdown::{self, LockdownConfirmation, TaskSupport};
+use boba_agent::lockdown::{self, LockdownConfirmation, TaskSupport, Unverified};
 use boba_agent::mcp::config::{RunSandbox, SandboxConfig};
 use boba_agent::mcp::server::ToolHandler;
-use boba_agent::runtime::{AgentRuntime, Emitter};
+use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
-use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason, InputTrust};
+use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
 use boba_store::repos::cli_install;
@@ -60,7 +60,9 @@ pub fn agent_runtime<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) -> Agen
                 _store: Arc::clone(store),
             }),
         )
-        .with_command_builder(Arc::new(command_builder(shim.err(), Arc::clone(store))))
+        .with_command_builder(Arc::new(command_builder(shim.err())))
+        // ADR-010 §2: every task goes through this gate before a run exists.
+        .with_gate(task_gate(Arc::clone(store)))
 }
 
 /// The sandbox a run works in: app data owns the workspaces, and the shim is
@@ -190,27 +192,21 @@ fn terminal_of(event: &AgentEvent) -> Option<(TaskOutcome, Option<String>)> {
 /// at this run's `mcp.json`, the pinned lockdown config, its non-interactive
 /// flags, and the prompt.
 ///
-/// Three refusals come first, all fail-closed:
+/// Two refusals come first, both fail-closed:
 /// 1. **No sidecar.** Without `boba-mcp` the CLI would run with its own native
 ///    tools and none of ours, so no run starts (AD-6).
-/// 2. **Untrusted input without a verified tool lockdown.** ADR-010 allows a
-///    task that reads postings, mail or company pages only on a CLI whose
-///    lockdown this build can verify — for the version the driver was verified
-///    against, with the config pinned in `boba-agent/src/lockdown`, and with the
-///    run-time observation of that pinning in place. That gate is a hard one,
-///    with no user override; a CLI that fails it is refused rather than "run
-///    anyway and hope". Until S2.4 wires the observation, **every** untrusted
-///    task is refused on every CLI (orquestador ruling (c), 2026-10-16).
-/// 3. **A prompt that could be parsed as an option.** Neither CLI documents an
+/// 2. **A prompt that could be parsed as an option.** Neither CLI documents an
 ///    end-of-options `--`, so a prompt starting with `-` is refused instead of
 ///    guessed at.
 ///
+/// What a task is allowed to *do* is not decided here: ADR-010's gate runs in
+/// the runtime, before a run exists ([`task_gate`]).
+///
 /// A CLI whose argv is not wired yet (Codex, OpenCode, Aider — their MCP flag
-/// is not a plain `--flag <path>`, or they take no prompt) is refused too; that
-/// stays the driver's work (S2.4).
+/// is not a plain `--flag <path>`, or they take no prompt) is refused here too;
+/// that stays the driver's work (S2.4).
 fn command_builder(
     shim_error: Option<String>,
-    store: Arc<Store>,
 ) -> impl Fn(&AgentTask, &RunSandbox) -> CommandSpec + Send + Sync {
     move |task: &AgentTask, sandbox: &RunSandbox| {
         if let Some(why) = &shim_error {
@@ -225,13 +221,6 @@ fn command_builder(
         let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
             return refusal(task, "unknown agent CLI");
         };
-        if reads_untrusted(task) && !lock_down(&store, kind, task).is_supported() {
-            return refusal(
-                task,
-                "this task reads untrusted content and this CLI has no verified tool lockdown \
-                 for its version (ADR-010; there is no user override)",
-            );
-        }
         let (Some(mcp_flag), Some(argv)) = (
             kind.mcp_config_flag(),
             kind.non_interactive_argv(&task.prompt),
@@ -242,14 +231,11 @@ fn command_builder(
                  takes no prompt); that arrives with the driver argv work",
             );
         };
-        // The flags that pin this CLI's lockdown for this task. A verified CLI
-        // always has them (`lockdown`'s own invariant), and an untrusted task
-        // without them must not start at all; a user-input task may run without
-        // them on a CLI that cannot be pinned, with the security badge.
+        // The flags that pin this CLI's lockdown for this task. A CLI the gate
+        // lets an untrusted task through always has them (`lockdown`'s own
+        // invariant); a CLI that cannot be pinned only ever runs the user's own
+        // input, with the security badge.
         let pinned = lockdown::pinned_args(kind, task.kind.id());
-        if reads_untrusted(task) && pinned.is_none() {
-            return refusal(task, "this CLI's lockdown config is not pinned");
-        }
 
         CommandSpec {
             program: PathBuf::from(kind.binary_names()[0]),
@@ -264,6 +250,28 @@ fn command_builder(
             env: Vec::new(),
         }
     }
+}
+
+/// ADR-010's gate, in the shape the runtime takes it: the composition root
+/// supplies the probed `cli_install` evidence, and `boba-agent` decides. The
+/// runtime consults it before a run gets a workspace, a token or a CLI, so no
+/// caller can route around it.
+///
+/// Until S2.4 wires the run-time observation of a pinned lockdown,
+/// [`lock_down`] refuses every untrusted task on every CLI (orquestador ruling
+/// (c), 2026-10-16) — a hard gate, with no user override.
+fn task_gate(store: Arc<Store>) -> Arc<TaskGate> {
+    Arc::new(move |task: &AgentTask| {
+        let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
+            // Nothing ever probed this CLI, so nothing vouches for any task on
+            // it.
+            return TaskSupport::Unsupported {
+                reason: Unverified::NoVerifiedConfig,
+                fallback: None,
+            };
+        };
+        lock_down(&store, kind, task)
+    })
 }
 
 /// ADR-010's verdict for a task, from the probed install the store holds: the
@@ -302,12 +310,6 @@ fn lock_down(store: &Store, kind: CliKind, task: &AgentTask) -> TaskSupport {
         &capabilities,
         LockdownConfirmation::NotObserved,
     )
-}
-
-/// A task that must not run without the ADR-010 gate: either its kind reads
-/// third-party content, or it declares untrusted input outright.
-fn reads_untrusted(task: &AgentTask) -> bool {
-    task.kind.reads_untrusted() || task.input_trust == InputTrust::Untrusted
 }
 
 /// A command that cannot start: the run fails fast, is recorded and is reported,
@@ -381,6 +383,7 @@ const UNOWNED: &str = "no slice owns it yet (unassigned)";
 mod tests {
     use super::*;
     use boba_agent::mcp::config::Workspace;
+    use boba_app::ports::agent::InputTrust;
     use serde_json::json;
 
     /// Claude Code's recorded-probe capabilities: MCP plus a tool allowlist,
@@ -589,11 +592,8 @@ mod tests {
     #[test]
     fn a_trusted_task_gets_the_cli_argv_with_this_runs_mcp_config() {
         // Trusted kinds are the ones whose input is the user's own (AD-4/ADR-010).
-        // A probed Full CLI, so its runs carry the pinned lockdown config.
-        let builder = command_builder(
-            None,
-            store_with_cli("argv", CliKind::ClaudeCode, "2.1.289", claude_caps()),
-        );
+        // A Full CLI, so its runs carry the pinned lockdown config.
+        let builder = command_builder(None);
         for cli in ["claude_code", "gemini_cli"] {
             let sandbox = run_sandbox(&format!("argv-{cli}"));
             let trusted = task_of(
@@ -623,76 +623,109 @@ mod tests {
         }
     }
 
-    /// P1: a task that reads third-party text must not start on a CLI whose
-    /// lockdown this build cannot verify (ADR-010, "no override").
+    /// P1 (ruling (c), 2026-10-16): ADR-010's gate refuses every untrusted task
+    /// until S2.4 observes a pinned lockdown — on an unprobed CLI, on a version
+    /// outside its driver's range, and on Claude Code with a pinned config.
     #[test]
-    fn an_untrusted_task_is_refused_on_an_unverified_cli() {
-        // Aider has no verified lockdown at all, and no probed install here.
-        let builder = command_builder(None, store("unverified"));
-        let sandbox = run_sandbox("unverified");
-        let mut untrusted = task("claude_code");
-        untrusted.prompt = "summarise this posting".to_string();
-        let spec = builder(&untrusted, &sandbox);
-        assert!(
-            spec.program.to_string_lossy().contains("boba-refused-"),
-            "an untrusted task got a live argv: {spec:?}"
+    fn untrusted_tasks_are_refused_by_the_gate() {
+        let unterprobed = task_gate(store("unprobed"));
+        let untrusted = task("aider");
+        assert_eq!(
+            unterprobed(&untrusted),
+            TaskSupport::Unsupported {
+                reason: Unverified::NoVerifiedConfig,
+                fallback: None,
+            }
         );
-        assert!(spec.args.is_empty());
 
-        // A CLI outside its driver's verified version range loses lockdown too.
-        let outdated = store_with_cli("outdated", CliKind::ClaudeCode, "2.2.0", claude_caps());
-        let builder = command_builder(None, outdated);
-        let spec = builder(&untrusted, &sandbox);
-        assert!(
-            spec.program.to_string_lossy().contains("boba-refused-"),
-            "an out-of-range CLI got a live argv: {spec:?}"
+        let outdated = task_gate(store_with_cli(
+            "outdated",
+            CliKind::ClaudeCode,
+            "2.2.0",
+            claude_caps(),
+        ));
+        assert_eq!(
+            outdated(&task("claude_code")),
+            TaskSupport::Unsupported {
+                reason: Unverified::VersionOutsideVerifiedRange { verified: (2, 1) },
+                fallback: None,
+            }
+        );
+
+        // A Full CLI with its proof complete but no observation yet.
+        let full = task_gate(store_with_cli(
+            "full",
+            CliKind::ClaudeCode,
+            "2.1.289",
+            claude_caps(),
+        ));
+        assert_eq!(
+            full(&task("claude_code")),
+            TaskSupport::Unsupported {
+                reason: Unverified::Unobserved,
+                fallback: None,
+            }
+        );
+        // `classify_emails` still has its deterministic fallback.
+        let mut classify = task("claude_code");
+        classify.kind = boba_app::ports::agent::AgentTaskKind::ClassifyEmails;
+        assert_eq!(
+            full(&classify),
+            TaskSupport::Unsupported {
+                reason: Unverified::Unobserved,
+                fallback: Some(lockdown::Fallback::DeterministicRules),
+            }
         );
     }
 
-    /// The user's own input does not need lockdown, so those tasks still run,
-    /// with the security badge the UI shows (ADR-010 §2).
+    /// The user's own input does not need lockdown, so the gate lets it through
+    /// with the badge the UI shows, and the CLI still gets a live argv.
     #[test]
-    fn a_user_input_task_still_runs_on_an_unverified_cli() {
-        let outdated = store_with_cli("outdated-user", CliKind::ClaudeCode, "2.2.0", claude_caps());
-        let builder = command_builder(None, outdated);
-        let sandbox = run_sandbox("outdated-user");
-
-        let spec = builder(
-            &task_of(
-                "claude_code",
-                boba_app::ports::agent::AgentTaskKind::ProfileImport,
-                InputTrust::User,
-            ),
-            &sandbox,
+    fn the_gate_lets_the_users_own_input_through_with_a_badge() {
+        let gate = task_gate(store_with_cli(
+            "badge",
+            CliKind::ClaudeCode,
+            "2.2.0",
+            claude_caps(),
+        ));
+        let user = task_of(
+            "claude_code",
+            boba_app::ports::agent::AgentTaskKind::ProfileImport,
+            InputTrust::User,
         );
+        assert_eq!(
+            gate(&user),
+            TaskSupport::SupportedWithBadge(Unverified::VersionOutsideVerifiedRange {
+                verified: (2, 1)
+            })
+        );
+
+        let builder = command_builder(None);
+        let spec = builder(&user, &run_sandbox("badge"));
         assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
+        assert!(
+            !spec.program.to_string_lossy().contains("boba-refused-"),
+            "a user-input task must still run: {spec:?}"
+        );
     }
 
-    /// P1 + ruling (c): even on a Full CLI with a pinned config, an untrusted
-    /// task stays refused until S2.4 observes the CLI's init event.
+    /// On a Full CLI the user's own input runs with its lockdown pinned: only
+    /// our MCP server, and only that task's own tools.
     #[test]
-    fn an_untrusted_task_is_refused_on_a_full_cli_until_the_observation_lands() {
-        let full = store_with_cli("full", CliKind::ClaudeCode, "2.1.289", claude_caps());
-        let builder = command_builder(None, full);
-        let sandbox = run_sandbox("full");
+    fn a_user_task_on_a_full_cli_carries_its_pinned_lockdown() {
+        let full = store_with_cli("pinned", CliKind::ClaudeCode, "2.1.289", claude_caps());
+        let builder = command_builder(None);
+        let sandbox = run_sandbox("pinned");
 
-        let mut untrusted = task("claude_code");
-        untrusted.prompt = "extract the offers".to_string();
-        let spec = builder(&untrusted, &sandbox);
-        assert!(
-            spec.program.to_string_lossy().contains("boba-refused-"),
-            "an untrusted task ran without the observation: {spec:?}"
-        );
-
-        // The user's own input does run there, with its lockdown pinned: only
-        // our MCP server, and only that task's own tools.
         let user = task_of(
             "claude_code",
             boba_app::ports::agent::AgentTaskKind::ProfileImport,
             InputTrust::User,
         );
         let spec = builder(&user, &sandbox);
-        assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
+
+        // The gate is what allows it; the argv is what pins it.
+        assert!(task_gate(full)(&user).is_supported());
         assert_eq!(spec.args[0], "--mcp-config");
         assert_eq!(spec.args[1], sandbox.config.display().to_string());
         assert!(
@@ -715,10 +748,7 @@ mod tests {
     /// P1: no sidecar means no tools, so no run may start.
     #[test]
     fn a_missing_shim_refuses_every_run() {
-        let builder = command_builder(
-            Some("the boba-mcp sidecar is missing".to_string()),
-            store("no-shim-store"),
-        );
+        let builder = command_builder(Some("the boba-mcp sidecar is missing".to_string()));
         let sandbox = run_sandbox("no-shim");
 
         for task in [
@@ -739,7 +769,7 @@ mod tests {
 
     #[test]
     fn a_prompt_that_could_be_an_option_is_refused() {
-        let builder = command_builder(None, store("dash-prompt-store"));
+        let builder = command_builder(None);
         let sandbox = run_sandbox("dash-prompt");
         let mut hostile = task_of(
             "claude_code",
@@ -754,7 +784,7 @@ mod tests {
 
     #[test]
     fn a_cli_without_wired_argv_fails_fast_instead_of_guessing() {
-        let builder = command_builder(None, store("no-argv"));
+        let builder = command_builder(None);
         for cli in ["codex", "opencode", "aider"] {
             let sandbox = run_sandbox(&format!("unsupported-{cli}"));
             let trusted = task_of(

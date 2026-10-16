@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use boba_agent::lockdown::TaskSupport;
 use boba_agent::runtime::{AgentRuntime, RunSpec, classify_failure};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{
@@ -58,6 +59,14 @@ fn spec(env: &[(&str, &str)]) -> RunSpec {
                 .collect(),
         },
     }
+}
+
+/// This suite drives the runtime and the supervisor, not ADR-010's gate, so it
+/// mounts one that allows the task it runs. Without a gate a task that reads
+/// third-party content is refused (S2.3b), which is not what these tests are
+/// about.
+fn runtime(repo: Arc<FakeRepo>) -> AgentRuntime<FakeRepo> {
+    AgentRuntime::new(repo).with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
 }
 
 fn task(budget: RunBudget) -> AgentTask {
@@ -175,7 +184,7 @@ fn run_persists_and_emits_events_attributed_to_cli_and_model() {
     let repo = Arc::new(FakeRepo::default());
     let emitted = Arc::new(Mutex::new(Vec::<(String, i64, AgentEvent)>::new()));
     let sink = Arc::clone(&emitted);
-    let runtime = AgentRuntime::new(Arc::clone(&repo)).with_emitter(Arc::new(
+    let runtime = runtime(Arc::clone(&repo)).with_emitter(Arc::new(
         move |run_id: &str, seq: i64, event: &AgentEvent| {
             sink.lock()
                 .unwrap()
@@ -231,7 +240,7 @@ fn run_persists_and_emits_events_attributed_to_cli_and_model() {
 #[test]
 fn timeout_kills_the_process_tree() {
     let repo = Arc::new(FakeRepo::default());
-    let runtime = AgentRuntime::new(Arc::clone(&repo));
+    let runtime = runtime(Arc::clone(&repo));
     let budget = RunBudget {
         wall_clock: Some(Duration::from_millis(200)),
         ..RunBudget::default()
@@ -261,7 +270,7 @@ fn timeout_kills_the_process_tree() {
 #[test]
 fn cancellation_kills_and_records_cancelled() {
     let repo = Arc::new(FakeRepo::default());
-    let runtime = AgentRuntime::new(Arc::clone(&repo));
+    let runtime = runtime(Arc::clone(&repo));
     let handle = runtime.start(
         task(RunBudget::default()),
         spec(&[("BOBA_FAKE_MODE", "spawn-child")]),
@@ -288,7 +297,7 @@ fn cancellation_kills_and_records_cancelled() {
 #[test]
 fn tool_call_limit_fails_with_limit_exceeded() {
     let repo = Arc::new(FakeRepo::default());
-    let runtime = AgentRuntime::new(Arc::clone(&repo));
+    let runtime = runtime(Arc::clone(&repo));
     let lines = [
         r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
         r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
@@ -324,7 +333,7 @@ fn tool_call_limit_fails_with_limit_exceeded() {
 #[test]
 fn auth_error_classifies_and_pauses_ai() {
     let repo = Arc::new(FakeRepo::default());
-    let runtime = AgentRuntime::new(Arc::clone(&repo));
+    let runtime = runtime(Arc::clone(&repo));
     let handle = runtime.start(
         task(RunBudget::default()),
         spec(&[("BOBA_FAKE_MODE", "fail-auth")]),
