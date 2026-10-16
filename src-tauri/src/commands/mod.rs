@@ -8,6 +8,7 @@ pub mod agent;
 pub mod email;
 pub mod ingest;
 pub mod offers;
+pub mod preferences;
 pub mod profile;
 pub mod sources;
 pub mod studio;

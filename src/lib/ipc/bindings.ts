@@ -27,6 +27,14 @@ export const commands = {
     typedError<ProfileSnapshot, AppError_Serialize>(
       __TAURI_INVOKE("profile_restore", { itemId, revisionId }),
     ),
+  /**  The current preferences, version and staleness (AC1/AC2). */
+  preferencesSnapshot: () =>
+    typedError<PreferencesSnapshot, AppError_Serialize>(__TAURI_INVOKE("preferences_snapshot")),
+  /**  Save the preferences step or the Settings page (AC1/AC2, FR-14). */
+  preferencesSave: (values: Preferences) =>
+    typedError<PreferencesSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("preferences_save", { values }),
+    ),
 };
 
 /** Events */
@@ -152,6 +160,37 @@ export type FactView = {
   from_agent_run: boolean;
 };
 
+/**  Salary period (AD-17). */
+export type MoneyPeriod = "year" | "month" | "hour";
+
+/**  Everything the user can edit (FR-7). */
+export type Preferences = {
+  roles: string[];
+  seniority_min: Seniority | null;
+  seniority_max: Seniority | null;
+  salary_floor: SalaryFloor | null;
+  locations: string[];
+  timezone_window: TimezoneWindow;
+  work_modes: WorkModes;
+  /**  BCP-47 languages I work in (AD-17). */
+  working_languages: string[];
+  deal_breaker_keywords: string[];
+  deal_breaker_notes: string;
+  excluded_companies: string[];
+};
+
+/**
+ *  The preferences document plus its version and staleness (FR-14). The same
+ *  shape is stored as JSON and sent over IPC, so the two can never drift.
+ */
+export type PreferencesSnapshot = {
+  /**  Bumped by every change. */
+  version: number;
+  values: Preferences;
+  /**  True until a re-score consumed this version (FR-14). */
+  scores_stale: boolean;
+};
+
 /**  The whole Profile screen in one read (AC1/AC2). */
 export type ProfileSnapshot = {
   /**  The current profile version (AC3). */
@@ -161,6 +200,27 @@ export type ProfileSnapshot = {
   /**  Facts an agent proposed that the user has not confirmed yet (S3.5). */
   pending_proposals: number;
 };
+
+/**  Whether the salary floor excludes Offers or only lowers their score (FR-7). */
+export type SalaryFirmness = "hard" | "soft";
+
+/**  The salary floor, in the AD-17 money shape. */
+export type SalaryFloor = {
+  /**
+   *  Integer minor units (AD-17); still an i64 on the wire and in the DB.
+   *  Exported as a TypeScript `number` because specta refuses BigInt-style
+   *  types over IPC: minor amounts stay far below 2^53, so no precision is
+   *  lost — a float here is impossible either way.
+   */
+  amount_minor: number;
+  /**  ISO-4217, upper case. */
+  currency: string;
+  period: MoneyPeriod;
+  firmness: SalaryFirmness;
+};
+
+/**  Target seniority (FR-7). */
+export type Seniority = "intern" | "junior" | "mid" | "senior" | "lead" | "principal";
 
 /**  Terminal event for a long task, emitted as `task.finished`. */
 export type TaskFinished = {
@@ -195,6 +255,19 @@ export type TaskProgressed = {
   total: number | null;
   /**  Optional i18n key describing the current step (never raw prose). */
   message_key: string | null;
+};
+
+/**  Hours the user is reachable, local time (FR-7). */
+export type TimezoneWindow = {
+  from: number;
+  to: number;
+};
+
+/**  Work modes the user accepts at all (FR-7). */
+export type WorkModes = {
+  remote: boolean;
+  hybrid: boolean;
+  onsite: boolean;
 };
 
 /* Tauri Specta runtime */

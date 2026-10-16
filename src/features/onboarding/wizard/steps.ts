@@ -1,4 +1,5 @@
 import LanguageStep from "../steps/language";
+import PreferencesStep from "../steps/preferences";
 import type { WizardStep } from "./machine";
 
 /**
@@ -8,4 +9,5 @@ import type { WizardStep } from "./machine";
  */
 export const WIZARD_STEPS: WizardStep[] = [
   { id: "language", titleKey: "onboarding:steps.language.title", Component: LanguageStep },
+  { id: "preferences", titleKey: "preferences:step.title", Component: PreferencesStep },
 ];
