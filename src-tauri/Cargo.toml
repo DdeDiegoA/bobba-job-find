@@ -35,6 +35,8 @@ boba-store = { path = "crates/boba-store" }
 # Composition root (CH5, ADR-012): the agent runtime is built and mounted here.
 boba-agent = { path = "crates/boba-agent" }
 boba-mcp-proto = { path = "crates/boba-mcp-proto" }
+# Email connections (S8.1): the Graph/OAuth adapter is mounted as a port here.
+boba-mail = { path = "crates/boba-mail" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -104,6 +104,14 @@ dirs = "7.0"
 sys-locale = "0.3"
 rmcp = "3.5"
 
+# --- OAuth (S8.1) ---
+# PKCE S256 needs SHA-256 and base64url; `url` builds and parses the loopback
+# redirect. All three were already in the lock (transitively), so pinning them
+# here adds no crate and no version.
+sha2 = "0.10"
+base64 = "0.22"
+url = { version = "2.5", default-features = false }
+
 # --- Documents / AV / mail ---
 typst = "0.15"
 typst-pdf = "0.15"
