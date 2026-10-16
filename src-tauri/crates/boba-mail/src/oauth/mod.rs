@@ -127,11 +127,30 @@ impl ProviderEndpoints {
         }
     }
 
-    /// The endpoints for a provider; `None` until its slice lands (S8.2).
+    /// Google's endpoints for a public installed-app client (S8.2).
+    ///
+    /// A desktop client is a public client: the flow is PKCE plus loopback, never
+    /// a confidential secret. Google does insist on the `client_secret` its
+    /// console issues for a "Desktop app" client at the token endpoint — its own
+    /// docs call that value "obviously not treated as a secret" — so it travels
+    /// with the token request only ([`refresh_tokens_with_client_secret`]); it
+    /// never reaches the authorisation URL or the API.
+    pub fn gmail() -> Self {
+        Self {
+            api_base: "https://gmail.googleapis.com/gmail/v1".to_string(),
+            authorize: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
+            token: "https://oauth2.googleapis.com/token".to_string(),
+            revoke: Some("https://oauth2.googleapis.com/revoke".to_string()),
+        }
+    }
+
+    /// The endpoints for a provider; `None` for a provider without OAuth (S8.3
+    /// syncs IMAP through `boba_mail::imap` instead).
     pub fn for_provider(provider: MailProvider) -> Option<Self> {
         match provider {
             MailProvider::MicrosoftGraph => Some(Self::microsoft_graph()),
-            MailProvider::Gmail | MailProvider::ImapSmtp => None,
+            MailProvider::Gmail => Some(Self::gmail()),
+            MailProvider::ImapSmtp => None,
         }
     }
 }
@@ -224,6 +243,9 @@ impl FlowState {
 pub struct PendingFlow {
     endpoints: ProviderEndpoints,
     client_id: String,
+    /// Google's public installed-app client secret, when the provider requires
+    /// it at the token endpoint (S8.2). Never sent in the authorisation URL.
+    client_secret: Option<String>,
     redirect_uri: String,
     scopes: Vec<String>,
     pkce: Pkce,
@@ -246,11 +268,19 @@ impl PendingFlow {
         Ok(Self {
             endpoints,
             client_id,
+            client_secret: None,
             redirect_uri: redirect_uri.into(),
             scopes: scopes.iter().map(|s| (*s).to_string()).collect(),
             pkce: Pkce::generate()?,
             state: FlowState::generate()?,
         })
+    }
+
+    /// Attach the public installed-app client secret the provider requires at its
+    /// token endpoint (Google; see [`ProviderEndpoints::gmail`]).
+    pub fn with_client_secret(mut self, secret: impl Into<String>) -> Self {
+        self.client_secret = Some(secret.into());
+        self
     }
 
     /// The endpoints this flow talks to.
@@ -290,6 +320,7 @@ impl PendingFlow {
             http,
             &self.endpoints,
             &self.client_id,
+            self.client_secret.as_deref(),
             &self.redirect_uri,
             code,
             self.pkce.verifier(),
@@ -458,21 +489,29 @@ impl TokenSet {
 }
 
 /// Exchange an authorisation code for tokens (RFC 6749 §4.1.3, PKCE §4.5).
+///
+/// `client_secret` is the public installed-app value Google requires at its token
+/// endpoint; `None` is the Microsoft shape (a public client with no secret at
+/// all).
 pub async fn exchange_code(
     http: &reqwest::Client,
     endpoints: &ProviderEndpoints,
     client_id: &str,
+    client_secret: Option<&str>,
     redirect_uri: &str,
     code: &str,
     verifier: &str,
 ) -> Result<TokenResponse, OAuthError> {
-    let form = [
+    let mut form = vec![
         ("client_id", client_id),
         ("grant_type", "authorization_code"),
         ("code", code),
         ("redirect_uri", redirect_uri),
         ("code_verifier", verifier),
     ];
+    if let Some(secret) = client_secret {
+        form.push(("client_secret", secret));
+    }
     token_request(http, &endpoints.token, &form).await
 }
 
@@ -486,6 +525,28 @@ pub async fn refresh_tokens(
 ) -> Result<TokenResponse, OAuthError> {
     let form = [
         ("client_id", client_id),
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+    ];
+    token_request(http, &endpoints.token, &form).await
+}
+
+/// Renew an access token at a provider that requires its public installed-app
+/// client secret in the request (Google, see [`ProviderEndpoints::gmail`]).
+///
+/// The secret is the one printed for the client id at registration time; Google
+/// states it is not confidential. It is sent to the token endpoint and nowhere
+/// else.
+pub async fn refresh_tokens_with_client_secret(
+    http: &reqwest::Client,
+    endpoints: &ProviderEndpoints,
+    client_id: &str,
+    client_secret: &str,
+    refresh_token: &str,
+) -> Result<TokenResponse, OAuthError> {
+    let form = [
+        ("client_id", client_id),
+        ("client_secret", client_secret),
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
     ];
@@ -577,6 +638,11 @@ mod tests {
             &["Mail.Send", "Mail.Read"],
         )
         .expect("flow")
+    }
+
+    /// The pending `state` of a flow (the flow keeps it private).
+    fn flow_state(flow: &PendingFlow) -> String {
+        flow.state.token.clone()
     }
 
     fn callback(state: &str) -> CallbackQuery {
@@ -844,12 +910,68 @@ mod tests {
     }
 
     #[test]
-    fn only_graph_has_endpoints_in_this_slice() {
+    fn every_oauth_provider_has_endpoints_and_imap_has_none() {
         assert!(ProviderEndpoints::for_provider(MailProvider::MicrosoftGraph).is_some());
-        assert!(ProviderEndpoints::for_provider(MailProvider::Gmail).is_none());
+        // S8.2: the Gmail send flow shares this flow (loopback, PKCE S256,
+        // single-use state) with Google's endpoints.
+        assert_eq!(
+            ProviderEndpoints::for_provider(MailProvider::Gmail),
+            Some(ProviderEndpoints::gmail())
+        );
         assert!(ProviderEndpoints::for_provider(MailProvider::ImapSmtp).is_none());
         // AC4: Graph has no revocation endpoint, so revocation is local only.
         assert_eq!(ProviderEndpoints::microsoft_graph().revoke, None);
+        // Google has one, so Disconnect revokes there too.
+        assert_eq!(
+            ProviderEndpoints::gmail().revoke.as_deref(),
+            Some("https://oauth2.googleapis.com/revoke")
+        );
+    }
+
+    /// The Gmail shape differs from Graph's in exactly one place: Google insists
+    /// on its public installed-app secret at the token endpoint (S8.2).
+    #[tokio::test]
+    async fn the_installed_app_secret_is_sent_only_to_the_token_endpoint() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("client_secret=public-app-value"))
+            .and(body_string_contains("grant_type=authorization_code"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "at",
+                "refresh_token": "rt",
+                "expires_in": 3600
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut flow = PendingFlow::new(
+            endpoints(&server.uri()),
+            "client-1",
+            "http://127.0.0.1:49152/cb",
+            &["https://www.googleapis.com/auth/gmail.send"],
+        )
+        .expect("flow")
+        .with_client_secret("public-app-value");
+        // Nothing about the secret leaks into the authorisation URL...
+        assert!(
+            !flow
+                .authorize_url()
+                .expect("url")
+                .contains("public-app-value")
+        );
+        // ...and the tokens still carry only what the provider granted.
+        let code = {
+            let state = flow_state(&flow);
+            flow.take_callback(&callback(&state), Instant::now())
+                .expect("code")
+        };
+        let tokens = flow
+            .exchange(&reqwest::Client::new(), &code)
+            .await
+            .expect("exchange");
+        assert_eq!(tokens.access_token, "at");
     }
 
     // --- Token endpoint (AC1/AC4) -------------------------------------------
@@ -878,6 +1000,7 @@ mod tests {
             &reqwest::Client::new(),
             &endpoints(&server.uri()),
             "client-1",
+            None,
             "http://127.0.0.1:49152/cb",
             "the-code",
             "the-verifier",
@@ -909,6 +1032,7 @@ mod tests {
             &reqwest::Client::new(),
             &endpoints(&server.uri()),
             "client-1",
+            None,
             "http://127.0.0.1:49152/cb",
             "stale-code",
             "the-verifier",
@@ -983,6 +1107,7 @@ mod tests {
             &reqwest::Client::new(),
             &endpoints,
             "client-1",
+            None,
             "http://127.0.0.1:49152/cb",
             "the-code",
             "the-verifier",

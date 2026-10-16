@@ -32,5 +32,15 @@
   "troubleshoot": "Boba only accepts the reply on your own machine (127.0.0.1), in the browser window it opened. If that window was closed or blocked, try again — or connect with your own client ID, or use IMAP.",
   "provider.microsoft_graph": "Outlook / Microsoft 365",
   "provider.gmail": "Gmail",
-  "provider.imap_smtp": "IMAP / SMTP"
+  "provider.imap_smtp": "IMAP / SMTP",
+  "gmail.title": "Gmail",
+  "gmail.description": "Boba sends you to Google to sign in. It never sees your password, and it asks only for the access below.",
+  "gmail.address.placeholder": "you@gmail.com",
+  "gmail.scopes.heading": "Google will ask you to allow",
+  "gmail.send_only": "Sending only: Boba never reads your Gmail through this client. Reading Gmail uses IMAP or your own Google client.",
+  "gmail.connect": "Connect Gmail",
+  "scopes.gmail.send": "Send mail as you — nothing else",
+  "client_secret": "Advanced: your client secret",
+  "client_secret.placeholder": "GOCSPX-…",
+  "client_secret.hint": "Google prints this next to your client ID and requires it when Boba renews access. It is not confidential."
 }

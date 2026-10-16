@@ -17,6 +17,9 @@ use boba_app::ports::repo::email::{
 };
 use boba_app::ports::secret::SecretPort;
 use boba_app::system::SystemClock;
+use boba_mail::gmail::{
+    self, BUNDLED_GMAIL_CLIENT_ID, BUNDLED_GMAIL_CLIENT_SECRET, GMAIL_SEND_SCOPE, GmailSecret,
+};
 use boba_mail::oauth::{
     self, BUNDLED_GRAPH_CLIENT_ID, OAuthError as FlowError, PendingFlow, ProviderEndpoints,
     STATE_TTL, TokenSet, loopback,
@@ -193,21 +196,13 @@ pub async fn email_connect_outlook(
     let accounts = wiring::port::<dyn EmailRepo>(&app)?;
     let secrets = wiring::port::<dyn SecretPort>(&app)?;
 
-    let address = input.address.trim().to_string();
-    if address.is_empty() || !address.contains('@') {
-        return Err(EmailFailure::Address.into());
-    }
-
+    let address = mailbox_address(&input.address)?;
     // AC1: Boba's bundled public client, or the user's own client id.
-    let (client_id, client_id_kind) = match input.client_id.as_deref().map(str::trim) {
-        Some(id) if !id.is_empty() => (id.to_string(), ClientIdKind::Byo),
-        _ => match BUNDLED_GRAPH_CLIENT_ID {
-            Some(id) => (id.to_string(), ClientIdKind::Bundled),
-            None => {
-                return Err(EmailFailure::NoBundledClient.into());
-            }
-        },
-    };
+    let (client_id, client_id_kind) = bundled_or_byo(
+        input.client_id.as_deref(),
+        BUNDLED_GRAPH_CLIENT_ID,
+        EmailFailure::NoBundledClient,
+    )?;
 
     // The mode's mail scopes, plus the standard scope that asks for a refresh
     // token — without it the connection dies when the access token expires and
@@ -217,15 +212,157 @@ pub async fn email_connect_outlook(
 
     let endpoints = ProviderEndpoints::microsoft_graph();
     let (listener, redirect_uri) = loopback::bind().map_err(EmailFailure::from)?;
-    let mut flow = PendingFlow::new(
+    let flow = PendingFlow::new(
         endpoints.clone(),
         client_id.clone(),
-        redirect_uri.clone(),
+        redirect_uri,
         &requested,
     )
     .map_err(EmailFailure::from)?;
+    let tokens = finish_flow(&app, flow, listener).await?;
 
-    open_in_browser(&app, &flow.authorize_url().map_err(EmailFailure::from)?)?;
+    // AC1/FR-40: the tokens go to the keychain, addressed by an opaque
+    // reference; the row keeps the reference and the granted scopes only.
+    let account = connection_row(
+        accounts.as_ref(),
+        MailProvider::MicrosoftGraph,
+        address,
+        input.mode,
+        client_id,
+        client_id_kind,
+        tokens.scopes.clone(),
+    )?;
+    secrets
+        .put(&account.secret_ref, &tokens.to_json())
+        .map_err(|_| EmailFailure::Keychain)?;
+    accounts
+        .upsert_account(&account)
+        .map_err(EmailFailure::Store)?;
+    Ok(ConnectionView::from(account))
+}
+
+/// The Connect Gmail form: the address, and an optional BYO client id with its
+/// public installed-app secret (AC1).
+#[derive(Debug, Clone, Deserialize, Type)]
+pub struct ConnectGmailInput {
+    /// The mailbox address, as typed by the user. Boba never asks for a
+    /// `gmail.readonly` scope to guess it (NFR-5).
+    pub address: String,
+    /// The user's own Google client id, when they have one ("advanced").
+    pub client_id: Option<String>,
+    /// The public value Google prints next to that client id. Not confidential by
+    /// Google's own documentation, and required at the token endpoint.
+    pub client_secret: Option<String>,
+}
+
+/// Connect Gmail with delegated OAuth (AC1).
+///
+/// Same loopback flow as Outlook (PKCE `S256`, single-use `state`, loopback-only),
+/// with one deliberate difference: the requested scope is `gmail.send` and nothing
+/// else. Boba's bundled client cannot read Gmail — reading is IMAP (S8.3), a BYO
+/// client (S8.5) or a `.eml` import — so the connection is stored send-only and
+/// `covers(ReadSend)` stays false.
+#[tauri::command]
+#[specta::specta]
+pub async fn email_connect_gmail(
+    app: tauri::AppHandle,
+    input: ConnectGmailInput,
+) -> AppResult<ConnectionView> {
+    let accounts = wiring::port::<dyn EmailRepo>(&app)?;
+    let secrets = wiring::port::<dyn SecretPort>(&app)?;
+
+    let address = mailbox_address(&input.address)?;
+    let byo_id = input
+        .client_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    let (client_id, client_id_kind) = bundled_or_byo(
+        byo_id,
+        BUNDLED_GMAIL_CLIENT_ID,
+        EmailFailure::NoBundledClient,
+    )?;
+    // Google demands the public installed-app secret at its token endpoint: the
+    // user's own when they brought a client, Boba's otherwise. It is not a
+    // confidential secret and never reaches the authorisation URL.
+    let client_secret = match client_id_kind {
+        ClientIdKind::Byo => input
+            .client_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string),
+        ClientIdKind::Bundled => BUNDLED_GMAIL_CLIENT_SECRET.map(str::to_string),
+    };
+
+    let (listener, redirect_uri) = loopback::bind().map_err(EmailFailure::from)?;
+    let mut flow = PendingFlow::new(
+        gmail::endpoints(),
+        client_id.clone(),
+        redirect_uri,
+        &[GMAIL_SEND_SCOPE],
+    )
+    .map_err(EmailFailure::from)?;
+    if let Some(secret) = &client_secret {
+        flow = flow.with_client_secret(secret.clone());
+    }
+    let tokens = finish_flow(&app, flow, listener).await?;
+
+    let account = connection_row(
+        accounts.as_ref(),
+        MailProvider::Gmail,
+        address,
+        EmailMode::SendOnly,
+        client_id,
+        client_id_kind,
+        tokens.scopes.clone(),
+    )?;
+    let stored = GmailSecret {
+        tokens: tokens.clone(),
+        client_secret,
+    };
+    secrets
+        .put(&account.secret_ref, &stored.to_json())
+        .map_err(|_| EmailFailure::Keychain)?;
+    accounts
+        .upsert_account(&account)
+        .map_err(EmailFailure::Store)?;
+    Ok(ConnectionView::from(account))
+}
+
+/// A typed mailbox address, or the error the UI shows.
+fn mailbox_address(address: &str) -> Result<String, EmailFailure> {
+    let address = address.trim().to_string();
+    if address.is_empty() || !address.contains('@') {
+        return Err(EmailFailure::Address);
+    }
+    Ok(address)
+}
+
+/// Boba's bundled public client id, or the user's own (AC1).
+fn bundled_or_byo(
+    byo: Option<&str>,
+    bundled: Option<&str>,
+    missing: EmailFailure,
+) -> Result<(String, ClientIdKind), EmailFailure> {
+    match byo {
+        Some(id) if !id.is_empty() => Ok((id.to_string(), ClientIdKind::Byo)),
+        _ => match bundled {
+            Some(id) => Ok((id.to_string(), ClientIdKind::Bundled)),
+            None => Err(missing),
+        },
+    }
+}
+
+/// Drive one loopback authorisation to tokens (AC1, AC2): open the user's browser
+/// and take the single callback. The PKCE verifier and the `state` never leave the
+/// flow, so the UI cannot re-implement the security-critical part differently.
+async fn finish_flow(
+    app: &tauri::AppHandle,
+    mut flow: PendingFlow,
+    listener: std::net::TcpListener,
+) -> Result<TokenSet, EmailFailure> {
+    open_in_browser(app, &flow.authorize_url().map_err(EmailFailure::from)?)?;
 
     // The listener accepts exactly one callback and closes (AC2). It runs on a
     // blocking thread so the flow's own deadline is the only wait.
@@ -239,7 +376,7 @@ pub async fn email_connect_outlook(
     let code = flow
         .take_callback(&callback, std::time::Instant::now())
         .map_err(EmailFailure::from)?;
-    let scopes: Vec<String> = flow.scopes().to_vec();
+    let scopes = flow.scopes().to_vec();
 
     let http = oauth::http_client().map_err(EmailFailure::from)?;
     // The code is exchanged with the PKCE verifier, which stays inside the flow.
@@ -247,38 +384,41 @@ pub async fn email_connect_outlook(
         .exchange(&http, &code)
         .await
         .map_err(EmailFailure::from)?;
+    Ok(TokenSet::new(&response, &scopes))
+}
 
-    // AC1/FR-40: the tokens go to the keychain, addressed by an opaque
-    // reference; the row keeps the reference and the granted scopes only.
+/// The row for one authorised connection.
+///
+/// Reconnects replace the connection for the same mailbox instead of adding a
+/// duplicate, and the timestamps are the store's (AD-16).
+fn connection_row(
+    accounts: &dyn EmailRepo,
+    provider: MailProvider,
+    address: String,
+    mode: EmailMode,
+    client_id: String,
+    client_id_kind: ClientIdKind,
+    scopes: Vec<String>,
+) -> Result<EmailAccount, EmailFailure> {
     let now = SystemClock.now_rfc3339();
     let existing = accounts
-        .find_account(MailProvider::MicrosoftGraph, &address)
+        .find_account(provider, &address)
         .map_err(EmailFailure::Store)?;
     let id = existing
         .as_ref()
         .map_or_else(boba_store::repos::email::new_account_id, |a| a.id.clone());
-    let secret_ref = format!("mail:{id}");
-    let tokens = TokenSet::new(&response, &scopes);
-    secrets
-        .put(&secret_ref, &tokens.to_json())
-        .map_err(|_| EmailFailure::Keychain)?;
-
-    let account = EmailAccount {
+    Ok(EmailAccount {
+        secret_ref: format!("mail:{id}"),
         id,
-        provider: MailProvider::MicrosoftGraph,
+        provider,
         address,
-        mode: input.mode,
+        mode,
         client_id,
         client_id_kind,
-        scopes: tokens.scopes,
-        secret_ref,
+        scopes,
         connected_at: existing.map_or_else(|| now.clone(), |a| a.connected_at),
         updated_at: now,
-    };
-    accounts
-        .upsert_account(&account)
-        .map_err(EmailFailure::Store)?;
-    Ok(ConnectionView::from(account))
+    })
 }
 
 /// Switch a connection between send-only and read+send (AC3).
@@ -369,7 +509,7 @@ async fn revoke_tokens(
     let Ok(Some(stored)) = secrets.get(&account.secret_ref) else {
         return Ok(());
     };
-    let Ok(tokens) = TokenSet::from_json(&stored) else {
+    let Some(tokens) = stored_tokens(account.provider, &stored) else {
         return Ok(());
     };
 
@@ -387,11 +527,23 @@ async fn revoke_tokens(
 }
 
 /// Open the authorisation URL in the user's own browser, never in a webview.
-fn open_in_browser(app: &tauri::AppHandle, url: &str) -> AppResult<()> {
+fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), EmailFailure> {
     use tauri_plugin_opener::OpenerExt as _;
     app.opener()
         .open_url(url.to_string(), None::<&str>)
-        .map_err(|_| EmailFailure::Browser.into())
+        .map_err(|_| EmailFailure::Browser)
+}
+
+/// The tokens one connection's keychain entry holds, whatever else it carries
+/// (S8.1 stores a Graph token set, S8.2 a Gmail entry with the public client
+/// secret next to it). An entry of an unknown shape is "nothing to revoke".
+fn stored_tokens(provider: MailProvider, stored: &str) -> Option<TokenSet> {
+    match provider {
+        MailProvider::Gmail => GmailSecret::from_json(stored)
+            .ok()
+            .map(|entry| entry.tokens),
+        MailProvider::MicrosoftGraph | MailProvider::ImapSmtp => TokenSet::from_json(stored).ok(),
+    }
 }
 
 #[cfg(test)]

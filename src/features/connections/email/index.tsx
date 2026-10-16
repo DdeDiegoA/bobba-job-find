@@ -6,7 +6,9 @@ import type { ConnectionView, EmailMode, MailProvider } from "@/lib/ipc/bindings
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import {
+  GMAIL_SCOPES,
   SCOPES_BY_MODE,
+  useConnectGmail,
   useConnectOutlook,
   useDisconnectEmail,
   useEmailAccounts,
@@ -35,6 +37,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "Mail.Read": "connections_email:scopes.Mail.Read",
   "Mail.Send": "connections_email:scopes.Mail.Send",
   offline_access: "connections_email:scopes.offline_access",
+  "https://www.googleapis.com/auth/gmail.send": "connections_email:scopes.gmail.send",
 };
 
 const PROVIDER_LABELS: Record<MailProvider, string> = {
@@ -44,11 +47,11 @@ const PROVIDER_LABELS: Record<MailProvider, string> = {
 };
 
 /** The plain-language list of what Boba asks the provider for (AC1). */
-function ScopeList({ mode }: { mode: EmailMode }) {
+function ScopeList({ scopes }: { scopes: string[] }) {
   const { t } = useTranslation("connections_email");
   return (
     <ul className="flex flex-col gap-1 text-sm text-fg-muted">
-      {SCOPES_BY_MODE[mode].map((scope) => (
+      {scopes.map((scope) => (
         <li key={scope}>{t(SCOPE_LABELS[scope] ?? scope)}</li>
       ))}
     </ul>
@@ -108,7 +111,8 @@ function ConnectedMailbox({ account }: { account: ConnectionView }) {
 
       <div className="flex flex-col gap-1">
         <span className="text-sm text-fg-muted">{t("list.scopes")}</span>
-        <ScopeList mode={account.mode} />
+        {/* What the provider actually granted, in plain language (AC1). */}
+        <ScopeList scopes={account.scopes} />
       </div>
 
       {confirming ? (
@@ -204,7 +208,7 @@ function ConnectOutlook() {
 
       <div className="rounded-xl bg-surface-muted p-3">
         <p className="text-sm font-medium text-fg">{t("scopes.heading")}</p>
-        <ScopeList mode={mode} />
+        <ScopeList scopes={SCOPES_BY_MODE[mode]} />
         <p className="mt-2 text-xs text-fg-subtle">{t("scopes.least")}</p>
       </div>
 
@@ -237,9 +241,100 @@ function ConnectOutlook() {
 }
 
 /**
- * Email connections (S8.1, EXPERIENCE §5). Connects Outlook through the
- * loopback OAuth flow, switches a connection between send-only and read+send,
- * and disconnects it.
+ * The Gmail connect form (S8.2, AC1): address, the single scope, and the
+ * advanced client id and public client secret.
+ *
+ * There is no mode switch here on purpose: Boba's bundled Google client asks for
+ * `gmail.send` only, so a Gmail connection is always send-only.
+ */
+function ConnectGmail() {
+  const { t } = useTranslation("connections_email");
+  const { t: tError } = useTranslation();
+  const connect = useConnectGmail();
+  const [address, setAddress] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+
+  const error = connect.error && isAppError(connect.error) ? connect.error : null;
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4"
+      aria-labelledby="email-connect-gmail-title"
+      onSubmit={(event) => {
+        event.preventDefault();
+        connect.mutate({
+          address: address.trim(),
+          client_id: clientId.trim() === "" ? null : clientId.trim(),
+          client_secret: clientSecret.trim() === "" ? null : clientSecret.trim(),
+        });
+      }}
+    >
+      <h2 id="email-connect-gmail-title" className="font-display text-lg text-fg">
+        {t("gmail.title")}
+      </h2>
+      <p className="text-sm text-fg-muted">{t("gmail.description")}</p>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("address")}
+        <input
+          type="email"
+          required
+          value={address}
+          placeholder={t("gmail.address.placeholder")}
+          onChange={(event) => setAddress(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+      </label>
+
+      <div className="rounded-xl bg-surface-muted p-3">
+        <p className="text-sm font-medium text-fg">{t("gmail.scopes.heading")}</p>
+        <ScopeList scopes={GMAIL_SCOPES} />
+        <p className="mt-2 text-xs text-fg-subtle">{t("gmail.send_only")}</p>
+      </div>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("client_id")}
+        <input
+          value={clientId}
+          placeholder={t("client_id.placeholder")}
+          onChange={(event) => setClientId(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <span className="text-xs text-fg-subtle">{t("client_id.hint")}</span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("client_secret")}
+        <input
+          value={clientSecret}
+          placeholder={t("client_secret.placeholder")}
+          onChange={(event) => setClientSecret(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <span className="text-xs text-fg-subtle">{t("client_secret.hint")}</span>
+      </label>
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" disabled={connect.isPending}>
+          {connect.isPending ? t("connecting") : t("gmail.connect")}
+        </Button>
+      </div>
+
+      {error ? (
+        <div role="alert" className="flex flex-col gap-1 text-sm text-danger">
+          <p>{renderAppError(error, tError)}</p>
+          <p className="text-fg-muted">{t("troubleshoot")}</p>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+/**
+ * Email connections (S8.1, S8.2, EXPERIENCE §5). Connects Outlook or Gmail
+ * through the loopback OAuth flow, switches a connection between send-only and
+ * read+send, and disconnects it.
  */
 export default function ConnectionsEmail() {
   const { t } = useTranslation("connections_email");
@@ -274,6 +369,7 @@ export default function ConnectionsEmail() {
 
       <div className={cn("flex flex-col gap-3", rows.length > 0 && "border-border border-t pt-4")}>
         <ConnectOutlook />
+        <ConnectGmail />
       </div>
     </section>
   );

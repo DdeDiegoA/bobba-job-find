@@ -51,6 +51,19 @@ export const commands = {
       __TAURI_INVOKE("email_connect_outlook", { input }),
     ),
   /**
+   *  Connect Gmail with delegated OAuth (AC1).
+   *
+   *  Same loopback flow as Outlook (PKCE `S256`, single-use `state`, loopback-only),
+   *  with one deliberate difference: the requested scope is `gmail.send` and nothing
+   *  else. Boba's bundled client cannot read Gmail — reading is IMAP (S8.3), a BYO
+   *  client (S8.5) or a `.eml` import — so the connection is stored send-only and
+   *  `covers(ReadSend)` stays false.
+   */
+  emailConnectGmail: (input: ConnectGmailInput) =>
+    typedError<ConnectionView, AppError_Serialize>(
+      __TAURI_INVOKE("email_connect_gmail", { input }),
+    ),
+  /**
    *  Switch a connection between send-only and read+send (AC3).
    *
    *  Reading is only switched on when the granted scopes cover it (NFR-5): a
@@ -200,6 +213,25 @@ export type ClientIdKind =
   | "bundled"
   /**  The user's own app registration (BYO client id). */
   | "byo";
+
+/**
+ *  The Connect Gmail form: the address, and an optional BYO client id with its
+ *  public installed-app secret (AC1).
+ */
+export type ConnectGmailInput = {
+  /**
+   *  The mailbox address, as typed by the user. Boba never asks for a
+   *  `gmail.readonly` scope to guess it (NFR-5).
+   */
+  address: string;
+  /**  The user's own Google client id, when they have one ("advanced"). */
+  client_id: string | null;
+  /**
+   *  The public value Google prints next to that client id. Not confidential by
+   *  Google's own documentation, and required at the token endpoint.
+   */
+  client_secret: string | null;
+};
 
 /**  The Connect Outlook form: address, mode, and an optional BYO client id (AC1). */
 export type ConnectOutlookInput = {
