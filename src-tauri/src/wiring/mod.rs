@@ -137,6 +137,12 @@ pub fn store_config(app: &AppHandle<impl Runtime>) -> Result<StoreConfig, String
 /// where every [`port`] lookup reports the typed Locked error. Callable again:
 /// that is how the unlock screen retries the keychain in the foreground (S1.2b).
 pub fn mount(app: &AppHandle<impl Runtime>) {
+    // Retrying while the store is open has nothing left to do, and opening it
+    // again would mount every port a second time (ADR-012 §3 panics).
+    if ports_mounted(app) {
+        return;
+    }
+
     // ADR-010 §4: a run that died without cleaning up (panic-abort, SIGKILL,
     // power loss) leaves its workspace and endpoint behind. Nothing is running
     // during setup, so everything under `runs/` and `ipc/` is a leftover and is
@@ -377,6 +383,23 @@ mod tests {
             store_state(app.handle()),
             StoreStatus::Locked { .. }
         ));
+    }
+
+    /// The keychain retry is a button, so it can be pressed late: with the store
+    /// already open it must do nothing rather than open and mount it twice.
+    #[test]
+    fn retrying_the_keychain_on_an_open_store_is_a_no_op() {
+        let app = mock_app();
+        let store = open_store();
+        adopt(app.handle(), &store);
+
+        super::mount(app.handle());
+
+        assert!(
+            port::<dyn SourcesRepo>(app.handle()).is_ok(),
+            "ports survive"
+        );
+        assert!(ports_mounted(app.handle()));
     }
 
     /// B1 (reviewer-4): after an idle expiry the ports are still mounted, so
