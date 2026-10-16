@@ -4,7 +4,8 @@
 -- One `posting` is one Offer in the normalised shape every later stage reads
 -- (ranking, tailoring, the tracker). Every source observation that produced or
 -- re-saw it is a row in `posting_source`, so dedup merges Offers and never
--- deletes provenance (AD-19).
+-- deletes provenance (AD-19). Re-seeing the same item on the same source
+-- refreshes its row rather than adding a copy.
 --
 -- Conventions from AD-17: ids are ULIDs (`pst_…`), timestamps are UTC RFC 3339
 -- text, money is `{amount_minor, currency, period}` (the three columns are all
@@ -16,8 +17,11 @@
 -- the S4.3 simhash read.
 --
 -- `dedup_key` / `simhash` are written by S4.3, which owns no migration of its
--- own; the columns and their index therefore live here (erD: architecture.md
+-- own; the columns and their index therefore live here (ERD: architecture.md
 -- §12). `requirements_json` is filled by S6.2's deterministic extraction.
+--
+-- `posted_at` / `deadline` are UTC RFC 3339 only (AD-17): normalisation drops a
+-- source date it cannot parse rather than storing one no consumer can read.
 CREATE TABLE posting (
     id                TEXT    PRIMARY KEY NOT NULL,
     source_id         TEXT    NOT NULL REFERENCES source (id) ON DELETE CASCADE,

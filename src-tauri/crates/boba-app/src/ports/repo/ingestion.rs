@@ -1,8 +1,10 @@
 //! `IngestionRepo` — owns `posting`, `posting_source`, `company`,
 //! `posting_features` (AD-16, AD-19). Adapter: `boba-store`.
 //!
-//! Writes are one posting plus its provenance atomically: dedup merges Offers,
-//! so a provenance row is appended, never rewritten (AD-19).
+//! Writes are one posting plus its provenance atomically. Dedup merges Offers
+//! into one posting with one provenance row per source, and re-seeing the same
+//! source item refreshes that row (its url, raw payload and fetch time) rather
+//! than adding a copy; a source's row is never deleted (AD-19).
 
 use boba_domain::posting::{Offer, Provenance};
 

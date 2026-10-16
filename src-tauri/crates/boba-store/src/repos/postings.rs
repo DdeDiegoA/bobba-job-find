@@ -3,9 +3,10 @@
 //!
 //! The store keeps the typed `boba_domain::posting` records; `locations` and
 //! `requirements` are stored as JSON text, and the enums as their `as_str`
-//! form, parsed back on read. Dedup merges Offers into one `posting` with N
-//! provenance rows, so a row is appended, never deleted (AD-19). `IngestionRepo`
-//! is implemented for [`Store`], which is `Send + Sync`.
+//! form, parsed back on read. Dedup merges Offers into one `posting` with one
+//! provenance row per source; a source's row is refreshed when that source is
+//! seen again and rows are never deleted (AD-19). `IngestionRepo` is implemented
+//! for [`Store`], which is `Send + Sync`.
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -129,8 +130,10 @@ pub fn insert_offer(
     Ok(())
 }
 
-/// Append (or refresh) one observation of a posting (AD-19: provenance is never
-/// rewritten or deleted — the same source observation is the same row).
+/// Write the row for one source's observation of a posting (AD-19). The key is
+/// `(posting, source, source id)`, so re-seeing the same item on the same source
+/// refreshes the row with the latest payload and fetch time instead of adding a
+/// copy. Rows of other sources are untouched, and nothing is ever deleted.
 fn insert_provenance(conn: &Connection, provenance: &Provenance) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO posting_source (posting_id, source_id, external_id, url, raw, fetched_at) \

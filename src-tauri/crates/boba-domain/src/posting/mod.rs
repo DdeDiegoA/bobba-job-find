@@ -61,11 +61,28 @@ impl Money {
     /// has no number at all; the currency defaults to USD and the period to a
     /// year, which is what boards mean when they say neither.
     pub fn parse(text: &str) -> Option<Self> {
-        let amount_minor = first_amount_minor(text)?;
+        Self::read(text, false)
+    }
+
+    /// Read money out of prose, such as a posting description. A bare number
+    /// there is usually not pay ("Founded in 2015"), so this asks for an
+    /// explicit marker — a currency code or symbol, or a pay period — before it
+    /// believes anything.
+    pub fn parse_hinted(text: &str) -> Option<Self> {
+        Self::read(text, true)
+    }
+
+    fn read(text: &str, needs_marker: bool) -> Option<Self> {
+        let currency = currency(text);
+        let period = period(text);
+        if needs_marker && currency.is_none() && period.is_none() {
+            return None;
+        }
         Some(Self {
-            amount_minor,
-            currency: currency(text),
-            period: period(text),
+            amount_minor: first_amount_minor(text)?,
+            // `$` is shared by USD/CAD/AUD/MXN; USD is the default (markets: FR-1).
+            currency: currency.unwrap_or_else(|| "USD".to_string()),
+            period: period.unwrap_or(PayPeriod::Year),
         })
     }
 }
@@ -93,9 +110,10 @@ fn first_amount_minor(text: &str) -> Option<i64> {
         let mut value: i64 = digits.parse().ok()?;
         // `50k` / `50K`: a thousands shorthand, never a year of `50`.
         if value < 1000 && matches!(chars.get(i), Some('k' | 'K')) {
-            value *= 1000;
+            value = value.checked_mul(1000)?;
         }
-        return Some(value * 100);
+        // Untrusted text: an 18-digit number would overflow minor units.
+        return value.checked_mul(100).filter(|minor| *minor > 0);
     }
     None
 }
@@ -111,7 +129,7 @@ fn is_group_separator(chars: &[char], i: usize) -> bool {
         && !rest.get(3).is_some_and(char::is_ascii_digit)
 }
 
-fn currency(text: &str) -> String {
+fn currency(text: &str) -> Option<String> {
     let upper = text.to_uppercase();
     let chars: Vec<char> = upper.chars().collect();
     for code in CURRENCY_CODES {
@@ -121,37 +139,57 @@ fn currency(text: &str) -> String {
             let after = chars.get(i + bytes.len());
             let bounded = |c: &char| !c.is_ascii_alphanumeric();
             if before.is_none_or(bounded) && after.is_none_or(bounded) {
-                return (*code).to_string();
+                return Some((*code).to_string());
             }
         }
     }
     if text.contains('€') {
-        "EUR".into()
+        Some("EUR".to_string())
     } else if text.contains('£') {
-        "GBP".into()
+        Some("GBP".to_string())
     } else if text.contains("R$") {
-        "BRL".into()
+        Some("BRL".to_string())
+    } else if text.contains('$') {
+        Some("USD".to_string())
     } else {
-        // `$` is shared by USD/CAD/AUD/MXN; USD is the default (markets: FR-1).
-        "USD".into()
+        None
     }
 }
 
-fn period(text: &str) -> PayPeriod {
+fn period(text: &str) -> Option<PayPeriod> {
     let lower = text.to_lowercase();
     // Spanish and English share these boards (FR-1); the keywords are ordered
-    // hour → month → year so `per hour` never reads as a year.
+    // hour → month → year so `per hour` never reads as a year. Month must stay
+    // before year: `mensual` contains `anual`.
     for keyword in ["hour", "hr", "por hora", "hora"] {
         if lower.contains(keyword) {
-            return PayPeriod::Hour;
+            return Some(PayPeriod::Hour);
         }
     }
     for keyword in ["month", "/mo", "mensual", "al mes", "por mes"] {
         if lower.contains(keyword) {
-            return PayPeriod::Month;
+            return Some(PayPeriod::Month);
         }
     }
-    PayPeriod::Year
+    for keyword in ["year", "annual", "annum", "año", "anual", "yr"] {
+        if lower.contains(keyword) {
+            return Some(PayPeriod::Year);
+        }
+    }
+    None
+}
+
+/// The UTC RFC 3339 form of a timestamp a source sent (AD-17), or `None` when
+/// it is not one. Sources are untrusted input: an offset is converted rather
+/// than stored, and a string no consumer could parse is dropped instead of
+/// poisoning the age and repost signals of S4.4.
+pub fn utc_rfc3339(value: &str) -> Option<String> {
+    let instant =
+        time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339).ok()?;
+    instant
+        .to_offset(time::UtcOffset::UTC)
+        .format(&time::format_description::well_known::Rfc3339)
+        .ok()
 }
 
 /// How the job is worked (FR-48). `Hybrid` is a later refinement: a source that
@@ -308,6 +346,48 @@ mod tests {
     fn money_is_none_without_a_number() {
         assert_eq!(Money::parse("Competitive salary"), None);
         assert_eq!(Money::parse(""), None);
+    }
+
+    #[test]
+    fn money_in_prose_needs_an_explicit_marker() {
+        // A description is full of numbers that are not pay (review finding 1).
+        assert_eq!(Money::parse_hinted("Founded in 2015, 40 engineers."), None);
+        assert_eq!(Money::parse_hinted("Team of 20 in Madrid."), None);
+        assert_eq!(Money::parse_hinted("Competitive salary"), None);
+
+        let euros = Money::parse_hinted("Compensation: 45.000 € al mes").unwrap();
+        assert_eq!(euros.currency, "EUR");
+        assert_eq!(euros.period, PayPeriod::Month);
+
+        let year = Money::parse_hinted("50,000 a year plus equity").unwrap();
+        assert_eq!(year.amount_minor, 5_000_000, "the year marker is enough");
+        assert_eq!(year.period, PayPeriod::Year);
+    }
+
+    #[test]
+    fn money_does_not_overflow_on_absurd_numbers() {
+        assert_eq!(Money::parse("USD 9999999999999999999 per year"), None);
+        assert_eq!(Money::parse("123456789012345678"), None, "18 digits * 100");
+        assert_eq!(
+            Money::parse_hinted("salary: $123456789012345678"),
+            None,
+            "untrusted text must not panic"
+        );
+    }
+
+    #[test]
+    fn posted_dates_are_normalised_to_utc_rfc3339() {
+        assert_eq!(
+            utc_rfc3339("2026-10-01T00:00:00Z").as_deref(),
+            Some("2026-10-01T00:00:00Z")
+        );
+        assert_eq!(
+            utc_rfc3339("2026-10-01T02:00:00+02:00").as_deref(),
+            Some("2026-10-01T00:00:00Z"),
+            "an offset is converted, not kept (AD-17)"
+        );
+        assert_eq!(utc_rfc3339("2026-10-01"), None, "a date is not a timestamp");
+        assert_eq!(utc_rfc3339("last Tuesday"), None);
     }
 
     #[test]

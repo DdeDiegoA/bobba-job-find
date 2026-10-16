@@ -11,7 +11,9 @@
 
 use std::sync::OnceLock;
 
-use boba_domain::posting::{ApplyHints, Money, Offer, Provenance, WorkMode, new_posting_id};
+use boba_domain::posting::{
+    ApplyHints, Money, Offer, Provenance, WorkMode, new_posting_id, utc_rfc3339,
+};
 use boba_domain::source::RawPosting;
 use html2text::render::TrivialDecorator;
 use lingua::{Language, LanguageDetector, LanguageDetectorBuilder};
@@ -35,11 +37,14 @@ pub fn normalize(raw: &RawPosting, source_id: &str, now: &str) -> (Offer, Proven
         .unwrap_or_default();
     let description_text = to_text(&description_html);
 
+    // A salary field is pay by definition; the description is prose, so it
+    // needs a currency or period marker before a number in it counts (a
+    // description says "Founded in 2015" far more often than it names pay).
     let money = raw
         .salary_text
         .as_deref()
         .and_then(Money::parse)
-        .or_else(|| Money::parse(&description_text));
+        .or_else(|| Money::parse_hinted(&description_text));
 
     let offer = Offer {
         id: id.clone(),
@@ -50,7 +55,9 @@ pub fn normalize(raw: &RawPosting, source_id: &str, now: &str) -> (Offer, Proven
         locations: clean_locations(&raw.locations),
         work_mode: WorkMode::from_remote(raw.remote),
         money,
-        posted_at: raw.posted_at.clone(),
+        // Only UTC RFC 3339 reaches the store (AD-17); a source that sends
+        // anything else contributes no date rather than a broken one.
+        posted_at: raw.posted_at.as_deref().and_then(utc_rfc3339),
         // Only a source that sends one gives a deadline; guessing it from the
         // description would fake the "possibly closed" signal of S4.4.
         deadline: None,
@@ -304,6 +311,29 @@ mod tests {
         let money = offer.money.expect("description carries the salary");
         assert_eq!(money.amount_minor, 4_500_000);
         assert_eq!(money.currency, "EUR");
+    }
+
+    #[test]
+    fn a_number_in_a_description_is_not_a_salary() {
+        let mut prose = raw();
+        prose.salary_text = None;
+        prose.description_html =
+            Some("<p>Founded in 2015, we are 40 engineers building APIs.</p>".into());
+
+        assert_eq!(normalize(&prose, "remotive", NOW).0.money, None);
+    }
+
+    #[test]
+    fn posted_dates_are_normalised_and_unparsable_ones_are_dropped() {
+        let mut dated = raw();
+        dated.posted_at = Some("2026-10-01T02:00:00+02:00".into());
+        assert_eq!(
+            normalize(&dated, "remotive", NOW).0.posted_at.as_deref(),
+            Some("2026-10-01T00:00:00Z")
+        );
+
+        dated.posted_at = Some("last Tuesday".into());
+        assert_eq!(normalize(&dated, "remotive", NOW).0.posted_at, None);
     }
 
     #[test]
