@@ -10,8 +10,16 @@
 //! security badge.
 //!
 //! The gate is a pure decision over evidence the driver probes (`--help`
-//! capabilities) and the version `--version` reported; the caller (the
+//! capabilities), the version `--version` reported, and whether the runtime has
+//! **observed** the locked-down CLI agree to the pinning. The caller (the
 //! composition root, which owns the `cli_install` row) enforces it.
+//!
+//! Ruling (c), orquestador 2026-10-16: no CLI is verified until the run-time
+//! observation ADR-010 §1 asks for exists (the CLI's init event listing only
+//! boba tools, wired in S2.4), so **no untrusted task is lifted yet** — the
+//! verdict takes [`LockdownConfirmation`] as an explicit input and the
+//! composition root passes [`LockdownConfirmation::NotObserved`] until S2.4
+//! supplies [`LockdownConfirmation::Observed`].
 
 use crate::drivers::{Capabilities, CliKind};
 use boba_app::ports::agent::AgentTaskKind;
@@ -39,6 +47,21 @@ pub enum Unverified {
     /// `tool_lockdown` is lost until the driver is updated (ADR-010 §1). The
     /// payload is the verified `(major, minor)` line.
     VersionOutsideVerifiedRange { verified: (u64, u64) },
+    /// The pinned config exists for this version, but nothing has watched the
+    /// CLI agree to it: the init-event observation is S2.4's (ruling (c),
+    /// 2026-10-16), and until it lands no untrusted task runs.
+    Unobserved,
+}
+
+/// Whether the run-time observation ADR-010 §1 asks for has confirmed this
+/// CLI's lockdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockdownConfirmation {
+    /// The runtime watched this CLI's init event and it listed only boba tools.
+    Observed,
+    /// No observer exists yet (S2.4): the pinned config is in place, but nothing
+    /// has seen the CLI agree to it, so nothing untrusted runs (ruling (c)).
+    NotObserved,
 }
 
 /// The lockdown verdict for one CLI install.
@@ -78,9 +101,15 @@ pub enum Fallback {
     DeterministicRules,
 }
 
-/// The lockdown verdict for `cli` at `version`, given its probed capabilities.
-pub fn tool_lockdown(cli: CliKind, version: &str, capabilities: &Capabilities) -> Lockdown {
-    let Some(evidence) = verified_evidence(cli) else {
+/// The lockdown verdict for `cli` at `version`, given its probed capabilities
+/// and whether the run-time observation has confirmed it.
+pub fn tool_lockdown(
+    cli: CliKind,
+    version: &str,
+    capabilities: &Capabilities,
+    confirmation: LockdownConfirmation,
+) -> Lockdown {
+    let Some(evidence) = lockdown_evidence(cli) else {
         return Lockdown::Unverified(Unverified::NoVerifiedConfig);
     };
     // A CLI whose probed help no longer carries the flags the pinned config
@@ -89,7 +118,10 @@ pub fn tool_lockdown(cli: CliKind, version: &str, capabilities: &Capabilities) -
         return Lockdown::Unverified(Unverified::NoVerifiedConfig);
     }
     match version_line(version) {
-        Some(line) if line == evidence.verified => Lockdown::Verified(evidence.method),
+        Some(line) if line == evidence.verified => match confirmation {
+            LockdownConfirmation::Observed => Lockdown::Verified(evidence.method),
+            LockdownConfirmation::NotObserved => Lockdown::Unverified(Unverified::Unobserved),
+        },
         _ => Lockdown::Unverified(Unverified::VersionOutsideVerifiedRange {
             verified: evidence.verified,
         }),
@@ -102,10 +134,11 @@ pub fn support(
     cli: CliKind,
     version: &str,
     capabilities: &Capabilities,
+    confirmation: LockdownConfirmation,
 ) -> TaskSupport {
     match (
         task.reads_untrusted(),
-        tool_lockdown(cli, version, capabilities),
+        tool_lockdown(cli, version, capabilities, confirmation),
     ) {
         (_, Lockdown::Verified(_)) => TaskSupport::Supported,
         (false, Lockdown::Unverified(reason)) => TaskSupport::SupportedWithBadge(reason),
@@ -116,10 +149,12 @@ pub fn support(
     }
 }
 
-/// The lock-down evidence a driver has, or `None` while it has none.
+/// What a driver can pin to lock its CLI down, or `None` while it has nothing.
 ///
 /// `verified` is the `(major, minor)` line the driver's fixtures cover: a newer
 /// release keeps its lockdown only once the driver is updated and re-verified.
+/// Having this evidence is necessary but not sufficient: the run-time
+/// observation ([`LockdownConfirmation`]) decides.
 struct Evidence {
     method: LockdownMethod,
     /// Capabilities the config being pinned depends on.
@@ -127,14 +162,14 @@ struct Evidence {
     verified: (u64, u64),
 }
 
-fn verified_evidence(cli: CliKind) -> Option<Evidence> {
+fn lockdown_evidence(cli: CliKind) -> Option<Evidence> {
     match cli {
         // A per-version pinned config, both halves documented in the recorded
         // `--help` and checked in the test below: `--strict-mcp-config` (only
         // the servers in our config, i.e. `boba` alone) and `--allowedTools`
         // restricted to the run's own boba tools, so no native tool survives.
-        // `init_event_is_locked_down` is the confirming observation once the
-        // runtime can read the CLI's init event (S2.4).
+        // Ruling (c): the observation that confirms it is S2.4's, so this
+        // evidence alone never verifies a run yet.
         CliKind::ClaudeCode => Some(Evidence {
             method: LockdownMethod::PinnedLockdownConfig,
             required: |caps| caps.mcp && caps.tool_allowlist,
@@ -246,15 +281,61 @@ mod tests {
     #[test]
     fn the_recorded_cli_versions_are_inside_their_verified_range() {
         assert!(matches!(
-            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &claude_caps()),
+            tool_lockdown(
+                CliKind::ClaudeCode,
+                CLAUDE_VERSION,
+                &claude_caps(),
+                LockdownConfirmation::Observed
+            ),
             Lockdown::Verified(LockdownMethod::PinnedLockdownConfig)
         ));
         // Gemini's `--exclude-tools` values are not pinned by a recorded fixture
         // yet, so its lockdown is not verified however good its version is.
         assert_eq!(
-            tool_lockdown(CliKind::GeminiCli, GEMINI_VERSION, &gemini_caps()),
+            tool_lockdown(
+                CliKind::GeminiCli,
+                GEMINI_VERSION,
+                &gemini_caps(),
+                LockdownConfirmation::Observed
+            ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
+    }
+
+    /// Ruling (c), 2026-10-16: nothing is verified until the runtime observation
+    /// exists (S2.4), however well the CLI's version and pinned config check out.
+    #[test]
+    fn nothing_is_verified_until_the_run_time_observation_exists() {
+        assert_eq!(
+            tool_lockdown(
+                CliKind::ClaudeCode,
+                CLAUDE_VERSION,
+                &claude_caps(),
+                LockdownConfirmation::NotObserved
+            ),
+            Lockdown::Unverified(Unverified::Unobserved)
+        );
+        for kind in [
+            AgentTaskKind::ExtractPostings,
+            AgentTaskKind::NarrateScores,
+            AgentTaskKind::TailorApplication,
+            AgentTaskKind::ReviewApplication,
+            AgentTaskKind::ClassifyEmails,
+        ] {
+            assert!(matches!(
+                support(
+                    kind,
+                    CliKind::ClaudeCode,
+                    CLAUDE_VERSION,
+                    &claude_caps(),
+                    LockdownConfirmation::NotObserved
+                ),
+                TaskSupport::Unsupported {
+                    reason: Unverified::Unobserved,
+                    ..
+                }
+            ));
+        }
     }
 
     #[test]
@@ -323,7 +404,12 @@ mod tests {
     fn a_version_outside_the_verified_range_loses_lockdown() {
         for version in ["1.9.0", "2.2.0", "3.0.0", "unknown", ""] {
             assert_eq!(
-                tool_lockdown(CliKind::ClaudeCode, version, &claude_caps()),
+                tool_lockdown(
+                    CliKind::ClaudeCode,
+                    version,
+                    &claude_caps(),
+                    LockdownConfirmation::Observed
+                ),
                 Lockdown::Unverified(Unverified::VersionOutsideVerifiedRange { verified: (2, 1) }),
                 "{version:?} must not keep tool_lockdown"
             );
@@ -333,7 +419,8 @@ mod tests {
             tool_lockdown(
                 CliKind::ClaudeCode,
                 "claude 2.1.400 (Claude Code)",
-                &claude_caps()
+                &claude_caps(),
+                LockdownConfirmation::Observed
             ),
             Lockdown::Verified(_)
         ));
@@ -343,7 +430,12 @@ mod tests {
     fn a_cli_with_no_verified_lockdown_config_never_gets_lockdown() {
         for cli in [CliKind::Aider, CliKind::OpenCode, CliKind::Codex] {
             assert_eq!(
-                tool_lockdown(cli, "1.0.0", &Capabilities::default()),
+                tool_lockdown(
+                    cli,
+                    "1.0.0",
+                    &Capabilities::default(),
+                    LockdownConfirmation::Observed
+                ),
                 Lockdown::Unverified(Unverified::NoVerifiedConfig),
                 "{}",
                 cli.display_name()
@@ -358,7 +450,8 @@ mod tests {
             tool_lockdown(
                 CliKind::ClaudeCode,
                 CLAUDE_VERSION,
-                &Capabilities::default()
+                &Capabilities::default(),
+                LockdownConfirmation::Observed
             ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
@@ -368,7 +461,12 @@ mod tests {
             ..Capabilities::default()
         };
         assert_eq!(
-            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &no_allowlist),
+            tool_lockdown(
+                CliKind::ClaudeCode,
+                CLAUDE_VERSION,
+                &no_allowlist,
+                LockdownConfirmation::Observed
+            ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
     }
@@ -387,7 +485,13 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                support(kind, CliKind::Aider, "1.0.0", &Capabilities::default()),
+                support(
+                    kind,
+                    CliKind::Aider,
+                    "1.0.0",
+                    &Capabilities::default(),
+                    LockdownConfirmation::Observed
+                ),
                 TaskSupport::Unsupported {
                     reason: Unverified::NoVerifiedConfig,
                     fallback,
@@ -397,7 +501,13 @@ mod tests {
             );
             // And the same on a Full CLI whose version moved out of range.
             assert_eq!(
-                support(kind, CliKind::ClaudeCode, "2.2.0", &claude_caps()),
+                support(
+                    kind,
+                    CliKind::ClaudeCode,
+                    "2.2.0",
+                    &claude_caps(),
+                    LockdownConfirmation::Observed
+                ),
                 TaskSupport::Unsupported {
                     reason: Unverified::VersionOutsideVerifiedRange { verified: (2, 1) },
                     fallback,
@@ -415,11 +525,23 @@ mod tests {
             AgentTaskKind::TranslateProfile,
         ] {
             assert_eq!(
-                support(kind, CliKind::Aider, "1.0.0", &Capabilities::default()),
+                support(
+                    kind,
+                    CliKind::Aider,
+                    "1.0.0",
+                    &Capabilities::default(),
+                    LockdownConfirmation::Observed
+                ),
                 TaskSupport::SupportedWithBadge(Unverified::NoVerifiedConfig)
             );
             assert_eq!(
-                support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()),
+                support(
+                    kind,
+                    CliKind::ClaudeCode,
+                    "2.1.289",
+                    &claude_caps(),
+                    LockdownConfirmation::Observed
+                ),
                 TaskSupport::Supported
             );
         }
@@ -434,7 +556,8 @@ mod tests {
                 AgentTaskKind::ProfileImport,
                 CliKind::ClaudeCode,
                 "2.2.0",
-                &claude_caps()
+                &claude_caps(),
+                LockdownConfirmation::Observed
             ),
             TaskSupport::SupportedWithBadge(Unverified::VersionOutsideVerifiedRange {
                 verified: (2, 1)
@@ -454,12 +577,17 @@ mod tests {
             AgentTaskKind::TranslateProfile,
         ] {
             assert_eq!(
-                support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()),
+                support(
+                    kind,
+                    CliKind::ClaudeCode,
+                    "2.1.289",
+                    &claude_caps(),
+                    LockdownConfirmation::Observed
+                ),
                 TaskSupport::Supported,
                 "{:?} must run on a Full CLI",
                 kind
             );
-            assert!(support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()).is_supported());
         }
     }
 
@@ -476,20 +604,29 @@ mod tests {
         assert!(TaskSupport::SupportedWithBadge(Unverified::NoVerifiedConfig).is_supported());
     }
 
-    /// The two tables that decide a run's safety must agree: a CLI whose
-    /// lockdown counts as verified is exactly one with a pinned config, so no
-    /// task can ever run on a "verified" CLI that has nothing to pin (the caller
-    /// refuses an untrusted task without flags, but this is what makes it
-    /// impossible in the first place).
+    /// The two tables that decide a run's safety must agree: a CLI can be
+    /// verified only if there is a pinned config to verify it against, so no run
+    /// is ever "verified" with nothing to pin.
     #[test]
-    fn the_evidence_tables_agree_so_no_verified_cli_can_run_unpinned() {
+    fn every_cli_that_could_be_verified_has_a_pinned_config() {
         for cli in CliKind::ALL {
-            assert_eq!(
-                verified_evidence(cli).is_some(),
-                pinned_args(cli, "extract_postings").is_some(),
-                "{}: verified evidence and pinned flags disagree",
-                cli.display_name()
-            );
+            if lockdown_evidence(cli).is_some() {
+                assert!(
+                    pinned_args(cli, "extract_postings").is_some(),
+                    "{}: verifiable but nothing to pin",
+                    cli.display_name()
+                );
+            }
         }
+        // And today the pinned config alone verifies nothing (ruling (c)).
+        assert!(matches!(
+            tool_lockdown(
+                CliKind::ClaudeCode,
+                CLAUDE_VERSION,
+                &claude_caps(),
+                LockdownConfirmation::NotObserved
+            ),
+            Lockdown::Unverified(_)
+        ));
     }
 }

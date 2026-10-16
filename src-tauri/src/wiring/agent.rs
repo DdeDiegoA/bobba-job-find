@@ -1,4 +1,5 @@
-//! Agent runtime and per-run sandbox wiring (CH5; AD-4, AD-6, AD-7, ADR-012).
+//! Agent runtime and per-run sandbox wiring (CH5; AD-4, AD-6, AD-7, ADR-010,
+//! ADR-012).
 //!
 //! The composition root is the only place that knows the app-data paths, where
 //! the packaged `boba-mcp` sidecar lives, and which repos stand behind the MCP
@@ -10,17 +11,21 @@
 //!
 //! What is live after this chore: every run gets its own workspace, token and
 //! MCP endpoint, its own `mcp.json`, an event stream the UI can follow, and a
-//! CLI command built from the driver's evidence. What is deliberately *not*
-//! live: the data behind most catalog tools (profile, postings, scores, mail,
-//! documents land in later slices) and the CLI argv for the CLIs whose MCP flag
-//! is not a plain `--flag <path>`. Both gaps are explicit refusals here rather
-//! than silence — see [`RepoTools`] and [`command_builder`].
+//! CLI command built from the driver's evidence **and** ADR-010's gate — the
+//! lock-down verdict comes from the probed `cli_install` row, and a task that
+//! reads third-party content is refused unless that CLI's lock-down is verified.
+//! What is deliberately *not* live: the data behind most catalog tools (profile,
+//! postings, scores, mail, documents land in later slices), the CLI argv for the
+//! CLIs whose MCP flag is not a plain `--flag <path>`, and the observation that
+//! will let a verified CLI run untrusted tasks (S2.4). Gaps are explicit
+//! refusals here rather than silence — see [`RepoTools`], [`command_builder`] and
+//! [`lock_down`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use boba_agent::drivers::{Capabilities, CliKind};
-use boba_agent::lockdown::{self, TaskSupport};
+use boba_agent::lockdown::{self, LockdownConfirmation, TaskSupport};
 use boba_agent::mcp::config::{RunSandbox, SandboxConfig};
 use boba_agent::mcp::server::ToolHandler;
 use boba_agent::runtime::{AgentRuntime, Emitter};
@@ -191,9 +196,11 @@ fn terminal_of(event: &AgentEvent) -> Option<(TaskOutcome, Option<String>)> {
 /// 2. **Untrusted input without a verified tool lockdown.** ADR-010 allows a
 ///    task that reads postings, mail or company pages only on a CLI whose
 ///    lockdown this build can verify — for the version the driver was verified
-///    against and with the config pinned in `boba-agent/src/lockdown`. That
-///    gate is a hard one, with no user override; a CLI that fails it is refused
-///    rather than "run anyway and hope".
+///    against, with the config pinned in `boba-agent/src/lockdown`, and with the
+///    run-time observation of that pinning in place. That gate is a hard one,
+///    with no user override; a CLI that fails it is refused rather than "run
+///    anyway and hope". Until S2.4 wires the observation, **every** untrusted
+///    task is refused on every CLI (orquestador ruling (c), 2026-10-16).
 /// 3. **A prompt that could be parsed as an option.** Neither CLI documents an
 ///    end-of-options `--`, so a prompt starting with `-` is refused instead of
 ///    guessed at.
@@ -286,7 +293,15 @@ fn lock_down(store: &Store, kind: CliKind, task: &AgentTask) -> TaskSupport {
             )
         },
     );
-    lockdown::support(task.kind, kind, &version, &capabilities)
+    // `NotObserved` until S2.4's runtime watches the CLI's init event (ruling
+    // (c), 2026-10-16): the pinned config alone never lifts the gate.
+    lockdown::support(
+        task.kind,
+        kind,
+        &version,
+        &capabilities,
+        LockdownConfirmation::NotObserved,
+    )
 }
 
 /// A task that must not run without the ADR-010 gate: either its kind reads
@@ -653,10 +668,10 @@ mod tests {
         assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
     }
 
-    /// P1: on a Full CLI the untrusted tasks run, with the pinned lockdown
-    /// config from `--help` and this task's own tool subset.
+    /// P1 + ruling (c): even on a Full CLI with a pinned config, an untrusted
+    /// task stays refused until S2.4 observes the CLI's init event.
     #[test]
-    fn a_verified_full_cli_runs_an_untrusted_task_with_its_lockdown_pinned() {
+    fn an_untrusted_task_is_refused_on_a_full_cli_until_the_observation_lands() {
         let full = store_with_cli("full", CliKind::ClaudeCode, "2.1.289", claude_caps());
         let builder = command_builder(None, full);
         let sandbox = run_sandbox("full");
@@ -664,7 +679,19 @@ mod tests {
         let mut untrusted = task("claude_code");
         untrusted.prompt = "extract the offers".to_string();
         let spec = builder(&untrusted, &sandbox);
+        assert!(
+            spec.program.to_string_lossy().contains("boba-refused-"),
+            "an untrusted task ran without the observation: {spec:?}"
+        );
 
+        // The user's own input does run there, with its lockdown pinned: only
+        // our MCP server, and only that task's own tools.
+        let user = task_of(
+            "claude_code",
+            boba_app::ports::agent::AgentTaskKind::ProfileImport,
+            InputTrust::User,
+        );
+        let spec = builder(&user, &sandbox);
         assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
         assert_eq!(spec.args[0], "--mcp-config");
         assert_eq!(spec.args[1], sandbox.config.display().to_string());
@@ -678,11 +705,11 @@ mod tests {
             .position(|arg| arg == "--allowedTools")
             .map(|at| spec.args[at + 1].clone())
             .expect("the allowlist is pinned");
-        assert_eq!(
-            allowed,
-            "mcp__boba__get_task_input,mcp__boba__get_pending_postings,mcp__boba__propose_posting_features",
-            "the allowlist must be this task's own tools, never more"
-        );
+        let expected: Vec<String> = boba_mcp_proto::tool::tools_for_task("profile_import")
+            .into_iter()
+            .map(|spec| format!("mcp__boba__{}", spec.name))
+            .collect();
+        assert_eq!(allowed, expected.join(","), "never more than its own tools");
     }
 
     /// P1: no sidecar means no tools, so no run may start.
