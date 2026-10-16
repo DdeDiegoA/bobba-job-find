@@ -7,5 +7,6 @@
   "errors.agent.timeout": "La tarea de IA tardó demasiado y se detuvo.",
   "errors.agent.limit_exceeded": "La tarea de IA llegó a su límite y se detuvo antes de terminar.",
   "errors.agent.cancelled": "La tarea de IA se canceló.",
-  "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa."
+  "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa.",
+  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar."
 }
