@@ -296,6 +296,65 @@ fn a_working_language_named_without_a_requirement_is_not_gated() {
     assert_eq!(gate(&report, GateKind::Language).verdict, Verdict::Pass);
 }
 
+// Review round 1 F1: a language the Profile only has weakly never hides one it
+// lacks entirely.
+#[test]
+fn an_undeclared_language_vetoes_even_when_an_earlier_one_only_flags() {
+    let mut inputs = candidate();
+    inputs.languages = vec![DeclaredLanguage {
+        language: "es".to_string(),
+        level: Cefr::B1,
+    }];
+    let report = run(
+        &offer("Spanish (C2) is required. German is required too."),
+        &inputs,
+    );
+    let language = gate(&report, GateKind::Language);
+
+    assert_eq!(language.verdict, Verdict::Veto, "{language:?}");
+    assert_eq!(language.reason, GateReason::RequirementNotMet);
+    assert_eq!(quote(language), "German is required too");
+}
+
+// Review round 1 F2: the lexicon matches whole words only.
+#[test]
+fn a_phrase_inside_another_word_is_not_a_demand() {
+    let report = run(&offer("Our focus only on quality."), &candidate());
+    let eligibility = gate(&report, GateKind::Eligibility);
+
+    assert_eq!(eligibility.verdict, Verdict::Flag, "{eligibility:?}");
+    assert_eq!(
+        eligibility.reason,
+        GateReason::Unverified,
+        "silence, not 'US only'"
+    );
+
+    // "native" inside "alternative" is not a level either.
+    let mut inputs = candidate();
+    inputs.languages = vec![DeclaredLanguage {
+        language: "es".to_string(),
+        level: Cefr::B1,
+    }];
+    let alternative = run(
+        &offer("We offer alternative schedules for Spanish speakers."),
+        &inputs,
+    );
+    assert_eq!(
+        gate(&alternative, GateKind::Language).verdict,
+        Verdict::Pass,
+        "a named language with no requirement is not gated"
+    );
+}
+
+#[test]
+fn a_real_phrase_is_still_found_next_to_a_word_that_looks_like_it() {
+    let report = run(&offer("US only. Focus only on quality."), &candidate());
+    let eligibility = gate(&report, GateKind::Eligibility);
+
+    assert_eq!(eligibility.verdict, Verdict::Veto);
+    assert_eq!(quote(eligibility), "US only");
+}
+
 // Golden 4: pay under a hard Salary Floor.
 #[test]
 fn golden_salary_below_a_hard_floor_vetoes() {

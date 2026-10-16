@@ -81,9 +81,12 @@ const REQUIREMENTS: &[&str] = &[
     "required",
     "requires",
     "requirement",
+    "requirements",
     "mandatory",
     "requerido",
     "requiere",
+    "requisito",
+    "requisitos",
     "fluent",
     "fluency",
     "fluido",
@@ -149,16 +152,13 @@ pub(super) fn demands(text: &str) -> Vec<(QuotedSpan, &'static str, PermitKind)>
     let folded = fold(text);
     let mut found: Vec<(QuotedSpan, &'static str, PermitKind)> = Vec::new();
     for (phrase, region, permit) in ELIGIBILITY {
-        let mut from = 0;
-        while let Some(offset) = folded[from..].find(phrase) {
-            let start = from + offset;
-            from = start + phrase.len();
+        for start in matches(&folded, phrase) {
             if found.iter().any(|(_, found_region, found_permit)| {
                 found_region == region && found_permit == permit
             }) {
                 continue;
             }
-            found.push((sentence(text, start, from), region, *permit));
+            found.push((sentence(text, start, start + phrase.len()), region, *permit));
         }
     }
     found.sort_by_key(|(span, _, _)| span.start);
@@ -172,20 +172,17 @@ pub(super) fn required_languages(text: &str) -> Vec<(QuotedSpan, &'static str, O
     let folded = fold(text);
     let mut found: Vec<(QuotedSpan, &'static str, Option<Cefr>)> = Vec::new();
     for (name, tag) in LANGUAGES {
-        let mut from = 0;
-        while let Some(offset) = folded[from..].find(name) {
-            let start = from + offset;
-            let end = start + name.len();
-            from = end;
+        for start in matches(&folded, name) {
             if found.iter().any(|(_, found_tag, _)| found_tag == tag) {
                 continue;
             }
+            let end = start + name.len();
             let span = sentence(text, start, end);
-            let near = near(text, &span, start, end);
-            if !requires(fold(near).as_str()) {
+            let near = fold(near(text, &span, start, end));
+            if !requires(&near) {
                 continue;
             }
-            found.push((span, *tag, stated_bar(&fold(near))));
+            found.push((span, *tag, stated_bar(&near)));
         }
     }
     found.sort_by_key(|(span, _, _)| span.start);
@@ -194,7 +191,9 @@ pub(super) fn required_languages(text: &str) -> Vec<(QuotedSpan, &'static str, O
 
 /// Whether a window of text states a requirement.
 fn requires(window: &str) -> bool {
-    REQUIREMENTS.iter().any(|word| window.contains(word))
+    REQUIREMENTS
+        .iter()
+        .any(|word| !matches(window, word).is_empty())
 }
 
 /// The bar a posting states: an explicit CEFR level wins over a level word.
@@ -209,9 +208,33 @@ fn stated_bar(window: &str) -> Option<Cefr> {
     }
     LEVEL_WORDS
         .iter()
-        .filter(|(word, _)| window.contains(word))
+        .filter(|(word, _)| !matches(window, word).is_empty())
         .map(|(_, level)| *level)
         .max()
+}
+
+/// Every occurrence of `needle` in the folded `haystack` that sits at a word
+/// boundary: `"us only"` must not be read out of `"focus only"`, nor `"native"`
+/// out of `"alternative"` — both are ordinary posting wording (review round 1).
+fn matches(haystack: &str, needle: &str) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = haystack[from..].find(needle) {
+        let start = from + offset;
+        from = start + needle.len();
+        let before = haystack[..start].chars().next_back();
+        let after = haystack[from..].chars().next();
+        if is_edge(before) && is_edge(after) {
+            found.push(start);
+        }
+    }
+    found
+}
+
+/// Whether the character next to a match lets it start (or end) there: a letter
+/// or a digit means the match sits inside a longer word. The text edge is fine.
+fn is_edge(neighbour: Option<char>) -> bool {
+    neighbour.is_none_or(|ch| !ch.is_alphanumeric())
 }
 
 /// The sentence (or bullet line) around `[start, end)`, trimmed — the words the

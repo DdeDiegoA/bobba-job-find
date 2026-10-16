@@ -354,46 +354,55 @@ fn authorized(inputs: &GateInputs, region: &str, permit: PermitKind) -> bool {
 }
 
 /// Language (FR-53): a required language nobody declared is a VETO; a declared
-/// level under the stated bar is a FLAG (rank it, warn).
+/// level under the stated bar is a FLAG (rank it, warn). The worst of all
+/// required languages wins, with its own quote — one declared-but-weak language
+/// never hides another one the Profile lacks entirely.
 fn language(offer: &Offer, inputs: &GateInputs) -> GateResult {
     let required = scan::required_languages(&offer.description_text);
+    let mut worst: Option<GateResult> = None;
+    let mut cleared: Option<&QuotedSpan> = None;
     for (span, tag, bar) in &required {
         let declared = inputs
             .languages
             .iter()
             .find(|declared| declared.language.eq_ignore_ascii_case(tag));
-        match declared {
-            None => {
-                return result(
-                    GateKind::Language,
-                    Verdict::Veto,
-                    GateReason::RequirementNotMet,
-                    Some(Evidence::Quoted(span.clone())),
-                    Confidence::High,
-                );
+        let decided = match declared {
+            None => result(
+                GateKind::Language,
+                Verdict::Veto,
+                GateReason::RequirementNotMet,
+                Some(Evidence::Quoted(span.clone())),
+                Confidence::High,
+            ),
+            Some(declared) if bar.is_some_and(|bar| declared.level < bar) => result(
+                GateKind::Language,
+                Verdict::Flag,
+                GateReason::BelowRequiredLevel,
+                Some(Evidence::Quoted(span.clone())),
+                Confidence::Medium,
+            ),
+            Some(_) => {
+                cleared = cleared.or(Some(span));
+                continue;
             }
-            Some(declared) if bar.is_some_and(|bar| declared.level < bar) => {
-                return result(
-                    GateKind::Language,
-                    Verdict::Flag,
-                    GateReason::BelowRequiredLevel,
-                    Some(Evidence::Quoted(span.clone())),
-                    Confidence::Medium,
-                );
-            }
-            Some(_) => {}
+        };
+        if worst
+            .as_ref()
+            .is_none_or(|worst| worst.verdict < decided.verdict)
+        {
+            worst = Some(decided);
         }
     }
-    let evidence = required
-        .first()
-        .map(|(span, _, _)| Evidence::Quoted(span.clone()));
+    if let Some(worst) = worst {
+        return worst;
+    }
+    // Levels are read from words like "fluent" (offer-scoring.md §2).
     result(
         GateKind::Language,
         Verdict::Pass,
         GateReason::Satisfied,
-        evidence.clone(),
-        match evidence {
-            // Levels are read from words like "fluent" (offer-scoring.md §2).
+        cleared.map(|span| Evidence::Quoted(span.clone())),
+        match cleared {
             Some(_) => Confidence::Medium,
             None => Confidence::High,
         },
