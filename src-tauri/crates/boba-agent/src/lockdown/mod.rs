@@ -164,12 +164,14 @@ struct Evidence {
 
 fn lockdown_evidence(cli: CliKind) -> Option<Evidence> {
     match cli {
-        // A per-version pinned config, both halves documented in the recorded
-        // `--help` and checked in the test below: `--strict-mcp-config` (only
-        // the servers in our config, i.e. `boba` alone) and `--allowedTools`
-        // restricted to the run's own boba tools, so no native tool survives.
-        // Ruling (c): the observation that confirms it is S2.4's, so this
-        // evidence alone never verifies a run yet.
+        // The most a CLI's own flags can say, both halves documented in the
+        // recorded `--help` and checked in the test below: `--strict-mcp-config`
+        // (only the servers in our config, i.e. `boba` alone) and `--allowedTools`
+        // listing the run's own boba tools. That is *not* proof that the CLI's
+        // native tools are gone: an allowlist pre-approves, it does not remove,
+        // so this evidence alone never verifies a run — the run-time observation
+        // is what says the tool set really is ours (reviewer round 2; ruling (c):
+        // that observation is S2.4's).
         CliKind::ClaudeCode => Some(Evidence {
             method: LockdownMethod::PinnedLockdownConfig,
             required: |caps| caps.mcp && caps.tool_allowlist,
@@ -185,14 +187,14 @@ fn lockdown_evidence(cli: CliKind) -> Option<Evidence> {
     }
 }
 
-/// The flags that pin this CLI's lockdown for one run's task, or `None` when
-/// this build has no verified way to pin it.
+/// The flags that narrow this CLI's tool set for one run's task, or `None` when
+/// this build has no documented way to narrow it.
 ///
 /// Every flag here is checked against the driver's recorded `--help` fixture in
-/// the test below: nothing is guessed (AD-4). The caller must add them to the
-/// run's argv, together with [`LockdownMethod::PinnedLockdownConfig`]'s version
-/// line, and the run is only as locked down as these flags make it: an unknown
-/// flag or an unknown tool name fails the launch instead of widening it.
+/// the test below: nothing is guessed (AD-4). They are necessary but **not
+/// sufficient** for a verified lockdown — an allowlist is not a removal — so the
+/// caller adds them to every run's argv (a narrower tool set is never worse) and
+/// the verdict still waits for the run-time observation (S2.4).
 pub fn pinned_args(cli: CliKind, task_id: &str) -> Option<Vec<String>> {
     match cli {
         CliKind::ClaudeCode => {
