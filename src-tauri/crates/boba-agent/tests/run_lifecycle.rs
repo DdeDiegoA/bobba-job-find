@@ -98,6 +98,7 @@ impl AgentRepo for FakeRepo {
             input_trust: run.input_trust,
             cli: run.cli,
             model: run.model,
+            pack_version: run.pack_version,
             status: RunStatus::Running.id().to_string(),
             failure_reason: None,
             started_at: "2026-10-05T00:00:00.000Z".to_string(),

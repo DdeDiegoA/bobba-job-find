@@ -8,14 +8,13 @@
 //! an invalid output back to the agent, and once the retry budget is spent the
 //! run stops with `FailureReason::InvalidOutput` — visible, never a loop.
 //!
-//! The catalog's schemas are plain object schemas (`type`, `properties`,
-//! `required`, `additionalProperties: false`, `items`, `minimum`), so the check
-//! below implements exactly those keywords and the tests refuse a catalog schema
-//! that leaves them.
+//! The catalog's schemas are plain object schemas, and the check below
+//! implements exactly the keywords in [`KEYWORDS`]. A schema that uses anything
+//! else is **refused**, not checked partially: a half-done check of an agent's
+//! output is worse than none.
 //!
-//! shortcut: a hand-rolled subset, not full JSON Schema; replace it with a
-//! validator crate once a catalog tool describes itself with a keyword outside
-//! the list above.
+//! shortcut: a hand-rolled subset, not full JSON Schema; add the keyword (and
+//! its check) or move to a validator crate once a catalog tool needs one.
 
 use boba_mcp_proto::tool;
 use serde_json::Value;
@@ -25,6 +24,18 @@ use super::is_output;
 /// How many times an invalid output is handed back to the agent before the task
 /// fails (AC2: retried up to 2 times, then it fails visibly).
 pub const MAX_OUTPUT_RETRIES: u32 = 2;
+
+/// The JSON Schema keywords [`check_output`] implements. Nothing outside this
+/// list is guessed at: a schema using one is refused (fail closed), so a new
+/// keyword can never be silently ignored.
+const KEYWORDS: [&str; 6] = [
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "minimum",
+];
 
 /// Why a run's output was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,10 +105,34 @@ pub fn check_output(task: &str, tool_name: &str, args: &Value) -> Result<(), Inv
     let spec = tool::find(tool_name).expect("outputs() only names catalog tools");
     let schema: Value =
         serde_json::from_str(spec.input_schema).expect("catalog schemas are valid JSON");
-    fits(&schema, args).map_err(|why| InvalidOutput::Schema {
+    let checked = supported(&schema).and_then(|()| fits(&schema, args));
+    checked.map_err(|why| InvalidOutput::Schema {
         tool: tool_name.to_string(),
         why,
     })
+}
+
+/// Whether the checker understands this schema: every keyword, at every level,
+/// is one it implements.
+fn supported(schema: &Value) -> Result<(), String> {
+    let Some(map) = schema.as_object() else {
+        return Ok(());
+    };
+    for (key, value) in map {
+        if !KEYWORDS.contains(&key.as_str()) {
+            return Err(format!("unsupported schema keyword `{key}`"));
+        }
+        match key.as_str() {
+            "properties" => {
+                for property in value.as_object().into_iter().flatten().map(|(_, v)| v) {
+                    supported(property)?;
+                }
+            }
+            "items" => supported(value)?,
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// `fits` is the checker's core: the catalog's own schemas are exercised
@@ -269,28 +304,38 @@ mod tests {
 
     #[test]
     fn every_catalog_schema_is_within_the_supported_subset() {
-        // A catalog schema that leaves these keywords must fail this test, not
-        // silently pass validation on the day a task starts writing.
-        const KEYWORDS: [&str; 6] = [
-            "type",
-            "properties",
-            "required",
-            "additionalProperties",
-            "items",
-            "minimum",
-        ];
+        // A catalog schema with a keyword the checker does not implement must
+        // fail this test, not silently pass validation on the day a task starts
+        // writing.
         for spec in tool::TOOLS {
             let schema: Value = serde_json::from_str(spec.input_schema).expect("JSON schema");
-            let mut seen = Vec::new();
-            collect_keywords(&schema, &mut seen);
-            for keyword in seen {
-                assert!(
-                    KEYWORDS.contains(&keyword.as_str()),
-                    "`{}` uses `{keyword}`, outside the checker subset",
-                    spec.name
-                );
-            }
+            assert_eq!(supported(&schema), Ok(()), "{}", spec.name);
         }
+    }
+
+    /// Fail closed: a keyword the checker does not implement is a refusal, not
+    /// something to skip past — including on a nested property.
+    #[test]
+    fn an_unsupported_schema_keyword_is_refused() {
+        for schema in [
+            json!({"type": "object", "enum": ["a"]}),
+            json!({"type": "string", "pattern": "^a$"}),
+            json!({"type": "object", "properties": {"id": {"type": "string", "format": "uuid"}}}),
+            json!({"type": "array", "items": {"oneOf": [{"type": "string"}]}}),
+        ] {
+            let refused = supported(&schema).expect_err(&format!("{schema} must be refused"));
+            assert!(refused.contains("unsupported schema keyword"), "{refused}");
+        }
+        // What it does implement stays accepted.
+        assert_eq!(
+            supported(&json!({
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+                "additionalProperties": false
+            })),
+            Ok(())
+        );
     }
 
     /// Every write tool's schema must reject the empty object, so a task cannot
@@ -307,24 +352,6 @@ mod tests {
                 "`{}` accepts `{{}}`",
                 spec.name
             );
-        }
-    }
-
-    fn collect_keywords(schema: &Value, out: &mut Vec<String>) {
-        let Some(map) = schema.as_object() else {
-            return;
-        };
-        for (key, value) in map {
-            out.push(key.clone());
-            match key.as_str() {
-                "properties" => {
-                    for property in value.as_object().into_iter().flatten().map(|(_, v)| v) {
-                        collect_keywords(property, out);
-                    }
-                }
-                "items" => collect_keywords(value, out),
-                _ => {}
-            }
         }
     }
 }

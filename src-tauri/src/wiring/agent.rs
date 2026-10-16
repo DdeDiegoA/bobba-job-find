@@ -21,15 +21,14 @@
 //! refusals here rather than silence — see [`RepoTools`], [`command_builder`] and
 //! [`lock_down`].
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 
 use boba_agent::drivers::{Capabilities, CliKind, McpWiring};
-use boba_agent::lockdown::{self, LockdownConfirmation, TaskSupport, Unverified};
+use boba_agent::lockdown::{self, TaskSupport, Unverified};
 use boba_agent::mcp::config::{RunSandbox, SandboxConfig};
 use boba_agent::mcp::server::ToolHandler;
-use boba_agent::runtime::{AgentRuntime, Emitter, LockdownObserver, TaskGate};
+use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
 use boba_mcp_proto::tool;
@@ -48,17 +47,11 @@ pub const AGENT_AREA: &str = "agent.run";
 /// (`bundle.externalBin = ["binaries/boba-mcp"]`).
 const SHIM_NAME: &str = "boba-mcp";
 
-/// The CLIs whose pinned lock-down this process has **observed** hold (ADR-010
-/// §1). It is the only thing that can lift the untrusted-content refusal, and it
-/// is deliberately in memory: a fresh launch earns the observation again.
-type ObservedLockdowns = Arc<Mutex<HashSet<String>>>;
-
 /// Build this launch's run engine: the store is the `AgentRepo`, and the
 /// sandbox, tool surface, event sink and command builder come from here.
 pub fn agent_runtime<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) -> AgentRuntime<Store> {
     let shim = resolve_shim();
     let resolved = shim.as_ref().ok().cloned();
-    let observed: ObservedLockdowns = Arc::new(Mutex::new(HashSet::new()));
     AgentRuntime::new(Arc::clone(store))
         .with_emitter(agent_emitter(app))
         .with_sandbox(
@@ -68,12 +61,10 @@ pub fn agent_runtime<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) -> Agen
             }),
         )
         .with_command_builder(Arc::new(command_builder(shim.clone())))
-        // ADR-010 §1: a run that watches the CLI hold to its pinned lock-down
-        // says so here, and this is the only place an untrusted task is ever
-        // let through (orquestador ruling (c), 2026-10-16).
-        .with_observer(lockdown_observer(Arc::clone(&observed)))
         // ADR-010 §2: every task goes through this gate before a run exists.
-        .with_gate(task_gate(Arc::clone(store), observed))
+        // The gate is only the first half; the run's own init event is the
+        // second, and the runtime enforces it before any tool call.
+        .with_gate(task_gate(Arc::clone(store)))
 }
 
 /// The sandbox a run works in: app data owns the workspaces, and the shim is
@@ -284,11 +275,15 @@ fn command_builder(
 }
 
 /// ADR-010's gate, in the shape the runtime takes it: the composition root
-/// supplies the probed `cli_install` evidence and whether this process has
-/// **observed** the CLI hold to its pinned lock-down, and `boba-agent` decides.
-/// The runtime consults it before a run gets a workspace, a token or a CLI, so
-/// no caller can route around it.
-fn task_gate(store: Arc<Store>, observed: ObservedLockdowns) -> Arc<TaskGate> {
+/// supplies the probed `cli_install` evidence, and `boba-agent` decides. The
+/// runtime consults it before a run gets a workspace, a token or a CLI, so no
+/// caller can route around it.
+///
+/// This answers one question — may an untrusted task **start** on this CLI? The
+/// question that follows, "did the CLI keep to the pin?", is the run's own init
+/// event, checked by the runtime before any tool call (ADR-010 §1). Nothing is
+/// cached, so a scheduled run after a restart is checked just as strictly.
+fn task_gate(store: Arc<Store>) -> Arc<TaskGate> {
     Arc::new(move |task: &AgentTask| {
         let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
             // Nothing ever probed this CLI, so nothing vouches for any task on
@@ -298,38 +293,21 @@ fn task_gate(store: Arc<Store>, observed: ObservedLockdowns) -> Arc<TaskGate> {
                 fallback: None,
             };
         };
-        lock_down(&store, kind, task, &observed)
+        lock_down(&store, kind, task)
     })
 }
 
-/// Where a run's observation of a locked-down CLI lands (ADR-010 §1). Only an
-/// init event the runtime read and accepted reaches this.
-fn lockdown_observer(observed: ObservedLockdowns) -> Arc<LockdownObserver> {
-    Arc::new(move |cli: &str| {
-        observed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(cli.to_string());
-    })
-}
-
-/// ADR-010's verdict for a task, from the probed install the store holds and the
-/// lock-down observations this process has made: the composition root owns both,
-/// the decision itself belongs to `boba-agent`.
+/// ADR-010's verdict for a task, from the probed install the store holds: the
+/// composition root owns the `cli_install` row (ADR-012), the decision itself
+/// belongs to `boba-agent`.
 ///
 /// No probed install (a CLI the user added by hand, or an unreadable store) is
 /// no evidence at all, so the verdict is taken from an empty one — which still
 /// lets the user's own input through and refuses everything untrusted.
 ///
-/// The observation is keyed by CLI id, and the version line is checked before it
-/// is consulted: a CLI whose version leaves its driver's verified range loses
-/// `tool_lockdown` however well it behaved last time (ADR-010 §1).
-fn lock_down(
-    store: &Store,
-    kind: CliKind,
-    task: &AgentTask,
-    observed: &ObservedLockdowns,
-) -> TaskSupport {
+/// A CLI whose version leaves its driver's verified range loses `tool_lockdown`
+/// however well it behaved last time (ADR-010 §1).
+fn lock_down(store: &Store, kind: CliKind, task: &AgentTask) -> TaskSupport {
     let probed = store
         .read({
             let kind_id = kind.id().to_string();
@@ -349,14 +327,7 @@ fn lock_down(
             )
         },
     );
-    let watchers = observed.lock().unwrap_or_else(PoisonError::into_inner);
-    let confirmation = if watchers.contains(kind.id()) {
-        LockdownConfirmation::Observed
-    } else {
-        LockdownConfirmation::NotObserved
-    };
-    drop(watchers);
-    lockdown::support(task.kind, kind, &version, &capabilities, confirmation)
+    lockdown::support(task.kind, kind, &version, &capabilities)
 }
 
 /// A command that cannot start: the run fails fast, is recorded and is reported,
@@ -472,18 +443,6 @@ mod tests {
             budget: boba_app::ports::agent::RunBudget::default(),
             env: Vec::new(),
         }
-    }
-
-    /// No CLI lock-down observed yet: the gate's starting state.
-    fn observed() -> ObservedLockdowns {
-        Arc::new(Mutex::new(HashSet::new()))
-    }
-
-    /// This process has watched `cli` hold to its pinned lock-down (ADR-010 §1).
-    fn observing(cli: &str) -> ObservedLockdowns {
-        let observed = observed();
-        observed.lock().unwrap().insert(cli.to_string());
-        observed
     }
 
     /// A run's sandbox under its own temp root, so parallel tests never share a
@@ -690,12 +649,14 @@ mod tests {
         }
     }
 
-    /// P1 (ruling (c), 2026-10-16): ADR-010's gate refuses every untrusted task
-    /// until S2.4 observes a pinned lockdown — on an unprobed CLI, on a version
-    /// outside its driver's range, and on Claude Code with a pinned config.
+    /// ADR-010's gate, first half (orquestador ruling, 2026-10-16): an untrusted
+    /// task is refused on a CLI nothing probed and on a version outside its
+    /// driver's range, and is allowed to **start** on a CLI this build can pin.
+    /// What the run may then do is decided by its own init event, which the
+    /// runtime checks before any tool call.
     #[test]
-    fn untrusted_tasks_are_refused_by_the_gate() {
-        let unterprobed = task_gate(store("unprobed"), observed());
+    fn the_gate_decides_whether_an_untrusted_task_may_start() {
+        let unterprobed = task_gate(store("unprobed"));
         let untrusted = task("aider");
         assert_eq!(
             unterprobed(&untrusted),
@@ -705,10 +666,12 @@ mod tests {
             }
         );
 
-        let outdated = task_gate(
-            store_with_cli("outdated", CliKind::ClaudeCode, "2.2.0", claude_caps()),
-            observed(),
-        );
+        let outdated = task_gate(store_with_cli(
+            "outdated",
+            CliKind::ClaudeCode,
+            "2.2.0",
+            claude_caps(),
+        ));
         assert_eq!(
             outdated(&task("claude_code")),
             TaskSupport::Unsupported {
@@ -717,42 +680,57 @@ mod tests {
             }
         );
 
-        // A Full CLI with its proof complete but no observation yet.
-        let full_store = store_with_cli("full", CliKind::ClaudeCode, "2.1.289", claude_caps());
-        let full = task_gate(Arc::clone(&full_store), observed());
+        // A Full CLI with its pin in place: the run may start, and the run's own
+        // init event is what verifies it from there (ADR-010 §1).
+        let full = task_gate(store_with_cli(
+            "full",
+            CliKind::ClaudeCode,
+            "2.1.301",
+            claude_caps(),
+        ));
+        assert_eq!(full(&task("claude_code")), TaskSupport::Supported);
+
+        // A CLI that cannot report the init event the run is verified against
+        // can never be pinned, so nothing untrusted starts on it.
+        let no_stream = Capabilities {
+            stream_json: false,
+            ..claude_caps()
+        };
+        let unverifiable = task_gate(store_with_cli(
+            "no-stream",
+            CliKind::ClaudeCode,
+            "2.1.301",
+            no_stream,
+        ));
         assert_eq!(
-            full(&task("claude_code")),
+            unverifiable(&task("claude_code")),
             TaskSupport::Unsupported {
-                reason: Unverified::Unobserved,
+                reason: Unverified::NoVerifiedConfig,
                 fallback: None,
             }
         );
-        // `classify_emails` still has its deterministic fallback.
+        // `classify_emails` keeps its deterministic fallback there.
         let mut classify = task("claude_code");
         classify.kind = boba_app::ports::agent::AgentTaskKind::ClassifyEmails;
         assert_eq!(
-            full(&classify),
+            unverifiable(&classify),
             TaskSupport::Unsupported {
-                reason: Unverified::Unobserved,
+                reason: Unverified::NoVerifiedConfig,
                 fallback: Some(lockdown::Fallback::DeterministicRules),
             }
         );
-
-        // ADR-010 §1: once a run has watched this CLI hold to its pinned
-        // lock-down, the same untrusted task runs — the observation is the only
-        // thing that lifts the refusal (orquestador ruling (c)).
-        let lifted = task_gate(full_store, observing("claude_code"));
-        assert_eq!(lifted(&task("claude_code")), TaskSupport::Supported);
     }
 
     /// The user's own input does not need lockdown, so the gate lets it through
     /// with the badge the UI shows, and the CLI still gets a live argv.
     #[test]
     fn the_gate_lets_the_users_own_input_through_with_a_badge() {
-        let gate = task_gate(
-            store_with_cli("badge", CliKind::ClaudeCode, "2.2.0", claude_caps()),
-            observed(),
-        );
+        let gate = task_gate(store_with_cli(
+            "badge",
+            CliKind::ClaudeCode,
+            "2.2.0",
+            claude_caps(),
+        ));
         let user = task_of(
             "claude_code",
             boba_app::ports::agent::AgentTaskKind::ProfileImport,
@@ -778,8 +756,8 @@ mod tests {
     /// our MCP server, and only that task's own tools.
     #[test]
     fn a_user_task_on_a_full_cli_carries_its_pinned_lockdown() {
-        let full = store_with_cli("pinned", CliKind::ClaudeCode, "2.1.289", claude_caps());
-        let full_gate = task_gate(Arc::clone(&full), observing("claude_code"));
+        let full = store_with_cli("pinned", CliKind::ClaudeCode, "2.1.301", claude_caps());
+        let full_gate = task_gate(Arc::clone(&full));
         let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         let sandbox = run_sandbox("pinned");
 

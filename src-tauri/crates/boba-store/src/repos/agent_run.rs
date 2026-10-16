@@ -20,9 +20,16 @@ fn sql_err(e: rusqlite::Error) -> StoreError {
 pub fn insert_run(conn: &Connection, run: &NewAgentRun) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO agent_run
-             (id, task_kind, input_trust, cli, model, status, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'running', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-        params![run.id, run.task_kind, run.input_trust, run.cli, run.model],
+             (id, task_kind, input_trust, cli, model, pack_version, status, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        params![
+            run.id,
+            run.task_kind,
+            run.input_trust,
+            run.cli,
+            run.model,
+            run.pack_version
+        ],
     )?;
     Ok(())
 }
@@ -77,18 +84,19 @@ fn run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentRunRecord> {
         input_trust: row.get(2)?,
         cli: row.get(3)?,
         model: row.get(4)?,
-        status: row.get(5)?,
-        failure_reason: row.get(6)?,
-        started_at: row.get(7)?,
-        ended_at: row.get(8)?,
-        tokens_in: row.get(9)?,
-        tokens_out: row.get(10)?,
-        cost_usd: row.get(11)?,
+        pack_version: row.get(5)?,
+        status: row.get(6)?,
+        failure_reason: row.get(7)?,
+        started_at: row.get(8)?,
+        ended_at: row.get(9)?,
+        tokens_in: row.get(10)?,
+        tokens_out: row.get(11)?,
+        cost_usd: row.get(12)?,
     })
 }
 
-const RUN_COLUMNS: &str = "id, task_kind, input_trust, cli, model, status, failure_reason,
-                           started_at, ended_at, tokens_in, tokens_out, cost_usd";
+const RUN_COLUMNS: &str = "id, task_kind, input_trust, cli, model, pack_version, status,
+                           failure_reason, started_at, ended_at, tokens_in, tokens_out, cost_usd";
 
 /// Fetch a run by id.
 pub fn get_run(conn: &Connection, run_id: &str) -> rusqlite::Result<Option<AgentRunRecord>> {
@@ -184,6 +192,10 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open");
         conn.execute_batch(include_str!("../../migrations/0004_agent_runs.sql"))
             .expect("apply 0004");
+        conn.execute_batch(include_str!(
+            "../../migrations/0011_agent_run_pack_version.sql"
+        ))
+        .expect("apply 0011");
         conn
     }
 
@@ -194,6 +206,7 @@ mod tests {
             input_trust: "untrusted".to_string(),
             cli: "claude_code".to_string(),
             model: Some("sonnet".to_string()),
+            pack_version: "0123456789abcdef".to_string(),
         }
     }
 
@@ -208,6 +221,8 @@ mod tests {
         assert_eq!(run.status, "running");
         assert_eq!(run.cli, "claude_code");
         assert_eq!(run.model.as_deref(), Some("sonnet"));
+        // The pack that produced the run travels with it (S2.4, AC2).
+        assert_eq!(run.pack_version, "0123456789abcdef");
         assert!(run.ended_at.is_none());
         assert!(run.started_at.contains('T'));
 
