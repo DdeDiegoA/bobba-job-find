@@ -109,6 +109,15 @@ export const commands = {
     typedError<ApplicationDetail, AppError_Serialize>(
       __TAURI_INVOKE("tracker_transition_status", { input }),
     ),
+  /**
+   *  Add an Offer from a pasted URL (AC1): fetch the page, then store what it
+   *  says. The user is asked to paste the text when the fetch fails.
+   */
+  ingestManualUrl: (url: string) =>
+    typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_url", { url })),
+  /**  Add an Offer from pasted text (AC2). */
+  ingestManualText: (text: string) =>
+    typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_text", { text })),
 };
 
 /** Events */
@@ -404,6 +413,31 @@ export type MailSecurity =
   | "tls"
   /**  Plain TCP upgraded with `STARTTLS` (IMAP 143, SMTP 587). */
   | "start_tls";
+
+/**  The Offer as the manual-add screen shows it right after intake (AC2). */
+export type ManualOffer = {
+  id: string;
+  title: string;
+  /**  Empty when neither the page nor the text named one (never invented). */
+  company: string;
+  source_id: string;
+  source_name: string;
+  locations: string[];
+  /**  `remote` | `hybrid` | `onsite` | `unknown`. */
+  work_mode: string;
+  /**
+   *  Pay in minor units, with its ISO-4217 code and period, so the UI formats
+   *  it (S4.2 stores the same three columns, AD-17). A JS number, not an
+   *  `i64`: specta refuses BigInt-style types, and a pay amount is nowhere
+   *  near 2^53 minor units.
+   */
+  amount_minor: number | null;
+  currency: string | null;
+  pay_period: string | null;
+  apply_url: string;
+  /**  BCP-47 content language of the posting. */
+  lang: string;
+};
 
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";

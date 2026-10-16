@@ -1,1 +1,27 @@
-{}
+{
+  "title": "Add a job",
+  "hint": "Paste a link or the posting text. Boba fetches and reads it, then adds it as an Offer — no automation, no account needed.",
+  "mode.aria": "What are you pasting?",
+  "mode.url": "A link",
+  "mode.text": "The text",
+  "url.label": "Job link",
+  "url.placeholder": "https://jobs.example.com/posting",
+  "text.label": "Posting text",
+  "text.placeholder": "Paste the whole posting here",
+  "submit.url": "Fetch and add",
+  "submit.text": "Add this job",
+  "submitting": "Reading…",
+  "fetch.hint": "A page Boba cannot fetch (robots rules, a block) can still be added: paste its text instead.",
+  "result.title": "Added to your inbox",
+  "result.untitled": "Untitled posting",
+  "result.company_unknown": "Company not stated",
+  "result.source": "Source: {source}",
+  "result.ranking": "It gets ranked and tailored on your next run.",
+  "work_mode.remote": "Remote",
+  "work_mode.hybrid": "Hybrid",
+  "work_mode.onsite": "On-site",
+  "work_mode.unknown": "Work mode not stated",
+  "salary.per_year": "per year",
+  "salary.per_month": "per month",
+  "salary.per_hour": "per hour"
+}

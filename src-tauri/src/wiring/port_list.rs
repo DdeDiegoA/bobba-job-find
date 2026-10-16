@@ -59,5 +59,14 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     }
     // The apply area owns `application` + `status_event` (S9.1).
     mount_port::<dyn ApplyRepo>(app, store.clone());
+    // The one outbound HTTP client (AD-10): the manual intake fetch (S4.7) is
+    // its first caller, and the source adapters share this instance. Mounted as
+    // the concrete type: there is no trait to abstract (one client, one
+    // implementation), and a second one would be a second bucket and a second
+    // robots cache.
+    match boba_sources::http::HttpClient::honest() {
+        Ok(http) => mount_port(app, Arc::new(http)),
+        Err(error) => tracing::error!(?error, "http client left unmounted"),
+    }
     // slices append ONE line above this comment; never reorder/remove
 }
