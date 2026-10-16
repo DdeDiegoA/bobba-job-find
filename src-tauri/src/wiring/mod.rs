@@ -5,6 +5,7 @@
 //! [`port_list`]. Commands read a port through [`port`] and never `try_state`
 //! directly, so a locked store is a typed error instead of a panic.
 
+pub mod agent;
 pub mod port_list;
 
 use std::path::PathBuf;

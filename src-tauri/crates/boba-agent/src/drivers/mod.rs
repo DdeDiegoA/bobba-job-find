@@ -68,6 +68,22 @@ impl CliKind {
         }
     }
 
+    /// The flag that points this CLI at a run's MCP config **file**, when that
+    /// flag takes the path as its value.
+    ///
+    /// Flags live with the driver because that is what AD-4 makes the driver's
+    /// business, and each value here is checked against the CLI's recorded
+    /// `--help` fixture in the test below: nothing is guessed. `None` means the
+    /// flag is not a simple `--flag <path>` (Codex takes a config override
+    /// string, Aider has no MCP support), so the argv for those CLIs stays with
+    /// the driver work rather than being invented in the composition root.
+    pub const fn mcp_config_flag(self) -> Option<&'static str> {
+        match self {
+            CliKind::ClaudeCode | CliKind::GeminiCli => Some("--mcp-config"),
+            CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
+        }
+    }
+
     /// Install link shown for a "Not installed" CLI (FR-2).
     pub const fn install_url(self) -> &'static str {
         match self {
@@ -205,6 +221,33 @@ mod tests {
             driver.health(false, " segfault "),
             HealthStatus::Unhealthy("segfault".to_string())
         );
+    }
+
+    #[test]
+    fn the_mcp_config_flag_is_the_one_the_cli_documents() {
+        // Evidence, not invention: the flag must appear in the recorded help.
+        for (kind, fixture) in [
+            (
+                CliKind::ClaudeCode,
+                include_str!("fixtures/claude_code_help.txt"),
+            ),
+            (CliKind::GeminiCli, include_str!("fixtures/gemini_help.txt")),
+        ] {
+            let flag = kind.mcp_config_flag().expect("a path-taking MCP flag");
+            assert!(
+                fixture.contains(flag),
+                "{} does not document {flag}",
+                kind.display_name()
+            );
+            assert!(
+                fixture.contains(&format!("{flag} <")),
+                "{flag} for {} does not take a value",
+                kind.display_name()
+            );
+        }
+        for kind in [CliKind::Codex, CliKind::OpenCode, CliKind::Aider] {
+            assert_eq!(kind.mcp_config_flag(), None, "{}", kind.display_name());
+        }
     }
 
     #[test]

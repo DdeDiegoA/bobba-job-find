@@ -32,6 +32,9 @@ specta-typescript = { workspace = true }
 boba-app = { path = "crates/boba-app" }
 # Composition root (ADR-012): the store adapter wiring opens and mounts.
 boba-store = { path = "crates/boba-store" }
+# Composition root (CH5, ADR-012): the agent runtime is built and mounted here.
+boba-agent = { path = "crates/boba-agent" }
+boba-mcp-proto = { path = "crates/boba-mcp-proto" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
