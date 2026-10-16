@@ -22,7 +22,7 @@ impl FakeCore {
     /// `reply` returns `None` to drop the connection without answering.
     fn start(reply: impl Fn(&Value) -> Option<Value> + Send + 'static) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
-        let endpoint = wire::endpoint(dir.path());
+        let endpoint = wire::endpoint(dir.path(), "01RUN");
         let listener = wire::listener(&endpoint).expect("bind the run's endpoint");
 
         let received = std::thread::spawn(move || {
@@ -158,6 +158,29 @@ fn a_rejected_token_exits_nonzero_and_prints_no_jsonrpc() {
     assert!(stdout.is_empty(), "stdout: {stdout:?}");
     assert!(stderr.contains("refused"), "stderr: {stderr}");
     // The refused message was never relayed to the core.
+    assert_eq!(core.messages().len(), 1);
+}
+
+#[test]
+fn an_oversized_stdin_frame_is_refused_and_never_relayed() {
+    let core = FakeCore::start(|message| {
+        (message["method"] == wire::METHOD_AUTH)
+            .then(|| json!({"jsonrpc": "2.0", "id": 0, "result": {"ok": true}}))
+    });
+    let huge = format!("{}\n", "x".repeat(wire::MAX_LINE_BYTES + 1));
+
+    let (status, stdout, stderr) = run_shim(
+        &[
+            (wire::ENV_TOKEN, "token"),
+            (wire::ENV_ENDPOINT, core.endpoint.as_str()),
+        ],
+        &huge,
+    );
+
+    assert!(!status.success());
+    assert!(stdout.is_empty(), "stdout: {stdout:?}");
+    assert!(stderr.contains("stdin"), "stderr: {stderr}");
+    // Only the handshake reached the core.
     assert_eq!(core.messages().len(), 1);
 }
 

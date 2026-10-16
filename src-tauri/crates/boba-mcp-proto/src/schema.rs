@@ -6,13 +6,55 @@
 //! The shim holds no policy: it authenticates and forwards lines. The core
 //! decides the tool subset, the call cap and the envelopes.
 
-use std::io;
+use std::io::{self, BufRead};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub use interprocess::local_socket::{Listener, ListenerNonblockingMode, Stream};
+
+/// The longest wire line either side will read. The peer across the socket is
+/// the CLI side, the party the per-run token exists to authenticate, so its
+/// framing is bounded rather than trusted (AD-6).
+pub const MAX_LINE_BYTES: usize = 1024 * 1024;
+
+/// Read one wire line, refusing anything longer than [`MAX_LINE_BYTES`].
+///
+/// The buffer grows only as far as the cap, so an endless stream cannot make
+/// either side allocate without limit. Over-length and non-UTF-8 input are
+/// `InvalidData`: the caller closes the connection instead of trying to resync
+/// a stream a hostile peer could keep desynchronised.
+pub fn read_message_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+    let mut bytes = Vec::new();
+    loop {
+        let chunk = reader.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        let end = chunk
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(chunk.len(), |i| i + 1);
+        if bytes.len() + end > MAX_LINE_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("message longer than {MAX_LINE_BYTES} bytes"),
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..end]);
+        reader.consume(end);
+        if bytes.ends_with(b"\n") {
+            break;
+        }
+    }
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let line =
+        String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(Some(line.trim_end_matches(['\n', '\r']).to_string()))
+}
 
 /// MCP protocol revision this server speaks (echoed on `initialize`).
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -94,21 +136,36 @@ pub fn request_id(message: &Value) -> Value {
     message.get("id").cloned().unwrap_or(Value::Null)
 }
 
-/// The endpoint of a run's MCP socket: a filesystem path on Unix, a namespaced
-/// pipe name on Windows. `base_dir` is the app data directory.
-pub fn endpoint(base_dir: &Path) -> String {
+/// How much of a run id goes into a Unix socket name. A `sockaddr_un` path is
+/// capped (104 bytes on macOS, 108 on Linux) and the app data directory already
+/// eats most of it, so the name is the run id's **last** 16 characters — the 80
+/// random bits of a ULID, which is what uniqueness needs — not the whole id.
+/// The full run id lives in `agent_run.id` and in the workspace path.
+const ENDPOINT_NAME_CHARS: usize = 16;
+
+/// Headroom under the smallest `sun_path` (104 bytes), for the trailing NUL.
+#[cfg(unix)]
+const SUN_PATH_BUDGET: usize = 100;
+
+/// The endpoint of one run's MCP socket: **one endpoint per run** (architecture
+/// §5.4), so a leftover socket from a crashed run can never wedge a later one.
+/// A filesystem path on Unix, a namespaced pipe name on Windows. `base_dir` is
+/// the app data directory.
+pub fn endpoint(base_dir: &Path, run_id: &str) -> String {
     #[cfg(unix)]
     {
+        let tail = &run_id[run_id.len().saturating_sub(ENDPOINT_NAME_CHARS)..];
         base_dir
             .join("ipc")
-            .join("boba-mcp.sock")
+            .join(format!("{tail}.sock"))
             .to_string_lossy()
             .into_owned()
     }
     #[cfg(windows)]
     {
         let _ = base_dir;
-        "boba-mcp".to_string()
+        let tail = &run_id[run_id.len().saturating_sub(ENDPOINT_NAME_CHARS)..];
+        format!("boba-mcp-{tail}")
     }
 }
 
@@ -128,6 +185,12 @@ fn name(endpoint: &str) -> io::Result<interprocess::local_socket::Name<'static>>
 
 /// Bind the run's MCP endpoint, reachable only by the owning user (AD-6).
 ///
+/// A pre-existing file at the endpoint path is removed first: the transport
+/// only reclaims its socket file on a clean drop, so a SIGKILL, a panic-abort
+/// or a power loss would otherwise leave a file that makes every later bind
+/// fail. Safe because endpoints are per run and the app is single-instance
+/// (AD-18), and because the directory is owner-only.
+///
 /// Unix: bin the socket in a `0700` directory; where the platform also honours
 /// a mode on the socket file (Linux) it is `0600`. macOS rejects that mode, so
 /// there the owner-only directory is the protection, and a Unix socket can be
@@ -145,9 +208,24 @@ pub fn listener(endpoint: &str) -> io::Result<Listener> {
         use interprocess::os::unix::local_socket::ListenerOptionsExt;
         use std::os::unix::fs::PermissionsExt;
 
+        // Fail with a plain message rather than the transport's byte-count one.
+        if endpoint.len() > SUN_PATH_BUDGET {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "endpoint path is {} bytes, over the {SUN_PATH_BUDGET}-byte Unix socket budget: {endpoint}",
+                    endpoint.len()
+                ),
+            ));
+        }
         if let Some(parent) = Path::new(endpoint).parent() {
             std::fs::create_dir_all(parent)?;
             std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+        }
+        match std::fs::remove_file(endpoint) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
         match ListenerOptions::new()
             .name(name(endpoint)?)
@@ -225,7 +303,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 
-        let endpoint = endpoint(&dir);
+        let endpoint = endpoint(&dir, "01RUN");
         let listener = listener(&endpoint).expect("bind");
 
         let socket = fs::metadata(&endpoint).unwrap().permissions().mode();
@@ -249,5 +327,109 @@ mod tests {
     #[cfg(unix)]
     fn endpoint_of_parent(endpoint: &str) -> std::path::PathBuf {
         Path::new(endpoint).parent().expect("parent").to_path_buf()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_socket_file_left_by_a_crashed_run_does_not_wedge_the_next_bind() {
+        // A crash does not unwind, so the transport reclaims nothing and the
+        // file stays behind: the next bind of that run id must still work.
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!("boba-mcp-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let endpoint = endpoint(&dir, "01RUN");
+        fs::create_dir_all(Path::new(&endpoint).parent().unwrap()).unwrap();
+        fs::write(&endpoint, b"left over by a crashed run").unwrap();
+
+        let bound = listener(&endpoint).expect("a stale file must not block the bind");
+        drop(bound);
+        let rebound = listener(&endpoint).expect("and the next bind must work too");
+        drop(rebound);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn two_runs_bind_their_own_endpoints_at_the_same_time() {
+        // §5.4: one endpoint per run, so a scheduled run and a "Run now" do not
+        // fight over a single global socket path.
+        use interprocess::local_socket::traits::Listener as _;
+        use std::fs;
+        let dir = std::env::temp_dir().join(format!("boba-mcp-two-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+
+        let first_endpoint = endpoint(&dir, "01AAA");
+        let second_endpoint = endpoint(&dir, "01BBB");
+        assert_ne!(first_endpoint, second_endpoint);
+        let first = listener(&first_endpoint).expect("first run");
+        let second = listener(&second_endpoint).expect("second run");
+
+        // Each endpoint accepts its own client, so neither shadows the other.
+        for (endpoint, listener) in [(&first_endpoint, &first), (&second_endpoint, &second)] {
+            let client = std::thread::spawn({
+                let endpoint = endpoint.clone();
+                move || connect(&endpoint).expect("connect")
+            });
+            let accepted = listener.accept().expect("accept");
+            drop((accepted, client.join().expect("client thread")));
+        }
+
+        drop((first, second));
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_endpoint_path_stays_inside_the_unix_socket_budget() {
+        // A realistic app data directory is ~70 bytes; the name must not push a
+        // `sockaddr_un` over the 104-byte cap on macOS.
+        let app_data =
+            Path::new("/Users/someone/Library/Application Support/com.boba-job-find.app");
+        let long_run_id = ulid_like(26);
+        let path = endpoint(app_data, &long_run_id);
+        assert!(
+            path.len() <= SUN_PATH_BUDGET,
+            "{} bytes: {path}",
+            path.len()
+        );
+        assert!(path.ends_with(".sock"));
+
+        // Two runs never share an endpoint, however long their ids are.
+        assert_ne!(
+            endpoint(app_data, &ulid_like(26)),
+            endpoint(app_data, &format!("{}X", ulid_like(25)))
+        );
+    }
+
+    #[cfg(unix)]
+    fn ulid_like(len: usize) -> String {
+        // Crockford base32, the alphabet real run ids use.
+        (0..len)
+            .map(|i| {
+                "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+                    .chars()
+                    .nth(i % 32)
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_line_over_the_cap_is_refused_and_a_normal_one_passes() {
+        let mut ok = io::Cursor::new(b"{\"id\":1}\n".to_vec());
+        assert_eq!(
+            read_message_line(&mut ok).unwrap().as_deref(),
+            Some("{\"id\":1}")
+        );
+        assert_eq!(read_message_line(&mut ok).unwrap(), None);
+
+        let mut huge = io::Cursor::new(vec![b'x'; MAX_LINE_BYTES + 10]);
+        let error = read_message_line(&mut huge).expect_err("over-length must fail");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let mut not_utf8 = io::Cursor::new(vec![0xff, 0xfe, b'\n']);
+        let error = read_message_line(&mut not_utf8).expect_err("non-UTF-8 must fail");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }

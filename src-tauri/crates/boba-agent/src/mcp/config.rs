@@ -29,6 +29,14 @@ impl Workspace {
     /// ULID; a directory already there is a leftover from a crashed run and is
     /// discarded, never reused (AD-6).
     pub fn create(runs_root: &Path, run_id: &str) -> io::Result<Self> {
+        if !is_valid_run_id(run_id) {
+            // This path is handed to `remove_dir_all`, so a caller must never be
+            // able to name anything outside `runs_root`.
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("run id must be non-empty ASCII alphanumeric, got {run_id:?}"),
+            ));
+        }
         let dir = runs_root.join(run_id);
         if dir.exists() {
             fs::remove_dir_all(&dir)?;
@@ -100,6 +108,17 @@ pub fn run_env(endpoint: &str, token: &str) -> Vec<(String, String)> {
     ]
 }
 
+/// Where a run's sandbox lives: the app data directories and the shim binary.
+#[derive(Debug, Clone)]
+pub struct SandboxConfig {
+    /// `<app data>/runs`, one workspace per run.
+    pub runs_root: PathBuf,
+    /// `<app data>`, the parent of `ipc/`; one endpoint per run lives there.
+    pub app_data: PathBuf,
+    /// The packaged `boba-mcp` binary.
+    pub shim: PathBuf,
+}
+
 /// A prepared run sandbox: the workspace, the endpoint and the token the run is
 /// allowed to use.
 #[derive(Debug)]
@@ -110,24 +129,24 @@ pub struct RunSandbox {
     pub config: PathBuf,
 }
 
-/// Prepare one run: create the workspace, mint the token and write the config.
-/// `runs_root` is the app data `runs` directory; `shim` is the packaged
-/// `boba-mcp` binary.
-pub fn prepare(
-    runs_root: &Path,
-    run_id: &str,
-    shim: &Path,
-    endpoint: &str,
-) -> io::Result<RunSandbox> {
-    let workspace = Workspace::create(runs_root, run_id)?;
+/// Prepare one run: create the workspace, mint the token and write the config
+/// that points the CLI at `boba-mcp` and at nothing else (AC1).
+pub fn prepare(cfg: &SandboxConfig, run_id: &str) -> io::Result<RunSandbox> {
+    let workspace = Workspace::create(&cfg.runs_root, run_id)?;
     let token = new_token()?;
-    let config = workspace.write_mcp_config(shim, endpoint, &token)?;
+    let endpoint = wire::endpoint(&cfg.app_data, run_id);
+    let config = workspace.write_mcp_config(&cfg.shim, &endpoint, &token)?;
     Ok(RunSandbox {
         workspace,
-        endpoint: endpoint.to_string(),
+        endpoint,
         token,
         config,
     })
+}
+
+/// A run id that is safe to join into a path.
+pub fn is_valid_run_id(run_id: &str) -> bool {
+    !run_id.is_empty() && run_id.len() <= 64 && run_id.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 #[cfg(unix)]
@@ -145,6 +164,7 @@ fn owner_only(_dir: &Path) -> io::Result<()> {
 /// in `runtime`; the suite runs tests in parallel, so names are per-test).
 #[cfg(test)]
 pub(crate) mod test_support {
+    use super::SandboxConfig;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -166,9 +186,18 @@ pub(crate) mod test_support {
             &self.0
         }
 
-        /// This root's MCP endpoint (a socket path under `ipc/`).
-        pub(crate) fn endpoint(&self) -> String {
-            super::wire::endpoint(&self.0)
+        /// A run's MCP endpoint (a socket path under `ipc/`).
+        pub(crate) fn endpoint(&self, run_id: &str) -> String {
+            super::wire::endpoint(&self.0, run_id)
+        }
+
+        /// A sandbox config rooted here.
+        pub(crate) fn sandbox_config(&self, shim: &Path) -> SandboxConfig {
+            SandboxConfig {
+                runs_root: self.0.join("runs"),
+                app_data: self.0.clone(),
+                shim: shim.to_path_buf(),
+            }
         }
     }
 
@@ -249,11 +278,29 @@ mod tests {
     }
 
     #[test]
+    fn a_run_id_that_could_escape_the_runs_directory_is_refused() {
+        let root = TempRoot::new();
+        for hostile in ["", "../..", "a/b", "with space", "dot.dot"] {
+            let error = Workspace::create(root.path(), hostile)
+                .expect_err("a hostile run id must not reach remove_dir_all");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{hostile:?}");
+        }
+        // A ULID, the only thing the runtime passes, is accepted.
+        assert!(is_valid_run_id(&ulid::Ulid::generate().to_string()));
+    }
+
+    #[test]
+    fn the_endpoint_is_per_run() {
+        let root = TempRoot::new();
+        assert_ne!(root.endpoint("01AAA"), root.endpoint("01BBB"));
+        assert!(root.endpoint("01AAA").ends_with("01AAA.sock") || cfg!(windows));
+    }
+
+    #[test]
     fn prepare_creates_the_workspace_config_and_env() {
         let root = TempRoot::new();
         let shim = Path::new("/app/binaries/boba-mcp");
-        let sandbox =
-            prepare(root.path(), "01RUN", shim, "/app/ipc/boba-mcp.sock").expect("prepare");
+        let sandbox = prepare(&root.sandbox_config(shim), "01RUN").expect("prepare");
 
         assert!(sandbox.config.is_file());
         assert_eq!(

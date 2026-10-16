@@ -40,7 +40,8 @@ fn serve() -> Result<(), String> {
         .map_err(|e| format!("cannot reach the core on {endpoint}: {e}"))?;
     let mut core = BufReader::new(stream);
     authenticate(&mut core, &token)?;
-    relay(&mut core, std::io::stdin().lock())
+    let stdin = std::io::stdin();
+    relay(&mut core, &mut stdin.lock())
 }
 
 /// Prove possession of the per-run token before relaying anything.
@@ -64,10 +65,9 @@ fn authenticate(core: &mut BufReader<wire::Stream>, token: &str) -> Result<(), S
 }
 
 /// Forward MCP messages until stdin ends.
-fn relay(core: &mut BufReader<wire::Stream>, input: impl BufRead) -> Result<(), String> {
+fn relay(core: &mut BufReader<wire::Stream>, input: &mut impl BufRead) -> Result<(), String> {
     let mut out = std::io::stdout().lock();
-    for line in input.lines() {
-        let line = line.map_err(|e| format!("reading stdin: {e}"))?;
+    while let Some(line) = read_from(input, "stdin")? {
         if line.trim().is_empty() {
             continue;
         }
@@ -96,10 +96,13 @@ fn send(core: &mut BufReader<wire::Stream>, line: &str) -> Result<(), String> {
 }
 
 fn recv(core: &mut BufReader<wire::Stream>) -> Result<String, String> {
-    let mut line = String::new();
-    match core.read_line(&mut line) {
-        Ok(0) => Err("the core closed the connection".to_string()),
-        Ok(_) => Ok(line.trim_end_matches(['\n', '\r']).to_string()),
-        Err(e) => Err(format!("reading from the core: {e}")),
-    }
+    read_from(core, "the core")
+        .and_then(|line| line.ok_or_else(|| "the core closed the connection".to_string()))
+}
+
+/// One bounded line. Neither the CLI on stdin nor the core on the socket gets
+/// to make this process allocate without limit (AD-6).
+fn read_from(reader: &mut impl BufRead, what: &str) -> Result<Option<String>, String> {
+    wire::read_message_line(reader)
+        .map_err(|e| format!("{what} sent a message the shim refuses: {e}"))
 }

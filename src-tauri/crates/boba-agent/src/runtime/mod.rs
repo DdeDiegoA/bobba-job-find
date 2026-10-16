@@ -14,17 +14,27 @@ use boba_app::ports::agent::{
 use boba_app::ports::repo::agent::{AgentRepo, FinishAgentRun, NewAgentRun, RunStatus};
 
 use crate::drivers::{CliKind, HealthStatus};
+use crate::mcp::config::{self, RunSandbox, SandboxConfig};
+use crate::mcp::server::{Limits, McpEndpoint, ToolHandler};
 use crate::supervisor::{CommandSpec, Stream, SupervisedProcess};
 
 /// How long to wait for a line before re-checking cancellation and limits.
 const POLL: Duration = Duration::from_millis(100);
 
-/// The concrete CLI invocation for a task. S2.3 owns workspace + MCP config
-/// rendering; S2.2 tests supply a fake CLI here.
+/// The concrete CLI invocation for a task. The runtime adds the run's
+/// workspace as `cwd` and its endpoint and token to `env` (AC1); callers that
+/// build the command themselves (tests, the composition root) pass one of
+/// these, and `AgentPort::run` builds it through [`CommandBuilder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunSpec {
     pub spec: CommandSpec,
 }
+
+/// Builds the CLI invocation for one task. The composition root injects it: a
+/// `CliDriver` owns detection and argv (AD-4, ADR-012), and the [`RunSandbox`]
+/// it is handed carries the workspace, the run's `mcp.json` and the endpoint,
+/// so adding the CLI's own MCP-config flag stays the driver's business.
+pub type CommandBuilder = dyn Fn(&AgentTask, &RunSandbox) -> CommandSpec + Send + Sync;
 
 /// Event sink, e.g. the Tauri `agent.run.progressed` emitter.
 pub type Emitter = dyn Fn(&str, i64, &AgentEvent) + Send + Sync;
@@ -35,6 +45,14 @@ pub struct AgentRuntime<R: AgentRepo + 'static> {
     emitter: Option<Arc<Emitter>>,
     /// Optional per-run poll cap, giving deterministic tests a stop condition.
     max_polls: Option<u64>,
+    /// The per-run sandbox and MCP endpoint (AC1, AD-6). Absent until the
+    /// composition root mounts them (ADR-012) and in tests that drive the
+    /// supervisor with their own fixture command.
+    sandbox: Option<(SandboxConfig, Arc<dyn ToolHandler>)>,
+    /// Turns a task into a CLI command, for [`AgentPort::run`].
+    builder: Option<Arc<CommandBuilder>>,
+    /// Bounds the endpoint puts on its peers.
+    limits: Limits,
 }
 
 impl<R: AgentRepo + 'static> AgentRuntime<R> {
@@ -43,7 +61,30 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             repo,
             emitter: None,
             max_polls: None,
+            sandbox: None,
+            builder: None,
+            limits: Limits::default(),
         }
+    }
+
+    /// Give every run its own workspace, token and MCP endpoint, served by the
+    /// injected handler. The composition root owns the paths and implements
+    /// `ToolHandler` over the repos (ADR-012): nothing here knows app data.
+    pub fn with_sandbox(mut self, sandbox: SandboxConfig, handler: Arc<dyn ToolHandler>) -> Self {
+        self.sandbox = Some((sandbox, handler));
+        self
+    }
+
+    /// How a task becomes a CLI command, for [`AgentPort::run`].
+    pub fn with_command_builder(mut self, builder: Arc<CommandBuilder>) -> Self {
+        self.builder = Some(builder);
+        self
+    }
+
+    /// Endpoint limits (tests shorten the handshake deadline).
+    pub fn with_endpoint_limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Attach an event sink, e.g. the Tauri `agent.run.progressed` emitter.
@@ -60,7 +101,78 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
 
     /// Run `task` against `run_spec`, streaming events on a background thread.
     pub fn start(&self, task: AgentTask, run_spec: RunSpec) -> RunHandle {
+        self.launch(task, move |_, _| Some(run_spec))
+    }
+
+    /// Prepare the run's workspace and endpoint, take its command from `build`,
+    /// then spawn. Every run ends by deleting the workspace and revoking the
+    /// token, whichever way it ended (AC1).
+    fn launch(
+        &self,
+        task: AgentTask,
+        build: impl FnOnce(&AgentTask, Option<&RunSandbox>) -> Option<RunSpec>,
+    ) -> RunHandle {
         let run_id = ulid::Ulid::generate().to_string();
+
+        let sandbox = match self
+            .sandbox
+            .as_ref()
+            .map(|(config, _)| config::prepare(config, &run_id))
+        {
+            Some(Ok(sandbox)) => Some(sandbox),
+            // A run that cannot get its own workspace must not start.
+            Some(Err(_)) => return self.failed(task, run_id, FailureReason::Crashed),
+            None => None,
+        };
+        let endpoint = match self.endpoint_for(&task, sandbox.as_ref()) {
+            Ok(endpoint) => endpoint,
+            Err(reason) => return self.failed(task, run_id, reason),
+        };
+        let Some(run_spec) = build(&task, sandbox.as_ref()) else {
+            // No command builder mounted, or no sandbox to run in: the run is
+            // still recorded and reported, never a panic (ADR-012).
+            return self.failed(task, run_id, FailureReason::NotFound);
+        };
+
+        self.spawn(
+            task,
+            run_id,
+            sandboxed(run_spec, sandbox.as_ref()),
+            sandbox,
+            endpoint,
+        )
+    }
+
+    /// Bind this run's MCP endpoint; `None` when no sandbox is mounted.
+    fn endpoint_for(
+        &self,
+        task: &AgentTask,
+        sandbox: Option<&RunSandbox>,
+    ) -> Result<Option<McpEndpoint>, FailureReason> {
+        let (Some((_, handler)), Some(sandbox)) = (self.sandbox.as_ref(), sandbox) else {
+            return Ok(None);
+        };
+        McpEndpoint::start(
+            &sandbox.endpoint,
+            task.kind.id(),
+            &sandbox.token,
+            task.budget.max_tool_calls,
+            Arc::clone(handler),
+            self.limits,
+        )
+        .map(Some)
+        .map_err(|_| FailureReason::Crashed)
+    }
+
+    /// Open the run, spawn the command, and stream its events.
+    fn spawn(
+        &self,
+        task: AgentTask,
+        run_id: String,
+        run_spec: RunSpec,
+        sandbox: Option<RunSandbox>,
+        endpoint: Option<McpEndpoint>,
+    ) -> RunHandle {
         let cancel = CancelToken::new();
         let (tx, events) = std::sync::mpsc::channel();
 
@@ -88,7 +200,12 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         };
         thread::Builder::new()
             .name(format!("boba-agent-run-{run_id}"))
-            .spawn(move || drive(state, cancel_for_thread, max_polls))
+            .spawn(move || {
+                // Held for the whole run: dropping the endpoint revokes the
+                // token, dropping the sandbox deletes the workspace (AC1).
+                let _held = (endpoint, sandbox);
+                drive(state, cancel_for_thread, max_polls);
+            })
             .expect("spawn run thread");
 
         RunHandle {
@@ -97,15 +214,80 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
             cancel,
         }
     }
+
+    /// Record and report a run that never started. The port features call has
+    /// no panic path: a missing engine is a failure with a reason.
+    fn failed(&self, task: AgentTask, run_id: String, reason: FailureReason) -> RunHandle {
+        let (tx, events) = std::sync::mpsc::channel();
+        let _ = self.repo.start_run(NewAgentRun {
+            id: run_id.clone(),
+            task_kind: task.kind.id().to_string(),
+            input_trust: trust_id(task.input_trust).to_string(),
+            cli: task.cli.clone(),
+            model: task.model.clone(),
+        });
+
+        let events_of_the_run = [
+            AgentEvent::Started {
+                cli: task.cli.clone(),
+                model: task.model.clone(),
+            },
+            failed_event(reason),
+        ];
+        for (seq, event) in events_of_the_run.iter().enumerate() {
+            record_event(
+                &*self.repo,
+                self.emitter.as_ref(),
+                &tx,
+                &run_id,
+                seq as i64,
+                event,
+            );
+        }
+        let _ = self.repo.finish_run(
+            &run_id,
+            FinishAgentRun {
+                status: RunStatus::Failed,
+                failure_reason: Some(reason.id().to_string()),
+                tokens_in: None,
+                tokens_out: None,
+                cost_usd: None,
+            },
+        );
+
+        RunHandle {
+            run_id,
+            events,
+            cancel: CancelToken::new(),
+        }
+    }
 }
 
 impl<R: AgentRepo + 'static> AgentPort for AgentRuntime<R> {
-    /// Adapter-agnostic entry point used by features. The CLI command is built
-    /// by the adapter from the task's `cli`; S2.2's adapter is `boba-agent`
-    /// itself, so the command is resolved by the caller as a [`RunSpec`].
-    fn run(&self, _task: AgentTask) -> RunHandle {
-        panic!("use AgentRuntime::start(task, RunSpec) until S2.3 wires MCP config")
+    /// The AD-4 entry point features call. The task's CLI command comes from the
+    /// injected [`CommandBuilder`]; the workspace, the token, the endpoint and
+    /// the tool policy are the runtime's (AC1, AD-6).
+    fn run(&self, task: AgentTask) -> RunHandle {
+        self.launch(task, |task, sandbox| {
+            let (builder, sandbox) = (self.builder.as_ref()?, sandbox?);
+            Some(RunSpec {
+                spec: builder(task, sandbox),
+            })
+        })
     }
+}
+
+/// Put the run inside its workspace: `cwd` is the run's own directory, and the
+/// endpoint and token travel in the environment, never in argv.
+fn sandboxed(mut run_spec: RunSpec, sandbox: Option<&RunSandbox>) -> RunSpec {
+    if let Some(sandbox) = sandbox {
+        run_spec.spec.cwd = Some(sandbox.workspace.path().to_path_buf());
+        run_spec
+            .spec
+            .env
+            .extend(config::run_env(&sandbox.endpoint, &sandbox.token));
+    }
+    run_spec
 }
 
 fn trust_id(trust: InputTrust) -> &'static str {
@@ -131,15 +313,33 @@ impl<R: AgentRepo> RunState<R> {
     fn emit(&mut self, event: &AgentEvent) {
         let seq = self.seq;
         self.seq += 1;
-        let payload = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_string());
-        let _ = self
-            .repo
-            .record_event(&self.run_id, seq, event_kind(event), &payload);
-        if let Some(sink) = &self.emitter {
-            sink(&self.run_id, seq, event);
-        }
-        let _ = self.tx.send(event.clone());
+        record_event(
+            &*self.repo,
+            self.emitter.as_ref(),
+            &self.tx,
+            &self.run_id,
+            seq,
+            event,
+        );
     }
+}
+
+/// Persist and emit one event. Both the running path and the failure paths use
+/// it, so a run looks the same to the UI whichever way it ended.
+fn record_event(
+    repo: &dyn AgentRepo,
+    emitter: Option<&Arc<Emitter>>,
+    tx: &Sender<AgentEvent>,
+    run_id: &str,
+    seq: i64,
+    event: &AgentEvent,
+) {
+    let payload = serde_json::to_string(event).unwrap_or_else(|_| "{}".to_string());
+    let _ = repo.record_event(run_id, seq, event_kind(event), &payload);
+    if let Some(sink) = emitter {
+        sink(run_id, seq, event);
+    }
+    let _ = tx.send(event.clone());
 }
 
 /// How the loop ended, mapped to a terminal status + reason.
@@ -422,6 +622,201 @@ impl Usage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boba_app::ports::agent::{AgentTaskKind, RunBudget};
+    use boba_app::ports::repo::agent::{
+        AgentEventRecord, AgentRepoError, AgentRunRecord, RunStatus,
+    };
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    /// Minimal in-memory `AgentRepo`: enough to drive a real run in-process.
+    #[derive(Default)]
+    struct FakeRepo {
+        runs: Mutex<Vec<AgentRunRecord>>,
+    }
+
+    impl AgentRepo for FakeRepo {
+        fn start_run(&self, run: NewAgentRun) -> Result<(), AgentRepoError> {
+            self.runs.lock().unwrap().push(AgentRunRecord {
+                id: run.id,
+                task_kind: run.task_kind,
+                input_trust: run.input_trust,
+                cli: run.cli,
+                model: run.model,
+                status: RunStatus::Running.id().to_string(),
+                failure_reason: None,
+                started_at: "2026-10-05T00:00:00.000Z".to_string(),
+                ended_at: None,
+                tokens_in: None,
+                tokens_out: None,
+                cost_usd: None,
+            });
+            Ok(())
+        }
+
+        fn record_event(
+            &self,
+            _run_id: &str,
+            _seq: i64,
+            _kind: &str,
+            _payload_json: &str,
+        ) -> Result<(), AgentRepoError> {
+            Ok(())
+        }
+
+        fn finish_run(&self, run_id: &str, finish: FinishAgentRun) -> Result<(), AgentRepoError> {
+            let mut runs = self.runs.lock().unwrap();
+            let run = runs.iter_mut().find(|run| run.id == run_id).expect("run");
+            run.status = finish.status.id().to_string();
+            run.failure_reason = finish.failure_reason;
+            run.ended_at = Some("2026-10-05T00:00:02.000Z".to_string());
+            Ok(())
+        }
+
+        fn get_run(&self, run_id: &str) -> Result<Option<AgentRunRecord>, AgentRepoError> {
+            Ok(self
+                .runs
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|run| run.id == run_id)
+                .cloned())
+        }
+
+        fn list_events(&self, _run_id: &str) -> Result<Vec<AgentEventRecord>, AgentRepoError> {
+            Ok(Vec::new())
+        }
+
+        fn unfinished_runs(&self) -> Result<Vec<AgentRunRecord>, AgentRepoError> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Accepts every call: this test is about the sandbox, not the tools.
+    struct NoTools;
+
+    impl ToolHandler for NoTools {
+        fn call(
+            &self,
+            _task: &str,
+            _tool: &str,
+            _args: &serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({}))
+        }
+    }
+
+    /// A short root: a Unix socket path is capped at ~104 bytes, and the
+    /// environment's temp directory is long enough to eat most of that.
+    fn scratch() -> PathBuf {
+        static SEQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir = PathBuf::from(format!(
+            "/tmp/boba-rt-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        dir
+    }
+
+    fn task() -> AgentTask {
+        AgentTask {
+            kind: AgentTaskKind::ExtractPostings,
+            input_trust: boba_app::ports::agent::InputTrust::Untrusted,
+            cli: "claude_code".to_string(),
+            model: Some("sonnet".to_string()),
+            prompt: "extract".to_string(),
+            budget: RunBudget::default(),
+            env: vec![],
+        }
+    }
+
+    /// The run's child reports its cwd and its token; both come from the run's
+    /// own sandbox, and the workspace is gone once the run ends (AC1).
+    #[cfg(unix)]
+    #[test]
+    fn a_run_runs_inside_its_workspace_and_cleans_up_afterwards() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            )
+            .with_command_builder(Arc::new(|_task, _sandbox| CommandSpec {
+                program: PathBuf::from("/bin/sh"),
+                args: vec![
+                    "-c".to_string(),
+                    "pwd; printf 'token=%s' \"$BOBA_RUN_TOKEN\"".to_string(),
+                ],
+                cwd: None,
+                env: vec![],
+            }));
+
+        let handle = runtime.run(task());
+        let run_id = handle.run_id.clone();
+
+        let output: String = handle
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                AgentEvent::Text { text } => Some(text),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let workspace = root.join("runs").join(&run_id);
+        assert!(
+            output.contains(&workspace.display().to_string()),
+            "the child did not run in {workspace:?}: {output:?}"
+        );
+        let token = output
+            .split("token=")
+            .nth(1)
+            .expect("BOBA_RUN_TOKEN was not in the child's environment");
+        assert_eq!(token.trim().len(), 64, "token: {token:?}");
+        // The workspace is deleted as the run's thread unwinds, just after the
+        // last event: wait for it rather than racing it.
+        let mut left = workspace.exists();
+        for _ in 0..200 {
+            if !left {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            left = workspace.exists();
+        }
+        assert!(!left, "the workspace outlived the run: {workspace:?}");
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// Without a command builder the port reports a failure instead of the
+    /// panic it used to carry (ADR-012).
+    #[test]
+    fn a_run_without_an_engine_is_reported_not_panicked() {
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo));
+
+        let handle = runtime.run(task());
+        let failed = handle
+            .events
+            .iter()
+            .find_map(|event| match event {
+                AgentEvent::Failed { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .expect("a failed event");
+        assert_eq!(failed, FailureReason::NotFound);
+        assert_eq!(
+            repo.get_run(&handle.run_id).unwrap().unwrap().status,
+            RunStatus::Failed.id()
+        );
+    }
 
     #[test]
     fn non_json_lines_parse_as_text() {
