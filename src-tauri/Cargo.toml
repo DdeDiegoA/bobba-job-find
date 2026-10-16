@@ -37,6 +37,10 @@ boba-agent = { path = "crates/boba-agent" }
 boba-mcp-proto = { path = "crates/boba-mcp-proto" }
 # Email connections (S8.1): the Graph/OAuth adapter is mounted as a port here.
 boba-mail = { path = "crates/boba-mail" }
+# Manual intake (S4.7): the shared outbound HTTP client is mounted here.
+boba-sources = { path = "crates/boba-sources" }
+# Resolving a pasted URL and a redirect's `Location` (S4.7).
+url = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -52,3 +56,5 @@ tauri-plugin-process = { workspace = true }
 # Unit tests build a mock Tauri app and the store without the OS keychain.
 [dev-dependencies]
 tauri = { workspace = true, features = ["test"] }
+# The manual-intake fetch (S4.7) is tested against a local HTTP server.
+wiremock = { workspace = true }

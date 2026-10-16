@@ -1,1 +1,27 @@
-{}
+{
+  "title": "Agregar una oferta",
+  "hint": "Pega un enlace o el texto de la oferta. Boba la descarga, la lee y la agrega como Oferta — sin automatización ni cuentas.",
+  "mode.aria": "¿Qué vas a pegar?",
+  "mode.url": "Un enlace",
+  "mode.text": "El texto",
+  "url.label": "Enlace de la oferta",
+  "url.placeholder": "https://empleos.ejemplo.com/oferta",
+  "text.label": "Texto de la oferta",
+  "text.placeholder": "Pega aquí toda la oferta",
+  "submit.url": "Descargar y agregar",
+  "submit.text": "Agregar esta oferta",
+  "submitting": "Leyendo…",
+  "fetch.hint": "Una página que Boba no puede descargar (reglas de robots, un bloqueo) igual se puede agregar: pega su texto.",
+  "result.title": "Agregada a tu bandeja",
+  "result.untitled": "Oferta sin título",
+  "result.company_unknown": "Empresa no indicada",
+  "result.source": "Origen: {source}",
+  "result.ranking": "Se puntúa y se adapta en tu próxima búsqueda.",
+  "work_mode.remote": "Remoto",
+  "work_mode.hybrid": "Híbrido",
+  "work_mode.onsite": "Presencial",
+  "work_mode.unknown": "Modalidad no indicada",
+  "salary.per_year": "al año",
+  "salary.per_month": "al mes",
+  "salary.per_hour": "por hora"
+}

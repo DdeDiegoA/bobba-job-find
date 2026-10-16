@@ -1,0 +1,9 @@
+{
+  "errors.manual.empty_input": "There is nothing to add: paste a job link or the posting text first.",
+  "errors.manual.too_large": "That paste is far bigger than a job posting. Paste just the posting text.",
+  "errors.manual.store": "Boba could not save that Offer. Try again.",
+  "errors.manual.missing_url": "Paste the job link first.",
+  "errors.manual.invalid_url": "That does not look like a web link. Use an http or https address.",
+  "errors.manual.fetch_unavailable": "Boba is locked, so it cannot fetch pages right now. Unlock it and try again.",
+  "errors.manual.fetch_failed": "Boba could not fetch that page (robots rules, a block, or a broken link). Paste the posting text instead."
+}

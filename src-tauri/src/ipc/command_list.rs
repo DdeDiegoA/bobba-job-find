@@ -28,6 +28,8 @@ macro_rules! boba_commands {
             crate::commands::tracker::tracker_board,
             crate::commands::tracker::tracker_application_detail,
             crate::commands::tracker::tracker_transition_status,
+            crate::commands::ingest::ingest_manual_url,
+            crate::commands::ingest::ingest_manual_text,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

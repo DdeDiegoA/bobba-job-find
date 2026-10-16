@@ -1,0 +1,9 @@
+{
+  "errors.manual.empty_input": "No hay nada que agregar: primero pega un enlace o el texto de la oferta.",
+  "errors.manual.too_large": "Eso es mucho más grande que una oferta. Pega solo el texto de la oferta.",
+  "errors.manual.store": "Boba no pudo guardar esa oferta. Inténtalo de nuevo.",
+  "errors.manual.missing_url": "Primero pega el enlace de la oferta.",
+  "errors.manual.invalid_url": "Eso no parece un enlace web. Usa una dirección http o https.",
+  "errors.manual.fetch_unavailable": "Boba está bloqueada, así que ahora no puede descargar páginas. Desbloquéala e inténtalo otra vez.",
+  "errors.manual.fetch_failed": "Boba no pudo descargar esa página (reglas de robots, un bloqueo o un enlace roto). Pega el texto de la oferta."
+}

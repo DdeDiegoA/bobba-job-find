@@ -657,6 +657,7 @@ dependencies = [
  "boba-app",
  "boba-mail",
  "boba-mcp-proto",
+ "boba-sources",
  "boba-store",
  "serde",
  "serde_json",
@@ -679,6 +680,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
