@@ -19,6 +19,10 @@ macro_rules! boba_commands {
             crate::commands::profile::profile_restore,
             crate::commands::preferences::preferences_snapshot,
             crate::commands::preferences::preferences_save,
+            crate::commands::email::email_accounts,
+            crate::commands::email::email_connect_outlook,
+            crate::commands::email::email_set_mode,
+            crate::commands::email::email_disconnect,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

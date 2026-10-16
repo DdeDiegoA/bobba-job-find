@@ -11,12 +11,17 @@
 use std::sync::Arc;
 
 use boba_app::ports::agent::AgentPort;
+use boba_app::ports::mail::MailPort;
 use boba_app::ports::repo::agent::AgentRepo;
+use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
+use boba_app::ports::secret::SecretPort;
+use boba_mail::graph::GraphMail;
 use boba_store::db::Store;
+use boba_store::keys::SecretStore;
 use boba_store::repos::audit::SqliteSystemRepo;
 use tauri::{AppHandle, Runtime};
 
@@ -39,5 +44,17 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // `store.clone()` line.
     let agent: Arc<dyn AgentPort> = Arc::new(agent::agent_runtime(app, store));
     mount_port::<dyn AgentPort>(app, agent);
+    // Email connections (S8.1): the row owner, the keychain scope a slice may
+    // address secrets through, and the Graph sender.
+    mount_port::<dyn EmailRepo>(app, store.clone());
+    let secrets: Arc<dyn SecretPort> = Arc::new(SecretStore::new(keychain_service()));
+    mount_port::<dyn SecretPort>(app, secrets.clone());
+    let accounts: Arc<dyn EmailRepo> = store.clone();
+    // A client that cannot be built leaves the port unmounted instead of
+    // panicking: a send then reports the typed error (ADR-012 §4).
+    match GraphMail::new(secrets, accounts) {
+        Ok(mail) => mount_port::<dyn MailPort>(app, Arc::new(mail)),
+        Err(error) => tracing::error!(?error, "mail port left unmounted"),
+    }
     // slices append ONE line above this comment; never reorder/remove
 }

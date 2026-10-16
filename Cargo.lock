@@ -608,6 +608,7 @@ version = "0.1.0"
 dependencies = [
  "boba-agent",
  "boba-app",
+ "boba-mail",
  "boba-mcp-proto",
  "boba-store",
  "serde",
@@ -637,10 +638,18 @@ dependencies = [
 name = "boba-mail"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "boba-app",
  "boba-domain",
+ "getrandom 0.4.3",
+ "reqwest 0.13.5",
  "serde",
+ "serde_json",
+ "sha2",
  "thiserror 2.0.21",
+ "tokio",
+ "url",
+ "wiremock",
 ]
 
 [[package]]

@@ -17,5 +17,21 @@
   "errors.profile.unknown_revision": "That version no longer exists.",
   "errors.profile.missing_id": "The profile item id is missing.",
   "errors.preferences.store": "Your preferences could not be read or saved.",
-  "errors.preferences.invalid": "Those preferences can't be saved: check the amount, currency, hours and work modes."
+  "errors.preferences.invalid": "Those preferences can't be saved: check the amount, currency, hours and work modes.",
+  "errors.email.address": "Enter the mailbox address you want to connect.",
+  "errors.email.no_bundled_client": "This build ships no bundled Microsoft client. Add your own client ID under “Advanced”.",
+  "errors.email.browser": "Boba could not open your browser. Open it yourself and try again.",
+  "errors.email.timeout": "The sign-in was not finished in time. Start again when you are ready.",
+  "errors.email.listen": "Boba could not open its local sign-in listener. Check that no other app is blocking it, then try again.",
+  "errors.email.refused": "Microsoft refused the request. Start again; if it repeats, use your own client ID or IMAP.",
+  "errors.email.state": "That sign-in response did not belong to this attempt. Start again.",
+  "errors.email.no_code": "Microsoft returned no authorisation code. Start again.",
+  "errors.email.offline": "Microsoft could not be reached. Check your connection and try again.",
+  "errors.email.rejected": "Microsoft rejected the sign-in. Check your client ID and try again.",
+  "errors.email.tokens": "The sign-in reply could not be read. Start again.",
+  "errors.email.internal": "Something went wrong while connecting.",
+  "errors.email.keychain": "Boba could not reach your keychain, so nothing was changed.",
+  "errors.email.store": "Your connections could not be read or saved.",
+  "errors.email.unknown_connection": "That connection no longer exists.",
+  "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”."
 }

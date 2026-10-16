@@ -17,5 +17,21 @@
   "errors.profile.unknown_revision": "Esa versión ya no existe.",
   "errors.profile.missing_id": "Falta el identificador del elemento del perfil.",
   "errors.preferences.store": "No se pudieron leer o guardar tus preferencias.",
-  "errors.preferences.invalid": "Esas preferencias no se pueden guardar: revisa el monto, la moneda, las horas y las modalidades."
+  "errors.preferences.invalid": "Esas preferencias no se pueden guardar: revisa el monto, la moneda, las horas y las modalidades.",
+  "errors.email.address": "Escribe la dirección del buzón que quieres conectar.",
+  "errors.email.no_bundled_client": "Esta versión no incluye un cliente de Microsoft. Añade tu propio client ID en «Avanzado».",
+  "errors.email.browser": "Boba no pudo abrir tu navegador. Ábrelo tú y vuelve a intentarlo.",
+  "errors.email.timeout": "El inicio de sesión no terminó a tiempo. Vuelve a empezar cuando quieras.",
+  "errors.email.listen": "Boba no pudo abrir su receptor local de inicio de sesión. Comprueba que ninguna otra app lo bloquee y vuelve a intentarlo.",
+  "errors.email.refused": "Microsoft rechazó la solicitud. Vuelve a empezar; si se repite, usa tu propio client ID o IMAP.",
+  "errors.email.state": "Esa respuesta de inicio de sesión no pertenecía a este intento. Vuelve a empezar.",
+  "errors.email.no_code": "Microsoft no devolvió ningún código de autorización. Vuelve a empezar.",
+  "errors.email.offline": "No se pudo contactar con Microsoft. Revisa tu conexión y vuelve a intentarlo.",
+  "errors.email.rejected": "Microsoft rechazó el inicio de sesión. Revisa tu client ID y vuelve a intentarlo.",
+  "errors.email.tokens": "No se pudo leer la respuesta del inicio de sesión. Vuelve a empezar.",
+  "errors.email.internal": "Algo falló al conectar.",
+  "errors.email.keychain": "Boba no pudo acceder a tu llavero, así que no se cambió nada.",
+  "errors.email.store": "No se pudieron leer ni guardar tus conexiones.",
+  "errors.email.unknown_connection": "Esa conexión ya no existe.",
+  "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar»."
 }
