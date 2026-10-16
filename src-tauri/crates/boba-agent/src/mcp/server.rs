@@ -288,6 +288,13 @@ fn serve_connection(
 
 /// Serve one `tools/call`, applying subset, cap and envelope policy.
 fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
+    // The run's output stayed invalid after its retries, so the core has already
+    // refused its work: no further call is served. This closes the window
+    // between that refusal and the runtime's kill, in which a write would
+    // otherwise still reach the handler (CH8).
+    if state.output_failed.load(Ordering::SeqCst) {
+        return wire::error(id, wire::CODE_UNAUTHORIZED, "the run is no longer active");
+    }
     let name = params["name"].as_str().unwrap_or_default();
     let args = params
         .get("arguments")
@@ -670,13 +677,56 @@ mod tests {
             "an invalid output must never reach the repos"
         );
 
-        // A valid output still passes: the budget only counts refusals.
+        // The budget counts refusals only: an output that arrives while retries
+        // remain still passes (a separate run, since this one is now failed).
+        let (root, endpoint, recorder) = start_endpoint("t2", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t2");
+        client.call_tool("propose_posting_features", json!({"features": {}}));
+        assert!(!endpoint.failed_output());
         let ok = client.call_tool(
             "propose_posting_features",
             json!({"id": "pst_1", "features": {"skills": []}}),
         );
         assert!(ok["result"].is_object(), "{ok}");
         assert_eq!(recorder.calls().len(), 1);
+    }
+
+    /// CH8: once the output retry budget is spent, the core has already refused
+    /// the run's work, so no further call is served — not even a read, and above
+    /// all not a write that would reach the handler in the window before the
+    /// runtime kills the CLI.
+    #[test]
+    fn once_the_output_is_refused_every_further_call_is_refused() {
+        let (root, endpoint, recorder) = start_endpoint("t", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        // Spend the output budget: two retries, the third refusal fails the run.
+        for attempt in 1..=3 {
+            client.call_tool("propose_posting_features", json!({"features": {}}));
+            assert_eq!(endpoint.failed_output(), attempt > 2, "attempt {attempt}");
+        }
+
+        // Everything after is refused, and none of it reaches the handler.
+        for (tool, args) in [
+            (
+                "propose_posting_features",
+                json!({"id": "pst_1", "features": {"skills": []}}),
+            ),
+            ("get_pending_postings", json!({"limit": 1})),
+            ("get_task_input", json!({})),
+        ] {
+            let refused = client.call_tool(tool, args);
+            assert_eq!(
+                refused["error"]["code"],
+                wire::CODE_UNAUTHORIZED,
+                "{tool}: {refused}"
+            );
+        }
+        assert!(
+            recorder.calls().is_empty(),
+            "a call reached the handler after the output was refused: {:?}",
+            recorder.calls()
+        );
     }
 
     /// AC2: a read tool is not an output, so it is never schema-checked.

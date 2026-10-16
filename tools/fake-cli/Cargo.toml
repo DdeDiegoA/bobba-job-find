@@ -13,3 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = { workspace = true }
+# Wire contract for the run's MCP endpoint (AD-6): the `mcp-run` mode speaks it
+# the way a real CLI's `boba-mcp` shim does.
+boba-mcp-proto = { path = "../../src-tauri/crates/boba-mcp-proto" }

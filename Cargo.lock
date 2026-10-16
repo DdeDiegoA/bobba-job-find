@@ -645,6 +645,7 @@ dependencies = [
 name = "boba-fake-cli"
 version = "0.1.0"
 dependencies = [
+ "boba-mcp-proto",
  "serde_json",
 ]
 
