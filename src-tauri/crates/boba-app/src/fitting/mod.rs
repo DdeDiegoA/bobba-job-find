@@ -269,9 +269,10 @@ fn measure(
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use boba_domain::documents::{Contact, Lang, SCHEMA_VERSION, Section};
-
     use super::*;
+    use boba_domain::documents::{
+        Contact, Lang, RenderedPdf, SCHEMA_VERSION, Section, TextLayerReport,
+    };
 
     fn claim(text: &str, facts: &[&str]) -> Claim {
         Claim {
@@ -370,6 +371,18 @@ mod tests {
                 orphans: self.orphans,
             })
         }
+
+        // S7.6's ATS check: these tests are about cutting, so the fake reports a
+        // layer nothing failed in. `boba-docs` tests the check itself on real
+        // rendered PDFs.
+        fn text_layer(
+            &self,
+            _document: &DocumentModel,
+            _rendered: &RenderedPdf,
+            _required_keywords: &[String],
+        ) -> Result<TextLayerReport, VerifyError> {
+            Ok(TextLayerReport::default())
+        }
     }
 
     /// A verifier whose pages never come down: the CV cannot be fitted.
@@ -385,6 +398,15 @@ mod tests {
                 pages: 9,
                 orphans: 0,
             })
+        }
+
+        fn text_layer(
+            &self,
+            _document: &DocumentModel,
+            _rendered: &RenderedPdf,
+            _required_keywords: &[String],
+        ) -> Result<TextLayerReport, VerifyError> {
+            Ok(TextLayerReport::default())
         }
     }
 

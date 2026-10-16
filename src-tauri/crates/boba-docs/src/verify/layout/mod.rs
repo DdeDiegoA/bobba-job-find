@@ -14,7 +14,9 @@ use ::typst::layout::{Frame, FrameItem};
 use typst_layout::PagedDocument;
 
 use boba_app::ports::verify::{VerifyError, VerifyPort};
-use boba_domain::documents::{DocumentModel, LayoutReport, SCHEMA_VERSION, TemplateId};
+use boba_domain::documents::{
+    DocumentModel, LayoutReport, RenderedPdf, SCHEMA_VERSION, TemplateId, TextLayerReport,
+};
 
 use crate::TypstRenderer;
 use crate::typst::Template;
@@ -26,6 +28,18 @@ impl VerifyPort for TypstRenderer {
         template: &TemplateId,
     ) -> Result<LayoutReport, VerifyError> {
         layout_facts(document, template.as_str())
+    }
+
+    /// The ATS text layer (S7.6, FR-77). Rust allows one `VerifyPort` impl for
+    /// `TypstRenderer`, so the method S7.6 added lives here and the check itself
+    /// in `crate::verify::text_layer`.
+    fn text_layer(
+        &self,
+        document: &DocumentModel,
+        rendered: &RenderedPdf,
+        required_keywords: &[String],
+    ) -> Result<TextLayerReport, VerifyError> {
+        crate::verify::text_layer::text_layer_facts(&rendered.bytes, document, required_keywords)
     }
 }
 

@@ -1,1 +1,13 @@
-{}
+{
+  "title": "Cobertura de palabras clave",
+  "hint": "Cada requisito de la oferta y si tu perfil lo respalda.",
+  "count": "Cobertura {covered}/{total}",
+  "covered": "Cubierta",
+  "gap": "Faltante",
+  "missing": "Sin fuente en tu perfil: {keywords}",
+  "status": {
+    "all": "Tu perfil respalda todas las palabras clave que pide la oferta ({total}).",
+    "partial": "{gaps, plural, one {# palabra clave no tiene fuente en tu perfil} other {# palabras clave no tienen fuente en tu perfil}}."
+  },
+  "notInserted": "No añadidas: {keywords} — Boba nunca escribe una palabra clave que tu perfil no respalde."
+}

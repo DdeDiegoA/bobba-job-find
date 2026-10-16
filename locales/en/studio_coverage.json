@@ -1,1 +1,13 @@
-{}
+{
+  "title": "Keyword coverage",
+  "hint": "Every requirement the Offer states, and whether your Profile backs it.",
+  "count": "Coverage {covered}/{total}",
+  "covered": "Covered",
+  "gap": "Gap",
+  "missing": "No Profile source for: {keywords}",
+  "status": {
+    "all": "Your Profile backs every keyword the Offer asks for ({total}).",
+    "partial": "{gaps, plural, one {# keyword has no Profile source} other {# keywords have no Profile source}}."
+  },
+  "notInserted": "Not added: {keywords} — Boba never writes a keyword your Profile does not back."
+}
