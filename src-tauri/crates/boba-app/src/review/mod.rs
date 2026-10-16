@@ -351,18 +351,30 @@ fn malformed(why: impl Into<String>) -> ReviewError {
 /// a critique of nothing is worse than a failed run — and a payload the core
 /// cannot use is refused **whole**, before anything is written, so the run
 /// retries instead of the studio half-showing a critique.
+///
+/// `application_id` is the application the **core** started this run for, and
+/// the payload's own `app_id` is a checked echo of it: a review run started for
+/// one application cannot annotate another, and the drafts that are annotated
+/// are the run's own.
 pub fn save_critique(
     repo: &dyn DocumentsRepo,
+    application_id: &str,
     args: &serde_json::Value,
     updated_at: &str,
 ) -> Result<Review, ReviewError> {
     let review = Review::parse(args)?;
+    if review.application_id != application_id {
+        return Err(malformed(format!(
+            "`app_id` names `{}`, but this run reviews `{application_id}`",
+            review.application_id
+        )));
+    }
     // The parsed findings, not the agent's raw payload: only fields the core
     // understands are stored.
     let findings =
         serde_json::to_string(&review.findings).expect("findings are plain serializable data");
-    if repo.set_review(&review.application_id, &findings, updated_at)? == 0 {
-        return Err(ReviewError::NothingToReview(review.application_id.clone()));
+    if repo.set_review(application_id, &findings, updated_at)? == 0 {
+        return Err(ReviewError::NothingToReview(application_id.to_string()));
     }
     Ok(review)
 }
@@ -837,6 +849,7 @@ mod tests {
 
         let review = save_critique(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
@@ -859,11 +872,51 @@ mod tests {
     /// A critique of an application with no drafts is refused: there is nothing
     /// the reviewer could have read, and storing it would be a critique of
     /// nothing.
+    /// A critique of an application with no drafts is refused: there is nothing
+    /// the reviewer could have read, and storing it would be a critique of
+    /// nothing.
+    #[test]
+    fn a_critique_naming_another_application_is_refused() {
+        let repo = FakeDocumentsRepo::default();
+        drafts_for(&repo, "app_1");
+        drafts_for(&repo, "app_2");
+
+        // The application is the core's, not the payload's: a review run started
+        // for one application cannot annotate another (the app_id-binding rule).
+        let error = save_critique(
+            &repo,
+            "app_1",
+            &json!({
+                "app_id": "app_2",
+                "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+            }),
+            "t",
+        )
+        .expect_err("a run may not annotate another application");
+        assert!(why(&error).contains("app_2"), "{error}");
+        assert!(repo.reviews().is_empty(), "nothing was written");
+
+        // And the run's own application is annotated as usual.
+        let review = save_critique(
+            &repo,
+            "app_1",
+            &json!({
+                "app_id": "app_1",
+                "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+            }),
+            "t",
+        )
+        .expect("the critique is stored");
+        assert_eq!(review.application_id, "app_1");
+        assert_eq!(repo.reviews().len(), 1);
+    }
+
     #[test]
     fn a_critique_of_an_application_with_no_drafts_is_refused() {
         let repo = FakeDocumentsRepo::default();
         let error = save_critique(
             &repo,
+            "app_unknown",
             &json!({
                 "app_id": "app_unknown",
                 "findings": [{"severity": "low", "target": "cv", "message": "typo"}],
@@ -886,6 +939,7 @@ mod tests {
         drafts_for(&repo, "app_1");
         let error = save_critique(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "findings": [{"severity": "urgent", "target": "cv", "message": "x"}],
@@ -902,8 +956,13 @@ mod tests {
     #[test]
     fn a_failed_review_write_reaches_the_caller() {
         let repo = FakeDocumentsRepo::failing();
-        let error = save_critique(&repo, &json!({"app_id": "app_1", "findings": []}), "t")
-            .expect_err("the store refused the write");
+        let error = save_critique(
+            &repo,
+            "app_1",
+            &json!({"app_id": "app_1", "findings": []}),
+            "t",
+        )
+        .expect_err("the store refused the write");
         assert!(matches!(error, ReviewError::Repo(_)), "{error}");
     }
 

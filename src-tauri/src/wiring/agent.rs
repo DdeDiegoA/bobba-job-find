@@ -375,7 +375,9 @@ impl ToolHandler for RepoTools {
                 Err("the run's own input is served by the MCP endpoint itself".to_string())
             }
             // S7.4: the reviewer's critique is stored on the drafts it judged.
-            Some(spec) if spec.name == "save_review" => save_review(&self.store, args),
+            Some(spec) if spec.name == "save_review" => {
+                save_review(&self.store, application_id, args)
+            }
             // S7.8: the screening answers a run drafted, stored as drafts for
             // the user to approve — for the application the run was started
             // for, whichever one its arguments name.
@@ -418,9 +420,21 @@ fn pending_slice(tool_name: &str) -> &'static str {
 /// critique on the drafts it judged. The core decides that — the agent only
 /// describes what is wrong — and a payload it cannot use is refused whole, so
 /// the run retries instead of the studio half-showing a critique.
-fn save_review(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
+///
+/// `application_id` is the application the **run** was started for: a review run
+/// cannot annotate another application's drafts, which is refused here as well
+/// as at the endpoint.
+fn save_review(
+    store: &Arc<Store>,
+    application_id: Option<&str>,
+    args: &Value,
+) -> Result<Value, String> {
+    let Some(application_id) = application_id else {
+        return Err("this run was started for no application".to_string());
+    };
     let review = boba_app::review::save_critique(
         store.as_ref(),
+        application_id,
         args,
         &boba_app::system::SystemClock.now_rfc3339(),
     )
@@ -717,6 +731,47 @@ mod tests {
         );
     }
 
+    /// The app_id-binding rule, per tool (orquestador ruling): a review run
+    /// started for one application cannot annotate another, and a run the core
+    /// bound to no application cannot review at all.
+    #[test]
+    fn save_review_refuses_another_application() {
+        let store = store("review-binding");
+        drafts(&store, "app_1");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let elsewhere = tools
+            .call(
+                "review_application",
+                Some("app_1"),
+                "save_review",
+                &json!({
+                    "app_id": "app_2",
+                    "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+                }),
+            )
+            .expect_err("a run may not review another application");
+        assert!(elsewhere.contains("app_2"), "{elsewhere}");
+
+        let unbound = tools
+            .call(
+                "review_application",
+                None,
+                "save_review",
+                &json!({
+                    "app_id": "app_1",
+                    "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
+                }),
+            )
+            .expect_err("no run application, no review");
+        assert!(unbound.contains("no application"), "{unbound}");
+
+        assert!(
+            critique(&store, "doc_cv_1").is_none(),
+            "neither refusal wrote anything"
+        );
+    }
+
     /// A payload the core cannot use is refused whole, and a critique of an
     /// application with no drafts is refused too: neither writes anything.
     #[test]
@@ -741,7 +796,7 @@ mod tests {
         let nothing_to_review = tools
             .call(
                 "review_application",
-                Some("app_1"),
+                Some("app_unknown"),
                 "save_review",
                 &json!({
                     "app_id": "app_unknown",
