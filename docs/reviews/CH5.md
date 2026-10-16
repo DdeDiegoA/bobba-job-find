@@ -23,3 +23,11 @@
 ## Gate
 
 Not run on `8067422`. It runs after the fix, with the full list from my round-2 review.
+
+## Round 2 — ebceab9 (reviewer-2, 2026-10-16)
+
+**Verdict: APPROVED, pending Diego's security gate.** P1 closed: untrusted task kinds and untrusted input are refused while lockdown is a stub, and a missing sidecar refuses every run. Test-only and P3 notes closed (`--print`/`--prompt` argv from fixtures, unique temp roots, no panic in `pending_slice`).
+
+Gate on ebceab9 (reviewer-2): metadata 0, fmt 0, clippy `--workspace --all-targets -D warnings` 0, `cargo test --workspace --locked` 0 (196 passed, 0 failed across all suites), `cargo deny check` 0, pnpm install/lint/typecheck/test 0, check-i18n 0, workflow-policy 0, gen-bindings --check 0, gen_stories --check 0.
+
+Residuals for Diego: lockdown and S2.3b must lift the untrusted refusal per CLI before any untrusted run is enabled; Codex/OpenCode/Aider argv and lock-down flags stay with S2.3b/S2.4.
