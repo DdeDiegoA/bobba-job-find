@@ -1,9 +1,8 @@
 //! Profile commands (S3.4, FR-11..13): thin wrappers over
 //! [`ProfileService`]. Validate, call the use case, map the error (AD-3).
 //!
-//! The store arrives as Tauri state (`Arc<dyn ProfileRepo>`). The composition
-//! root mounts it (`app.manage`) once the store is open; until then a command
-//! answers with a typed error instead of panicking.
+//! The store arrives through [`wiring::port`] (ADR-012): a locked or unmounted
+//! store is `errors.store.locked`, never a panic.
 
 use std::sync::Arc;
 
@@ -13,28 +12,13 @@ use boba_app::profile::{
     FactRevisionInput, FactView, ProfileError, ProfileService, ProfileSnapshot,
 };
 use boba_app::system::SystemClock;
-use tauri::Manager;
 
-/// The service over the mounted repo.
+use crate::wiring;
+
+/// The service over the mounted repo (ADR-012: ports come only from the helper).
 fn service(app: &tauri::AppHandle) -> AppResult<ProfileService> {
-    // CH4 (ADR-012) swaps this call for `wiring::port::<dyn ProfileRepo>(app)?`.
-    let repo = port(app)?;
+    let repo = wiring::port::<dyn ProfileRepo>(app)?;
     Ok(ProfileService::new(repo, Arc::new(SystemClock)))
-}
-
-/// ADR-012 point 4: until CH4 ships the shared helper, a port comes from Tauri
-/// state or the app is Locked. Commands must not call `try_state` themselves;
-/// this is the one place that does, waiting to be replaced.
-fn port(app: &tauri::AppHandle) -> AppResult<Arc<dyn ProfileRepo>> {
-    app.try_state::<Arc<dyn ProfileRepo>>()
-        .map(|state| state.inner().clone())
-        .ok_or_else(store_not_mounted)
-}
-
-/// The store is not mounted yet: no key is in hand, so the app is effectively
-/// locked (ADR-009). The shared helper returns exactly this.
-fn store_not_mounted() -> AppError {
-    AppError::locked("errors.store.locked")
 }
 
 /// Map a use-case failure onto the typed IPC error (AD-3).
@@ -113,14 +97,6 @@ mod tests {
         let mapped = to_app(ProfileError::Repo(ProfileRepoError::new("disk")));
         assert_eq!(mapped.code, ErrorCode::Internal);
         assert_eq!(mapped.message_key, "errors.profile.store");
-    }
-
-    /// CH4 contract (ADR-012): an unmounted store reads as the Locked state.
-    #[test]
-    fn an_unmounted_store_reports_the_locked_state() {
-        let error = store_not_mounted();
-        assert_eq!(error.code, ErrorCode::Locked);
-        assert_eq!(error.message_key, "errors.store.locked");
     }
 
     #[test]

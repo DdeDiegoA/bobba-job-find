@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use boba_app::ports::repo::agent::AgentRepo;
+use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_store::db::Store;
@@ -28,5 +29,6 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         app,
         Arc::new(SqliteSystemRepo::new(store.clone(), keychain_service())),
     );
+    mount_port::<dyn ProfileRepo>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }
