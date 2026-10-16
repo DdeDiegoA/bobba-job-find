@@ -1,83 +1,78 @@
-//! Document repository (S7.1): the single writer of the `document` table (AD-16).
+//! Document repository (S7.1, S7.2): the single writer of the `document` table
+//! (AD-16).
 //!
 //! Rows hold the schema-versioned model JSON plus, once rendered and verified,
-//! the PDF/DOCX blobs and the verification report. The repo stays typed as
-//! plain strings so `boba-store` does not depend on `boba-docs` (AD-1): the
-//! caller owns the model types, the store owns the bytes.
+//! the PDF/DOCX blobs and the verification report. S7.2 added the
+//! [`DocumentsRepo`] trait and conformed this adapter to it, and the
+//! `untrusted_origin` column: a draft comes from an agent run, so the store
+//! records that its content is untrusted (ADR-010) instead of guessing later.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use boba_app::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
+use boba_domain::documents::{DocumentKind, DocumentRecord, Lang, NewDocument, TemplateId};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use crate::db::StoreError;
+use crate::db::{Store, StoreError};
 
-/// Values needed to insert a new document row. `version` is derived on insert.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewDocument {
-    pub id: String,
-    pub application_id: String,
-    /// `cv` or `cover_letter` (see `boba_docs::model::DocumentKind`).
-    pub kind: String,
-    /// `en` or `es`.
-    pub lang: String,
-    pub template: String,
-    pub model_json: String,
-    pub created_at: String,
+/// A stored value that parses to no known variant. The migration's CHECK
+/// constraints mean this only happens on a hand-edited database.
+#[derive(Debug, thiserror::Error)]
+#[error("unknown value {value:?} in document column {column}")]
+struct BadValue {
+    column: &'static str,
+    value: String,
 }
 
-/// A document row without its (potentially large) blobs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentRecord {
-    pub id: String,
-    pub application_id: String,
-    pub kind: String,
-    pub lang: String,
-    pub template: String,
-    pub version: i64,
-    pub model_json: String,
-    pub has_pdf: bool,
-    pub has_docx: bool,
-    pub verification_json: Option<String>,
-    pub verified_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
+fn bad_value(column: &'static str, value: String) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        0,
+        rusqlite::types::Type::Text,
+        Box::new(BadValue { column, value }),
+    )
 }
 
 const SELECT: &str = "SELECT id, application_id, kind, lang, template, version, model_json, \
-     pdf_blob IS NOT NULL, docx_blob IS NOT NULL, verification_json, verified_at, created_at, updated_at \
+     pdf_blob IS NOT NULL, docx_blob IS NOT NULL, verification_json, verified_at, \
+     untrusted_origin, created_at, updated_at \
      FROM document";
 
-fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<DocumentRecord> {
+fn row(r: &Row<'_>) -> rusqlite::Result<DocumentRecord> {
+    let kind: String = r.get(2)?;
+    let lang: String = r.get(3)?;
     Ok(DocumentRecord {
         id: r.get(0)?,
         application_id: r.get(1)?,
-        kind: r.get(2)?,
-        lang: r.get(3)?,
-        template: r.get(4)?,
+        kind: DocumentKind::parse(&kind).ok_or_else(|| bad_value("kind", kind))?,
+        lang: Lang::parse(&lang).ok_or_else(|| bad_value("lang", lang))?,
+        template: TemplateId::new(r.get::<_, String>(4)?),
         version: r.get(5)?,
         model_json: r.get(6)?,
         has_pdf: r.get::<_, i64>(7)? != 0,
         has_docx: r.get::<_, i64>(8)? != 0,
         verification_json: r.get(9)?,
         verified_at: r.get(10)?,
-        created_at: r.get(11)?,
-        updated_at: r.get(12)?,
+        untrusted_origin: r.get::<_, i64>(11)? != 0,
+        created_at: r.get(12)?,
+        updated_at: r.get(13)?,
     })
 }
 
 /// Insert a document, assigning the next `version` for its `(application, kind)`.
 pub fn insert(conn: &Connection, new: &NewDocument) -> Result<i64, StoreError> {
-    let version = next_version(conn, &new.application_id, &new.kind)?;
+    let version = next_version(conn, &new.application_id, new.kind)?;
     conn.execute(
         "INSERT INTO document \
-         (id, application_id, kind, lang, template, version, model_json, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+         (id, application_id, kind, lang, template, version, model_json, untrusted_origin, \
+          created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
         params![
             new.id,
             new.application_id,
-            new.kind,
-            new.lang,
-            new.template,
+            new.kind.as_str(),
+            new.lang.code(),
+            new.template.as_str(),
             version,
             new.model_json,
+            i64::from(new.untrusted_origin),
             new.created_at,
         ],
     )?;
@@ -107,14 +102,14 @@ pub fn list_for_application(
 pub fn latest(
     conn: &Connection,
     application_id: &str,
-    kind: &str,
+    kind: DocumentKind,
 ) -> Result<Option<DocumentRecord>, StoreError> {
     Ok(conn
         .query_row(
             &format!(
                 "{SELECT} WHERE application_id = ?1 AND kind = ?2 ORDER BY version DESC LIMIT 1"
             ),
-            params![application_id, kind],
+            params![application_id, kind.as_str()],
             row,
         )
         .optional()?)
@@ -183,14 +178,93 @@ fn blob(conn: &Connection, id: &str, column: &str) -> Result<Option<Vec<u8>>, St
         .flatten())
 }
 
-fn next_version(conn: &Connection, application_id: &str, kind: &str) -> Result<i64, StoreError> {
-    // `MAX()` over no rows is SQL NULL, which maps to `None` here.
+/// `MAX()` over no rows is SQL NULL, which maps to `None` here.
+fn next_version(
+    conn: &Connection,
+    application_id: &str,
+    kind: DocumentKind,
+) -> Result<i64, StoreError> {
     let current: Option<i64> = conn.query_row(
         "SELECT MAX(version) FROM document WHERE application_id = ?1 AND kind = ?2",
-        params![application_id, kind],
+        params![application_id, kind.as_str()],
         |r| r.get::<_, Option<i64>>(0),
     )?;
     Ok(current.unwrap_or(0) + 1)
+}
+
+/// Map a store failure into the port's stringified error.
+fn repo(error: StoreError) -> DocumentsRepoError {
+    DocumentsRepoError::new(error.to_string())
+}
+
+impl DocumentsRepo for Store {
+    fn insert(&self, new: &NewDocument) -> Result<i64, DocumentsRepoError> {
+        // Read (`next_version`) and write in one job on the single writer, so two
+        // concurrent inserts cannot take the same version (AD-2).
+        let new = new.clone();
+        self.execute(move |conn| insert(conn, &new)).map_err(repo)
+    }
+
+    fn get(&self, id: &str) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
+        let id = id.to_owned();
+        self.read(move |conn| get(conn, &id)).map_err(repo)
+    }
+
+    fn list_for_application(
+        &self,
+        application_id: &str,
+    ) -> Result<Vec<DocumentRecord>, DocumentsRepoError> {
+        let application_id = application_id.to_owned();
+        self.read(move |conn| list_for_application(conn, &application_id))
+            .map_err(repo)
+    }
+
+    fn latest(
+        &self,
+        application_id: &str,
+        kind: DocumentKind,
+    ) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
+        let application_id = application_id.to_owned();
+        self.read(move |conn| latest(conn, &application_id, kind))
+            .map_err(repo)
+    }
+
+    fn set_pdf(&self, id: &str, pdf: &[u8], updated_at: &str) -> Result<(), DocumentsRepoError> {
+        let (id, pdf, updated_at) = (id.to_owned(), pdf.to_vec(), updated_at.to_owned());
+        self.execute(move |conn| set_pdf(conn, &id, &pdf, &updated_at))
+            .map_err(repo)
+    }
+
+    fn set_docx(&self, id: &str, docx: &[u8], updated_at: &str) -> Result<(), DocumentsRepoError> {
+        let (id, docx, updated_at) = (id.to_owned(), docx.to_vec(), updated_at.to_owned());
+        self.execute(move |conn| set_docx(conn, &id, &docx, &updated_at))
+            .map_err(repo)
+    }
+
+    fn mark_verified(
+        &self,
+        id: &str,
+        verification_json: &str,
+        verified_at: &str,
+    ) -> Result<(), DocumentsRepoError> {
+        let (id, verification_json, verified_at) = (
+            id.to_owned(),
+            verification_json.to_owned(),
+            verified_at.to_owned(),
+        );
+        self.execute(move |conn| mark_verified(conn, &id, &verification_json, &verified_at))
+            .map_err(repo)
+    }
+
+    fn pdf(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+        let id = id.to_owned();
+        self.read(move |conn| pdf(conn, &id)).map_err(repo)
+    }
+
+    fn docx(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+        let id = id.to_owned();
+        self.read(move |conn| docx(conn, &id)).map_err(repo)
+    }
 }
 
 #[cfg(test)]
@@ -206,14 +280,15 @@ mod tests {
         conn
     }
 
-    fn new(id: &str, kind: &str, template: &str) -> NewDocument {
+    fn new(id: &str, kind: DocumentKind, template: &str) -> NewDocument {
         NewDocument {
             id: id.into(),
             application_id: "app_1".into(),
-            kind: kind.into(),
-            lang: "en".into(),
-            template: template.into(),
+            kind,
+            lang: Lang::En,
+            template: TemplateId::new(template),
             model_json: "{\"schema_version\":1}".into(),
+            untrusted_origin: true,
             created_at: "2026-10-05T00:00:00Z".into(),
         }
     }
@@ -234,24 +309,36 @@ mod tests {
     #[test]
     fn insert_bumps_version_and_latest_returns_the_newest() {
         let conn = connection();
-        assert_eq!(insert(&conn, &new("doc_1", "cv", "cv-classic")).unwrap(), 1);
-        assert_eq!(insert(&conn, &new("doc_2", "cv", "cv-modern")).unwrap(), 2);
         assert_eq!(
-            insert(&conn, &new("doc_3", "cover_letter", "cover-classic")).unwrap(),
+            insert(&conn, &new("doc_1", DocumentKind::Cv, "cv-classic")).unwrap(),
+            1
+        );
+        assert_eq!(
+            insert(&conn, &new("doc_2", DocumentKind::Cv, "cv-modern")).unwrap(),
+            2
+        );
+        assert_eq!(
+            insert(
+                &conn,
+                &new("doc_3", DocumentKind::CoverLetter, "cover-classic")
+            )
+            .unwrap(),
             1,
             "versions are per (application, kind)"
         );
 
-        let latest = latest(&conn, "app_1", "cv").unwrap().expect("a cv");
+        let latest = latest(&conn, "app_1", DocumentKind::Cv)
+            .unwrap()
+            .expect("a cv");
         assert_eq!(latest.id, "doc_2");
-        assert_eq!(latest.template, "cv-modern");
+        assert_eq!(latest.template.as_str(), "cv-modern");
         assert_eq!(list_for_application(&conn, "app_1").unwrap().len(), 3);
     }
 
     #[test]
     fn rendered_blobs_and_verification_round_trip() {
         let conn = connection();
-        insert(&conn, &new("doc_1", "cv", "cv-classic")).unwrap();
+        insert(&conn, &new("doc_1", DocumentKind::Cv, "cv-classic")).unwrap();
         assert!(!get(&conn, "doc_1").unwrap().unwrap().has_pdf);
 
         set_pdf(&conn, "doc_1", b"%PDF-1.7 test", "t1").unwrap();
@@ -272,10 +359,47 @@ mod tests {
     #[test]
     fn kind_and_lang_are_constrained() {
         let conn = connection();
-        let mut bad = new("doc_1", "resume", "cv-classic");
-        bad.lang = "fr".into();
-        assert!(insert(&conn, &bad).is_err(), "kind/lang CHECK must reject");
         assert!(get(&conn, "missing").unwrap().is_none());
         assert!(pdf(&conn, "missing").unwrap().is_none());
+
+        // The model cannot express an unknown kind or language, so the CHECK is
+        // what keeps a hand-edited row out; prove it still rejects one.
+        let inserted = conn.execute(
+            "INSERT INTO document (id, application_id, kind, lang, template, version, \
+             model_json, created_at, updated_at) \
+             VALUES ('doc_x', 'app_1', 'resume', 'fr', 'cv-classic', 1, '{}', 't', 't')",
+            [],
+        );
+        assert!(inserted.is_err(), "kind/lang CHECK must reject");
+    }
+
+    // AC7 (S7.2): a draft comes from an agent run, so it is stored untrusted, and
+    // a row written by a database migrated from 0003 reads back untrusted too.
+    #[test]
+    fn untrusted_origin_defaults_to_one_and_travels_with_the_row() {
+        let conn = connection();
+
+        let trusted = NewDocument {
+            untrusted_origin: false,
+            ..new("doc_1", DocumentKind::Cv, "cv-classic")
+        };
+        insert(&conn, &trusted).unwrap();
+        assert!(!get(&conn, "doc_1").unwrap().unwrap().untrusted_origin);
+
+        insert(
+            &conn,
+            &new("doc_2", DocumentKind::CoverLetter, "cover-classic"),
+        )
+        .unwrap();
+        assert!(get(&conn, "doc_2").unwrap().unwrap().untrusted_origin);
+
+        let default: String = conn
+            .query_row(
+                "SELECT dflt_value FROM pragma_table_info('document') WHERE name = 'untrusted_origin'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the column exists");
+        assert_eq!(default, "1", "the migration's default is untrusted");
     }
 }

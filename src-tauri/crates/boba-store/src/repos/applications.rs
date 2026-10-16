@@ -133,8 +133,8 @@ pub fn list_package(
         .into_iter()
         .map(|document| PackageItem {
             document_id: document.id,
-            kind: document.kind,
-            lang: document.lang,
+            kind: document.kind.as_str().to_string(),
+            lang: document.lang.code().to_string(),
             version: document.version,
             verified_at: document.verified_at,
         })
@@ -250,6 +250,7 @@ mod tests {
     use boba_domain::application::{
         AppStatus, Application, PackageItem, StatusEvent, StatusSource,
     };
+    use boba_domain::documents::{DocumentKind, Lang, NewDocument, TemplateId};
 
     use super::*;
     use crate::migrate;
@@ -446,16 +447,20 @@ mod tests {
     fn the_package_is_read_through_the_documents_owner() {
         let conn = connection();
         create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
-        for (id, kind) in [("doc_1", "cv"), ("doc_2", "cover_letter")] {
+        for (id, kind) in [
+            ("doc_1", DocumentKind::Cv),
+            ("doc_2", DocumentKind::CoverLetter),
+        ] {
             crate::repos::documents::insert(
                 &conn,
-                &crate::repos::documents::NewDocument {
+                &NewDocument {
                     id: id.into(),
                     application_id: "app_01".into(),
-                    kind: kind.into(),
-                    lang: "en".into(),
-                    template: "classic".into(),
+                    kind,
+                    lang: Lang::En,
+                    template: TemplateId::new("classic"),
                     model_json: "{}".into(),
+                    untrusted_origin: true,
                     created_at: "2026-10-16T09:00:00Z".into(),
                 },
             )

@@ -10,7 +10,10 @@ use typst_as_lib::TypstEngine;
 use typst_layout::PagedDocument;
 use typst_pdf::PdfOptions;
 
-use crate::model::{CoverLetterDocument, CvDocument, DocumentKind, SCHEMA_VERSION};
+use boba_domain::documents::{
+    CoverLetterDocument, CvDocument, DocumentKind, DocumentModel, LayoutReport, RenderedPdf,
+    SCHEMA_VERSION,
+};
 
 /// Bundled OFL fonts. Lato covers Latin Extended (ES diacritics).
 const FONTS: [&[u8]; 3] = [
@@ -139,8 +142,46 @@ fn check_schema(version: u32) -> Result<(), RenderError> {
     }
 }
 
+/// Render either draft to PDF, with the layout facts verification reads (S7.2).
+pub fn render_document(
+    document: &DocumentModel,
+    template: Template,
+) -> Result<RenderedPdf, RenderError> {
+    // The templates branch on `lang`, so the JSON carries the draft's own
+    // language; it is the same shape S7.1 handed the templates.
+    let (kind, version, json) = match document {
+        DocumentModel::Cv(doc) => (
+            DocumentKind::Cv,
+            doc.schema_version,
+            serde_json::to_string(doc)?,
+        ),
+        DocumentModel::CoverLetter(doc) => (
+            DocumentKind::CoverLetter,
+            doc.schema_version,
+            serde_json::to_string(doc)?,
+        ),
+    };
+    check(template, kind)?;
+    check_schema(version)?;
+    let (bytes, pages) = render_paged(template, &json)?;
+    Ok(RenderedPdf {
+        bytes,
+        layout: LayoutReport {
+            pages,
+            // shortcut: orphan headings are counted in S7.5's layout pass; this
+            // renderer only knows the page count.
+            orphans: 0,
+        },
+    })
+}
+
 /// Compile `template` against `document_json` and export a PDF.
 fn render(template: Template, document_json: &str) -> Result<Vec<u8>, RenderError> {
+    Ok(render_paged(template, document_json)?.0)
+}
+
+/// Compile and export, also reporting how many pages the document laid out to.
+fn render_paged(template: Template, document_json: &str) -> Result<(Vec<u8>, u32), RenderError> {
     let engine = TypstEngine::builder()
         .main_file(template.source())
         .fonts(FONTS)
@@ -156,14 +197,16 @@ fn render(template: Template, document_json: &str) -> Result<Vec<u8>, RenderErro
     let document = compiled
         .output
         .map_err(|e| RenderError::Compile(e.to_string()))?;
-    typst_pdf::pdf(&document, &PdfOptions::default())
-        .map_err(|e| RenderError::Pdf(format!("{e:?}")))
+    let pages = u32::try_from(document.pages().len()).unwrap_or(u32::MAX);
+    let pdf = typst_pdf::pdf(&document, &PdfOptions::default())
+        .map_err(|e| RenderError::Pdf(format!("{e:?}")))?;
+    Ok((pdf, pages))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Claim, Contact, Lang, Link, Section};
+    use boba_domain::documents::{Claim, Contact, Lang, Link, Section};
 
     fn cv(lang: Lang, name: &str, item: &str) -> CvDocument {
         CvDocument {
