@@ -256,13 +256,12 @@ pub fn deterministic(offer: &Offer) -> Vec<Claim> {
     // Money is a structured Offer field (AD-17): read it there, never by
     // re-parsing the prose a second time (AD-8 — one reader per field).
     if let Some(money) = &offer.money {
-        claims.push(Claim {
-            kind: FeatureKind::Compensation,
-            value: money_value(money),
-            source: super::FeatureSource::Det,
-            confidence: Confidence::High,
-            evidence: Evidence::Field("money".to_string()),
-        });
+        claims.push(Claim::deterministic(
+            FeatureKind::Compensation,
+            money_value(money),
+            Confidence::High,
+            Evidence::Field("money".to_string()),
+        ));
     }
 
     claims.extend(education_claims(text));
@@ -318,15 +317,14 @@ fn lexicon_claims(
         if value.is_empty() || !seen.insert(value.to_lowercase()) {
             continue;
         }
-        claims.push(Claim {
+        claims.push(Claim::deterministic(
             kind,
             // FR-55 F1 compares the posting's wording with the user's: the
             // phrase is kept exactly as written.
-            value: value.to_string(),
-            source: super::FeatureSource::Det,
+            value,
             confidence,
-            evidence: Evidence::Quoted(scan::sentence(text, start, end)),
-        });
+            Evidence::Quoted(scan::sentence(text, start, end)),
+        ));
     }
     claims
 }
@@ -337,13 +335,12 @@ fn lexicon_claims(
 /// title states nothing, and a body word is a weaker reading.
 fn seniority_claims(title: &str, text: &str) -> Vec<Claim> {
     if let Some(seniority) = highest_seniority(title) {
-        return vec![Claim {
-            kind: FeatureKind::Seniority,
-            value: seniority.as_str().to_string(),
-            source: super::FeatureSource::Det,
-            confidence: Confidence::High,
-            evidence: Evidence::Field("title".to_string()),
-        }];
+        return vec![Claim::deterministic(
+            FeatureKind::Seniority,
+            seniority.as_str(),
+            Confidence::High,
+            Evidence::Field("title".to_string()),
+        )];
     }
     let folded = scan::fold(text);
     let Some(seniority) = highest_seniority(text) else {
@@ -360,13 +357,12 @@ fn seniority_claims(title: &str, text: &str) -> Vec<Claim> {
         })
         .min()
         .unwrap_or((0, 0));
-    vec![Claim {
-        kind: FeatureKind::Seniority,
-        value: seniority.as_str().to_string(),
-        source: super::FeatureSource::Det,
-        confidence: Confidence::Medium,
-        evidence: Evidence::Quoted(scan::sentence(text, start, end)),
-    }]
+    vec![Claim::deterministic(
+        FeatureKind::Seniority,
+        seniority.as_str(),
+        Confidence::Medium,
+        Evidence::Quoted(scan::sentence(text, start, end)),
+    )]
 }
 
 /// The highest seniority word `field` uses, `None` when it states none (AD-8:
@@ -397,12 +393,13 @@ fn language_claims(text: &str) -> Vec<Claim> {
     found.sort_unstable();
     found
         .into_iter()
-        .map(|(start, end, tag)| Claim {
-            kind: FeatureKind::Language,
-            value: tag.to_string(),
-            source: super::FeatureSource::Det,
-            confidence: Confidence::Medium,
-            evidence: Evidence::Quoted(scan::sentence(text, start, end)),
+        .map(|(start, end, tag)| {
+            Claim::deterministic(
+                FeatureKind::Language,
+                tag,
+                Confidence::Medium,
+                Evidence::Quoted(scan::sentence(text, start, end)),
+            )
         })
         .collect()
 }

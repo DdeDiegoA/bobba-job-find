@@ -28,7 +28,7 @@ use serde::Deserialize;
 
 use crate::scoring::gates::{Confidence, Evidence, QuotedSpan};
 
-use super::{Claim, FeatureKind, FeatureSource, Seniority};
+use super::{AgentRunRef, Claim, FeatureKind, FeatureSource, Seniority};
 use crate::scoring::gates::scan;
 
 /// Why a proposal was refused: its shape, or a value the contract does not
@@ -146,21 +146,16 @@ impl Entry {
 }
 
 /// Keep the proposals whose quote is really in the posting text (AC1: the core
-/// disposes), with the span of that quote.
+/// disposes), with the span of that quote and the run that made them (AD-5:
+/// every agent output carries `{agent_run_id, cli, model}`).
 ///
 /// A missing, blank or unverifiable quote drops **that claim**, never the batch
 /// and never the claim without evidence.
-pub fn resolve(proposed: &[ProposedClaim], text: &str) -> Vec<Claim> {
+pub fn resolve(proposed: &[ProposedClaim], text: &str, run: &AgentRunRef) -> Vec<Claim> {
     let folded = scan::fold(text);
     let mut claims = Vec::new();
     for proposal in proposed {
-        let quote = proposal.quote.trim();
-        if quote.is_empty() {
-            continue;
-        }
-        // Case-insensitive: a model that quotes the posting's words in another
-        // case is accepted, one that reworded them is dropped.
-        let Some(start) = folded.find(&scan::fold(quote)) else {
+        let Some((quote, start)) = quoted(&folded, &proposal.quote) else {
             continue;
         };
         claims.push(Claim {
@@ -170,9 +165,37 @@ pub fn resolve(proposed: &[ProposedClaim], text: &str) -> Vec<Claim> {
             // The quote is verified, the reading is the model's: Medium.
             confidence: Confidence::Medium,
             evidence: Evidence::Quoted(span_of(text, start, start + quote.len())),
+            run: Some(run.clone()),
         });
     }
     claims
+}
+
+/// How many of `proposed` really quote `text`, and how many do not — the same
+/// check [`resolve`] makes, without building the claims: what the tool boundary
+/// answers with (AD-5), where nothing is stored yet.
+pub fn verified_counts(proposed: &[ProposedClaim], text: &str) -> (usize, usize) {
+    let folded = scan::fold(text);
+    let verified = proposed
+        .iter()
+        .filter(|proposal| quoted(&folded, &proposal.quote).is_some())
+        .count();
+    (verified, proposed.len() - verified)
+}
+
+/// Where a proposal's quote sits in the folded posting text, with the trimmed
+/// quote itself. `None` when the quote is blank or the posting does not contain
+/// it.
+///
+/// Case-insensitive: a model that quotes the posting's words in another case is
+/// accepted, one that reworded them is dropped.
+fn quoted(folded_text: &str, quote: &str) -> Option<(String, usize)> {
+    let quote = quote.trim();
+    if quote.is_empty() {
+        return None;
+    }
+    let start = folded_text.find(&scan::fold(quote))?;
+    Some((quote.to_string(), start))
 }
 
 /// The trimmed span of `[start, end)` in `text`, as a quote the UI can show.
@@ -219,6 +242,15 @@ mod tests {
             kind,
             value: value.to_string(),
             quote: quote.to_string(),
+        }
+    }
+
+    /// The run a proposal came from, as the use case threads it in.
+    fn run() -> AgentRunRef {
+        AgentRunRef {
+            run_id: "01RUN".to_string(),
+            cli: "claude_code".to_string(),
+            model: Some("haiku".to_string()),
         }
     }
 
@@ -313,6 +345,7 @@ mod tests {
         let claims = resolve(
             &[proposed(FeatureKind::Skill, "Rust", "Rust services")],
             text,
+            &run(),
         );
         assert_eq!(claims.len(), 1);
         let Evidence::Quoted(QuotedSpan {
@@ -327,6 +360,11 @@ mod tests {
         assert_eq!(&text[*start..*end], "Rust services");
         assert_eq!(claims[0].source, FeatureSource::Llm);
         assert_eq!(claims[0].confidence, Confidence::Medium);
+        assert_eq!(
+            claims[0].run(),
+            Some(&run()),
+            "an agent claim names the run, CLI and model that wrote it (AD-5)"
+        );
     }
 
     #[test]
@@ -338,6 +376,7 @@ mod tests {
                 proposed(FeatureKind::Skill, "Go", "   "),
             ],
             text,
+            &run(),
         );
         assert!(claims.is_empty(), "{claims:?}");
     }
@@ -347,6 +386,7 @@ mod tests {
         let claims = resolve(
             &[proposed(FeatureKind::Skill, "Rust", "RUST")],
             "we build apis in rust.",
+            &run(),
         );
         assert_eq!(claims.len(), 1);
         let Evidence::Quoted(span) = &claims[0].evidence else {
@@ -364,6 +404,7 @@ mod tests {
                 proposed(FeatureKind::Skill, "Kubernetes", "Rust and TypeScript."),
             ],
             &posting.description_text,
+            &run(),
         );
         let merged = merge(deterministic(&posting), proposed);
         let rust: Vec<&Claim> = merged
@@ -392,6 +433,7 @@ mod tests {
                 "remote within the EU",
             )],
             &posting.description_text,
+            &run(),
         );
         let mut set = PostingFeatures::new(posting.id.clone(), 7);
         set.extend(merge(deterministic(&posting), proposed));

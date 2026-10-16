@@ -26,6 +26,12 @@
 -- `input_trust` (a posting run is untrusted). The UI renders `evidence_text` and
 -- every `llm` value as plain or sanitised data only — never as markup.
 --
+-- An `llm` row names the run behind it (`agent_run_id`, `agent_cli`,
+-- `agent_model`): AD-5 requires every agent output to carry
+-- `{agent_run_id, cli, model}`, so a claim can be traced to the run, CLI and
+-- model that proposed it. The three columns are NULL for a deterministic claim —
+-- the core wrote it, no run did — and the CHECK below keeps that pairing exact.
+--
 -- `posting_features_run` is the cache marker, and it is what makes an *empty*
 -- feature set a real answer: a posting whose extraction found nothing still has
 -- a row here, so it is neither "pending" nor re-read on every run. `agent_done`
@@ -47,10 +53,20 @@ CREATE TABLE posting_features (
     evidence_end     INTEGER,
     untrusted_origin INTEGER NOT NULL DEFAULT 1
                         CHECK (untrusted_origin IN (0, 1)),
+    -- The run behind an `llm` claim (AD-5, `agent_run.id`); NULL when the core
+    -- read the claim itself.
+    agent_run_id     TEXT,
+    agent_cli        TEXT,
+    agent_model      TEXT,
     PRIMARY KEY (posting_id, profile_version, kind, value, source),
     -- A quote has offsets into the posting text; a field name has none.
     CHECK ((evidence_kind = 'quoted') = (evidence_start IS NOT NULL)),
-    CHECK ((evidence_kind = 'quoted') = (evidence_end IS NOT NULL))
+    CHECK ((evidence_kind = 'quoted') = (evidence_end IS NOT NULL)),
+    -- An agent claim must name its run and CLI; a deterministic claim must name
+    -- neither. A model is optional (the user may not have picked one).
+    CHECK ((source = 'llm') = (agent_run_id IS NOT NULL)),
+    CHECK ((source = 'llm') = (agent_cli IS NOT NULL)),
+    CHECK (agent_model IS NULL OR (source = 'llm' AND agent_run_id IS NOT NULL))
 ) STRICT;
 
 -- The cache marker and the run queue: one row per (posting, profile version)

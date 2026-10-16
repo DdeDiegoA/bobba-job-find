@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use boba_domain::posting::Offer;
 use boba_domain::posting_features::{
-    Claim, FeatureError, FeatureSource, PendingPosting, PostingFeatures, Proposal, deterministic,
-    merge, resolve,
+    AgentRunRef, Claim, FeatureError, FeatureSource, PendingPosting, PostingFeatures, Proposal,
+    deterministic, merge, resolve, verified_counts,
 };
 use serde_json::Value;
 
@@ -42,13 +42,14 @@ use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
 /// run one of its retries instead of being stored or silently lost; the use case
 /// stores the accepted ones from the run's event stream.
 pub fn validate_proposal(offer: &Offer, args: &Value) -> Result<(usize, usize), FeatureError> {
-    let (verified, dropped) = verified_claims(offer, args)?;
-    Ok((verified.len(), dropped))
+    Ok(verified_counts(
+        &proposal_of(args)?.claims()?,
+        &offer.description_text,
+    ))
 }
 
-/// Read one proposal and keep the claims whose quote is really in `offer`'s
-/// text, with how many quotes the posting does not contain.
-fn verified_claims(offer: &Offer, args: &Value) -> Result<(Vec<Claim>, usize), FeatureError> {
+/// The contract object of a `propose_posting_features` call, shape-checked.
+fn proposal_of(args: &Value) -> Result<Proposal, FeatureError> {
     let features = args.get("features").cloned().unwrap_or(Value::Null);
     // serde would also accept a positional sequence for a struct; the contract
     // is a named object, so anything else is refused here rather than read as
@@ -56,12 +57,18 @@ fn verified_claims(offer: &Offer, args: &Value) -> Result<(Vec<Claim>, usize), F
     if !features.is_object() {
         return Err(shape_error("`features` must be an object"));
     }
-    let proposal: Proposal =
-        serde_json::from_value(features).map_err(|error| shape_error(&error.to_string()))?;
-    let proposed = proposal.claims()?;
-    let verified = resolve(&proposed, &offer.description_text);
-    let dropped = proposed.len() - verified.len();
-    Ok((verified, dropped))
+    serde_json::from_value(features).map_err(|error| shape_error(&error.to_string()))
+}
+
+/// The claims of one proposal whose quote is really in `offer`'s text, each
+/// attributed to the run that proposed it (AD-5).
+fn verified_claims(
+    offer: &Offer,
+    run: &AgentRunRef,
+    args: &Value,
+) -> Result<Vec<Claim>, FeatureError> {
+    let proposed = proposal_of(args)?.claims()?;
+    Ok(resolve(&proposed, &offer.description_text, run))
 }
 
 /// The posting a proposal is about, as the tool takes it.
@@ -176,8 +183,8 @@ impl ExtractFeatures {
         {
             return Ok(set);
         }
-        let events = self.dispatch(&self.offer(offer_id)?, request)?;
-        let stored = self.harvest(&events)?;
+        let (run, events) = self.dispatch(&self.offer(offer_id)?, request)?;
+        let stored = self.harvest(&run, &events)?;
         if let Some(reason) = failure(&events) {
             return Err(FeaturesError::Run(reason));
         }
@@ -191,14 +198,19 @@ impl ExtractFeatures {
         self.features(offer_id)
     }
 
-    /// Store every proposal a run made, from its event stream (AC1). Returns how
-    /// many claims were stored.
+    /// Store every proposal a run made, from its event stream (AC1), tagging
+    /// each claim with the run that proposed it (AD-5). Returns how many claims
+    /// were stored.
     ///
     /// A proposal whose quote is not in the posting is dropped, not stored
     /// (AD-5); a payload outside the contract is an error, so the run is
     /// visible rather than silently ignored. This is also the seam a batch run
     /// uses: drain the handle's events and harvest them the same way.
-    pub fn harvest(&self, events: &[AgentEvent]) -> Result<usize, FeaturesError> {
+    pub fn harvest(
+        &self,
+        run: &AgentRunRef,
+        events: &[AgentEvent],
+    ) -> Result<usize, FeaturesError> {
         let mut stored = 0;
         for event in events {
             let AgentEvent::ToolCall { name, input } = event else {
@@ -207,7 +219,7 @@ impl ExtractFeatures {
             if !is_proposal(name) {
                 continue;
             }
-            stored += self.store_proposal(input)?;
+            stored += self.store_proposal(run, input)?;
         }
         Ok(stored)
     }
@@ -230,15 +242,16 @@ impl ExtractFeatures {
             .ok_or_else(|| FeaturesError::UnknownOffer(offer_id.to_string()))
     }
 
-    /// Run the task and collect its events. The run is synchronous: this use
-    /// case has nothing else to do while it waits, and every later stage wants
-    /// the features, not a handle.
+    /// Run the task and collect its events, with the identity every claim it
+    /// proposes will carry (AD-5). The run is synchronous: this use case has
+    /// nothing else to do while it waits, and every later stage wants the
+    /// features, not a handle.
     fn dispatch(
         &self,
         offer: &Offer,
         request: ExtractRequest,
-    ) -> Result<Vec<AgentEvent>, FeaturesError> {
-        let handle = self.agents.run(AgentTask {
+    ) -> Result<(AgentRunRef, Vec<AgentEvent>), FeaturesError> {
+        let task = AgentTask {
             kind: AgentTaskKind::ExtractPostings,
             // A posting is third-party text (ADR-010): the run may only start on
             // a CLI with a verified tool lockdown (S2.3b's gate, not this one).
@@ -249,22 +262,30 @@ impl ExtractFeatures {
             target_language: offer.lang.clone(),
             budget: request.budget,
             env: Vec::new(),
-        });
-        Ok(handle.events.iter().collect())
+        };
+        let (cli, model) = (task.cli.clone(), task.model.clone());
+        let handle = self.agents.run(task);
+        // The id and CLI the runtime opened the run with, so a stored claim
+        // points at the `agent_run` row that produced it (AD-5).
+        let run = AgentRunRef {
+            run_id: handle.run_id.clone(),
+            cli,
+            model,
+        };
+        Ok((run, handle.events.iter().collect()))
     }
 
     /// Store one `propose_posting_features` call: read the posting it is about,
     /// verify every quote against that posting's text, merge the survivors with
     /// what the core already knows, and write them as the run's claims (AC1).
-    fn store_proposal(&self, args: &Value) -> Result<usize, FeaturesError> {
+    fn store_proposal(&self, run: &AgentRunRef, args: &Value) -> Result<usize, FeaturesError> {
         let id = proposal_id(args)
             .ok_or_else(|| FeaturesError::Contract(missing_id()))?
             .to_string();
         // The same check the tool boundary runs, here against the stored posting:
         // an unverifiable quote stores nothing (AD-5).
         let offer = self.offer(&id)?;
-        let (verified, _dropped) =
-            verified_claims(&offer, args).map_err(FeaturesError::Contract)?;
+        let verified = verified_claims(&offer, run, args).map_err(FeaturesError::Contract)?;
         if verified.is_empty() {
             return Ok(0);
         }
@@ -444,6 +465,16 @@ mod tests {
         }
     }
 
+    /// The identity a harvested claim must carry (AD-5): the run the fake port
+    /// hands back is `run_test`, and the request names the CLI and model.
+    fn run() -> AgentRunRef {
+        AgentRunRef {
+            run_id: "run_test".to_string(),
+            cli: "claude_code".to_string(),
+            model: Some("haiku".to_string()),
+        }
+    }
+
     fn proposal(id: &str, body: serde_json::Value) -> AgentEvent {
         AgentEvent::ToolCall {
             name: "mcp__boba__propose_posting_features".to_string(),
@@ -552,6 +583,25 @@ mod tests {
             "the deterministic claims and the run's both landed"
         );
         assert!(repo.features_agent_done("pst_1", 0).unwrap());
+
+        // AD-5: every claim the run proposed names the run, CLI and model behind
+        // it — threaded from the run handle through the event stream.
+        let agent_claims: Vec<Claim> = repo
+            .stored_claims("pst_1", 0)
+            .into_iter()
+            .filter(|claim| claim.source == FeatureSource::Llm)
+            .collect();
+        assert_eq!(agent_claims.len(), 2, "{agent_claims:?}");
+        for claim in agent_claims {
+            assert_eq!(claim.run(), Some(&run()));
+        }
+        assert!(
+            repo.stored_claims("pst_1", 0)
+                .iter()
+                .filter(|claim| claim.source == FeatureSource::Det)
+                .all(|claim| claim.run().is_none()),
+            "the core's own reads have no run"
+        );
     }
 
     #[test]
@@ -699,16 +749,19 @@ mod tests {
         let (service, _) = service(&repo, Arc::new(FakeAgent::default()));
 
         let stored = service
-            .harvest(&[
+            .harvest(
+                &run(),
+                &[
                 proposal(
                     "pst_1",
                     serde_json::json!({"skills": [{"value": "Kubernetes", "quote": "Rust and SQL."}]}),
                 ),
-                proposal(
-                    "pst_2",
-                    serde_json::json!({"notes": [{"value": "remote", "quote": "Figma and research."}]}),
-                ),
-            ])
+                    proposal(
+                        "pst_2",
+                        serde_json::json!({"notes": [{"value": "remote", "quote": "Figma and research."}]}),
+                    ),
+                ],
+            )
             .unwrap();
 
         assert_eq!(stored, 2);
@@ -777,15 +830,18 @@ mod tests {
         let (service, _) = service(&repo, Arc::new(FakeAgent::default()));
 
         let stored = service
-            .harvest(&[
-                AgentEvent::ToolCall {
-                    name: "mcp__boba__get_pending_postings".to_string(),
-                    input: serde_json::json!({"limit": 5}),
-                },
-                AgentEvent::Text {
-                    text: "done".to_string(),
-                },
-            ])
+            .harvest(
+                &run(),
+                &[
+                    AgentEvent::ToolCall {
+                        name: "mcp__boba__get_pending_postings".to_string(),
+                        input: serde_json::json!({"limit": 5}),
+                    },
+                    AgentEvent::Text {
+                        text: "done".to_string(),
+                    },
+                ],
+            )
             .unwrap();
 
         assert_eq!(stored, 0);

@@ -15,8 +15,8 @@ use boba_app::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use boba_domain::dedup::{DedupProbe, description_simhash, job_key_of, probe_matches};
 use boba_domain::posting::{ApplyHints, Money, Offer, PayPeriod, Provenance, WorkMode};
 use boba_domain::posting_features::{
-    Claim, FeatureKind, FeatureSource, PendingPosting, PostingFeatures, confidence_parse,
-    confidence_text, evidence_columns, evidence_from_columns,
+    AgentRunRef, Claim, FeatureKind, FeatureSource, PendingPosting, PostingFeatures,
+    confidence_parse, confidence_text, evidence_columns, evidence_from_columns,
 };
 
 use crate::db::{Store, StoreError};
@@ -238,8 +238,8 @@ fn map_err(error: StoreError) -> IngestionRepoError {
 // --- features (S6.2, FR-55/FR-56 inputs, FR-61, AD-5) -------------------------
 
 const FEATURES_SELECT: &str = "SELECT kind, value, source, confidence, evidence_kind, \
-     evidence_text, evidence_start, evidence_end FROM posting_features \
-     WHERE posting_id = ?1 AND profile_version = ?2";
+     evidence_text, evidence_start, evidence_end, agent_run_id, agent_cli, agent_model \
+     FROM posting_features WHERE posting_id = ?1 AND profile_version = ?2";
 
 /// The features of one (posting, profile version), `None` when the version has
 /// never been read (the `posting_features_run` marker is what tells the two
@@ -278,12 +278,27 @@ pub fn features(
             evidence_start,
             evidence_end,
             r.get::<_, String>(1)?,
+            r.get::<_, Option<String>>(8)?,
+            r.get::<_, Option<String>>(9)?,
+            r.get::<_, Option<String>>(10)?,
         ))
     })?;
 
     let mut set = PostingFeatures::new(posting_id.to_string(), profile_version);
     for row in rows {
-        let (kind, source, confidence, evidence_kind, evidence_text, start, end, value) = row?;
+        let (
+            kind,
+            source,
+            confidence,
+            evidence_kind,
+            evidence_text,
+            start,
+            end,
+            value,
+            run_id,
+            cli,
+            model,
+        ) = row?;
         let claim = Claim {
             kind: parse(FeatureKind::parse(&kind), kind)?,
             value,
@@ -298,6 +313,7 @@ pub fn features(
                 ),
                 evidence_kind,
             )?,
+            run: run_ref(run_id, cli, model)?,
         };
         set.claims.push(claim);
     }
@@ -305,6 +321,23 @@ pub fn features(
     // a re-run produces, so a read-back equals a fresh extraction (FR-61).
     set.sort();
     Ok(Some(set))
+}
+
+/// The run behind an `llm` row, from its three columns. The migration keeps the
+/// pairing exact (`source = 'llm'` iff a run id is present), so a row the CHECK
+/// let through and this cannot read is a corrupt row, not a default.
+fn run_ref(
+    run_id: Option<String>,
+    cli: Option<String>,
+    model: Option<String>,
+) -> Result<Option<AgentRunRef>, StoreError> {
+    match (run_id, cli) {
+        (None, None) => Ok(None),
+        (Some(run_id), Some(cli)) => Ok(Some(AgentRunRef { run_id, cli, model })),
+        (run_id, cli) => Err(StoreError::Sqlite(format!(
+            "posting_features row names half a run: id {run_id:?}, cli {cli:?}"
+        ))),
+    }
 }
 
 /// Upsert one feature set: the claims, the cache marker and — for the
@@ -337,14 +370,17 @@ fn save_features(
         tx.execute(
             "INSERT INTO posting_features (posting_id, profile_version, kind, value, source, \
              confidence, evidence_kind, evidence_text, evidence_start, evidence_end, \
-             untrusted_origin) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1) \
+             untrusted_origin, agent_run_id, agent_cli, agent_model) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?12, ?13) \
              ON CONFLICT(posting_id, profile_version, kind, value, source) DO UPDATE SET \
                  confidence = excluded.confidence, \
                  evidence_kind = excluded.evidence_kind, \
                  evidence_text = excluded.evidence_text, \
                  evidence_start = excluded.evidence_start, \
-                 evidence_end = excluded.evidence_end",
+                 evidence_end = excluded.evidence_end, \
+                 agent_run_id = excluded.agent_run_id, \
+                 agent_cli = excluded.agent_cli, \
+                 agent_model = excluded.agent_model",
             params![
                 features.posting_id,
                 features.profile_version,
@@ -356,6 +392,9 @@ fn save_features(
                 evidence_text,
                 start.map(|value| value as i64),
                 end.map(|value| value as i64),
+                claim.run().map(|run| run.run_id.as_str()),
+                claim.run().map(|run| run.cli.as_str()),
+                claim.run().and_then(|run| run.model.as_deref()),
             ],
         )?;
     }
@@ -811,16 +850,33 @@ mod tests {
     }
 
     fn quoted(kind: FeatureKind, value: &str, span: &str, start: usize) -> Claim {
-        Claim {
+        Claim::deterministic(
             kind,
-            value: value.into(),
-            source: FeatureSource::Det,
-            confidence: Confidence::High,
-            evidence: Evidence::Quoted(QuotedSpan {
+            value,
+            Confidence::High,
+            Evidence::Quoted(QuotedSpan {
                 text: span.into(),
                 start,
                 end: start + span.len(),
             }),
+        )
+    }
+
+    /// The run behind an `llm` claim, as the use case threads it in.
+    fn run() -> AgentRunRef {
+        AgentRunRef {
+            run_id: "01RUN".to_string(),
+            cli: "claude_code".to_string(),
+            model: Some("haiku".to_string()),
+        }
+    }
+
+    fn proposed(kind: FeatureKind, value: &str, span: &str, start: usize) -> Claim {
+        Claim {
+            source: FeatureSource::Llm,
+            confidence: Confidence::Medium,
+            run: Some(run()),
+            ..quoted(kind, value, span, start)
         }
     }
 
@@ -853,13 +909,12 @@ mod tests {
             vec![
                 quoted(FeatureKind::Skill, "Rust", "Rust services", 4),
                 quoted(FeatureKind::Skill, "SQL", "SQL and Rust", 0),
-                Claim {
-                    kind: FeatureKind::Compensation,
-                    value: "USD 5000000 year".into(),
-                    source: FeatureSource::Det,
-                    confidence: Confidence::High,
-                    evidence: Evidence::Field("money".into()),
-                },
+                Claim::deterministic(
+                    FeatureKind::Compensation,
+                    "USD 5000000 year",
+                    Confidence::High,
+                    Evidence::Field("money".into()),
+                ),
             ],
         );
         save_features(&conn, &set, "2026-10-16T00:00:00Z", 0).unwrap();
@@ -945,31 +1000,32 @@ mod tests {
         .unwrap();
         assert_eq!(features_pending(&conn, 1, 10).unwrap().len(), 1);
 
-        let mut merged = feature_set(
+        let merged = feature_set(
             "pst_1",
             1,
             vec![
                 quoted(FeatureKind::Skill, "Rust", "Rust", 0),
-                Claim {
-                    kind: FeatureKind::Note,
-                    value: "remote within the EU".into(),
-                    source: FeatureSource::Llm,
-                    confidence: Confidence::Medium,
-                    evidence: Evidence::Field("title".into()),
-                },
+                proposed(FeatureKind::Note, "remote within the EU", "APIs", 0),
             ],
         );
-        // The model's claim is a quote of the posting, stored as untrusted text.
-        merged.claims[1].evidence = Evidence::Quoted(QuotedSpan {
-            text: "APIs".into(),
-            start: 0,
-            end: 4,
-        });
         save_features(&conn, &merged, "t", 1).unwrap();
 
         let read_back = features(&conn, "pst_1", 1).unwrap().expect("cached");
         assert_eq!(read_back.claims.len(), 2, "{read_back:?}");
         assert!(read_back.has_llm());
+        // AD-5: the agent's claim names the run, CLI and model behind it.
+        let agent_claim = read_back
+            .claims
+            .iter()
+            .find(|claim| claim.source == FeatureSource::Llm)
+            .expect("the agent claim");
+        assert_eq!(agent_claim.run(), Some(&run()));
+        let deterministic = read_back
+            .claims
+            .iter()
+            .find(|claim| claim.source == FeatureSource::Det)
+            .expect("the core's claim");
+        assert_eq!(deterministic.run(), None, "no run wrote it");
         assert!(
             features_pending(&conn, 1, 10).unwrap().is_empty(),
             "a served pass is not pending again (FR-61: no second run)"
@@ -1056,6 +1112,9 @@ mod tests {
             "UPDATE posting_features SET source = 'agent'",
             "UPDATE posting_features SET untrusted_origin = 2",
             "UPDATE posting_features SET evidence_start = NULL",
+            // An agent claim without its run is not a claim (AD-5).
+            "UPDATE posting_features SET source = 'llm'",
+            "UPDATE posting_features SET source = 'llm', agent_run_id = '01RUN'",
         ] {
             assert!(
                 conn.execute(statement, []).is_err(),

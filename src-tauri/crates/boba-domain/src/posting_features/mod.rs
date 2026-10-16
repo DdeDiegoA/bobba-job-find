@@ -34,7 +34,7 @@ mod extract;
 mod proposal;
 
 pub use extract::deterministic;
-pub use proposal::{Entry, FeatureError, Proposal, ProposedClaim, merge, resolve};
+pub use proposal::{Entry, FeatureError, Proposal, ProposedClaim, merge, resolve, verified_counts};
 
 /// What one claim is about. The seven kinds the agent contract and the store
 /// both know (`posting_features.kind`).
@@ -147,6 +147,20 @@ impl Seniority {
     }
 }
 
+/// The run that proposed a claim (AD-5): enough to find its `agent_run` row and
+/// name the CLI and model that wrote it. The architecture's rule is that every
+/// agent output carries `{agent_run_id, cli, model}`; a deterministic claim has
+/// no run, because the core wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRunRef {
+    /// ULID of the run (`agent_run.id`).
+    pub run_id: String,
+    /// `CliKind` id, e.g. `claude_code`.
+    pub cli: String,
+    /// The model the user picked, when one was named.
+    pub model: Option<String>,
+}
+
 /// One thing the posting says, with where it was read and how sure the core is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Claim {
@@ -157,9 +171,34 @@ pub struct Claim {
     pub source: FeatureSource,
     pub confidence: Confidence,
     pub evidence: Evidence,
+    /// Set exactly when [`Claim::source`] is [`FeatureSource::Llm`] (the store
+    /// enforces the pairing): which run proposed this.
+    pub run: Option<AgentRunRef>,
 }
 
 impl Claim {
+    /// A claim the core read itself, with no run behind it.
+    pub fn deterministic(
+        kind: FeatureKind,
+        value: impl Into<String>,
+        confidence: Confidence,
+        evidence: Evidence,
+    ) -> Self {
+        Self {
+            kind,
+            value: value.into(),
+            source: FeatureSource::Det,
+            confidence,
+            evidence,
+            run: None,
+        }
+    }
+
+    /// The run that proposed this claim, when an agent did.
+    pub fn run(&self) -> Option<&AgentRunRef> {
+        self.run.as_ref()
+    }
+
     /// The form claims are compared in: case and surrounding space do not make
     /// two claims different (`Rust` and ` rust ` are one skill).
     pub fn normalized_value(&self) -> String {
@@ -333,13 +372,12 @@ mod tests {
     use crate::scoring::gates::QuotedSpan;
 
     fn claim(kind: FeatureKind, value: &str) -> Claim {
-        Claim {
+        Claim::deterministic(
             kind,
-            value: value.to_string(),
-            source: FeatureSource::Det,
-            confidence: Confidence::High,
-            evidence: Evidence::Field("title".to_string()),
-        }
+            value,
+            Confidence::High,
+            Evidence::Field("title".to_string()),
+        )
     }
 
     fn span(text: &str, start: usize, end: usize) -> Evidence {
@@ -405,8 +443,28 @@ mod tests {
         assert!(!set.has_llm());
         let mut proposed = claim(FeatureKind::Skill, "Kubernetes");
         proposed.source = FeatureSource::Llm;
+        proposed.run = Some(AgentRunRef {
+            run_id: "01RUN".to_string(),
+            cli: "claude_code".to_string(),
+            model: None,
+        });
         set.extend([proposed]);
         assert!(set.has_llm());
+        assert_eq!(
+            set.claims
+                .iter()
+                .find(|claim| claim.value == "Kubernetes")
+                .and_then(|claim| claim.run())
+                .map(|run| run.run_id.as_str()),
+            Some("01RUN")
+        );
+    }
+
+    #[test]
+    fn a_deterministic_claim_has_no_run_behind_it() {
+        let claim = claim(FeatureKind::Skill, "Rust");
+        assert_eq!(claim.run(), None);
+        assert_eq!(claim.source, FeatureSource::Det);
     }
 
     #[test]
