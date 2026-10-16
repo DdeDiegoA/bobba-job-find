@@ -669,6 +669,56 @@ mod tests {
         assert_eq!(recorder.calls().len(), 1);
     }
 
+    /// The same rule for the reviewer's tool, one cross-app test per tool
+    /// (orquestador ruling): a run started for one application cannot store a
+    /// critique for another, and its own application is served.
+    #[test]
+    fn a_run_cannot_store_a_critique_for_another_application() {
+        let (root, _endpoint, recorder) = start_endpoint_answering(
+            "t",
+            tool::REVIEW_APPLICATION,
+            r#"{"app_id":"app_1","posting_id":"pst_1","drafts":{}}"#,
+        );
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        let elsewhere = client.call_tool(
+            "save_review",
+            json!({
+                "app_id": "app_2",
+                "findings": [{
+                    "severity": "high",
+                    "target": "cv",
+                    "message": "The bullet about Kubernetes is backed by no fact."
+                }],
+            }),
+        );
+        assert_eq!(
+            elsewhere["error"]["code"],
+            wire::CODE_TOOL_DENIED,
+            "{elsewhere}"
+        );
+        assert!(
+            recorder.calls().is_empty(),
+            "the handler never saw the call: {:?}",
+            recorder.calls()
+        );
+
+        // The run's own application is served as usual.
+        let own = client.call_tool(
+            "save_review",
+            json!({
+                "app_id": "app_1",
+                "findings": [{
+                    "severity": "high",
+                    "target": "cv",
+                    "message": "The bullet about Kubernetes is backed by no fact."
+                }],
+            }),
+        );
+        assert!(own["result"].is_object(), "{own}");
+        assert_eq!(recorder.calls().len(), 1);
+    }
+
     /// Fail closed: a write that names an application is only served when the
     /// run's own input names the same one. A run whose input names none — or is
     /// not the core's JSON at all — cannot write to an application.
