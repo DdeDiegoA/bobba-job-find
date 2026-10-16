@@ -5,7 +5,9 @@
 //!
 //! * **the class** — the core reads the question's own words and decides
 //!   whether it is about pay, eligibility or anything else ([`QuestionClass`]).
-//!   The run never picks that.
+//!   The run never picks that. A question the words only make *suspicious*
+//!   ("payroll", "rate your skills") is answered by the run as free text and
+//!   flagged for review, rather than classed on a guess.
 //! * **salary and eligibility** — those answers are the user's Preferences, not
 //!   the run's prose (FR-80): the run's words for such a question are dropped
 //!   and the value comes from [`Defaults`]. With no Preferences value there is
@@ -158,39 +160,71 @@ impl Question {
 /// Whether a question is about pay or eligibility, decided from its own words.
 /// This is the core's call, never the run's: it is what makes those two classes
 /// take their value from Preferences and stay flagged for review.
+///
+/// The lexicon has two tiers, because the honest reading of a form's wording is
+/// not always a classification:
+///
+/// * **the class**, from words that mean pay or eligibility and little else
+///   ([`SALARY_STEMS`], [`SALARY_PHRASES`], [`ELIGIBILITY_STEMS`],
+///   [`ELIGIBILITY_PHRASES`]). Those questions take their value from the user's
+///   own settings.
+/// * **the suspicion**, from words that are *often* about them but appear in
+///   ordinary questions too ("payroll", "rate your skills", "legal name"). A
+///   suspicious question stays free text — the run's grounded answer is kept —
+///   and is flagged for review ([`is_suspect`]). Guessing here would either drop
+///   a real answer or store an invented one; flagging costs the user one look.
 pub struct QuestionClass;
 
-/// The words that make a question a **pay** question (EN + ES). A phrase is
-/// matched as a whole word run, so "Rate your Rust skills" is not a pay
-/// question: a word like `rate` alone is far too common to classify on.
-const SALARY_TERMS: [&str; 8] = [
-    "salary",
-    "salary expectation",
-    "compensation",
-    "remuneration",
-    "pay expectation",
+/// Word beginnings that make a question a **pay** question (EN + ES), matched as
+/// a prefix of a whole word so one entry covers the family: `salar` covers
+/// `salary`, `salaries`, `salario`, `salarial`, `salariales`.
+const SALARY_STEMS: [&str; 5] = ["salar", "wage", "compensat", "remuner", "sueld"];
+
+/// Pay phrases that a single word cannot carry (EN + ES), matched as whole words.
+const SALARY_PHRASES: [&str; 9] = [
+    "pay range",
+    "pay band",
     "expected pay",
-    "salario",
-    "pretensión salarial",
+    "desired pay",
+    "pay expectation",
+    "pay expectations",
+    "hourly rate",
+    "daily rate",
+    "day rate",
 ];
 
-/// The words that make a question an **eligibility** question (EN + ES): work
-/// authorization, permits and sponsorship.
-const ELIGIBILITY_TERMS: [&str; 14] = [
+/// Word beginnings that make a question an **eligibility** question: citizenship,
+/// visa and residence wording (`visa` covers `visas` and `visado`).
+const ELIGIBILITY_STEMS: [&str; 3] = ["citizenship", "residen", "visa"];
+
+/// Eligibility phrases (EN + ES), matched as whole words.
+const ELIGIBILITY_PHRASES: [&str; 19] = [
     "authorized to work",
     "authorised to work",
     "authorization to work",
     "authorisation to work",
     "legally authorized",
     "legally authorised",
+    "legally permitted",
+    "permitted to work",
+    "eligible to work",
     "right to work",
     "work permit",
     "work authorization",
     "work authorisation",
-    "visa",
+    "work eligibility",
     "sponsorship",
     "permiso de trabajo",
+    "permiso de residencia",
     "autorización para trabajar",
+    "elegible para trabajar",
+];
+
+/// Word beginnings that make a question **suspicious** — pay-ish, eligibility-ish
+/// — without settling its class (see [`QuestionClass`]). Kept to words that reach
+/// an ordinary question: "payroll", "rate your skills", "legal name".
+const SUSPECT_STEMS: [&str; 7] = [
+    "pay", "rate", "eligib", "permit", "sponsor", "citizen", "legal",
 ];
 
 impl QuestionClass {
@@ -200,20 +234,30 @@ impl QuestionClass {
     /// user must see before it goes anywhere.
     pub fn of(question: &str) -> AnswerClass {
         let words = words_of(question);
-        if SALARY_TERMS
-            .iter()
-            .any(|term| contains_phrase(&words, term))
-        {
+        if matches(&words, &SALARY_STEMS, &SALARY_PHRASES) {
             return AnswerClass::Salary;
         }
-        if ELIGIBILITY_TERMS
-            .iter()
-            .any(|term| contains_phrase(&words, term))
-        {
+        if matches(&words, &ELIGIBILITY_STEMS, &ELIGIBILITY_PHRASES) {
             return AnswerClass::Eligibility;
         }
         AnswerClass::Other
     }
+
+    /// Whether the core *suspects* the question is about pay or eligibility
+    /// without classing it as one: the answer is still the run's, and the user
+    /// is asked to look at it.
+    pub fn is_suspect(question: &str) -> bool {
+        let words = words_of(question);
+        matches(&words, &SUSPECT_STEMS, &[])
+    }
+}
+
+/// Whether any stem begins a word of `words`, or any phrase is a run of them.
+fn matches(words: &str, stems: &[&str], phrases: &[&str]) -> bool {
+    phrases.iter().any(|phrase| contains_phrase(words, phrase))
+        || words
+            .split_whitespace()
+            .any(|word| stems.iter().any(|stem| word.starts_with(stem)))
 }
 
 /// The question's words, lower-cased, with punctuation that is not part of a
@@ -386,13 +430,17 @@ fn dispose(
             "`fact_ids` names `{unknown}`, which this profile does not have"
         )));
     }
+    // A question the core only suspects is answered by the run, and flagged:
+    // the near misses ("payroll", "rate your skills") must reach the user
+    // rather than be answered quietly (review round 1).
+    let needs_review = QuestionClass::is_suspect(&answer.question);
     Ok(DraftedAnswer {
         id: String::new(),
         question: answer.question,
         class,
         answer: Some(text),
         fact_ids: answer.fact_ids,
-        needs_review: false,
+        needs_review,
     })
 }
 
@@ -655,6 +703,123 @@ mod tests {
             AnswersError::Payload(why) => why.clone(),
             other => panic!("expected a refused payload, got {other}"),
         }
+    }
+
+    // AC1, widened: the wording real forms use is classed from its own words, and
+    // the ambiguous words fail closed instead of silently answering.
+    #[test]
+    fn the_wording_real_forms_use_is_classed_not_guessed() {
+        for question in [
+            "What is your desired wage?",
+            "Expected pay range?",
+            "What are your pretensiones salariales?",
+            "¿Cuál es tu sueldo deseado?",
+            "What is your hourly rate?",
+            "Compensation expectation (annual)?",
+            "¿Cuáles son tus expectativas salariales?",
+            "What salary do you require?",
+        ] {
+            assert_eq!(
+                QuestionClass::of(question),
+                AnswerClass::Salary,
+                "{question}"
+            );
+        }
+
+        for question in [
+            "Are you eligible to work in the EU?",
+            "Are you legally permitted to work here?",
+            "Do you hold citizenship of an EU country?",
+            "¿Tienes permiso de residencia?",
+            "Will you require visa sponsorship?",
+            "Do you have a work permit?",
+            "Are you authorised to work in Canada?",
+        ] {
+            assert_eq!(
+                QuestionClass::of(question),
+                AnswerClass::Eligibility,
+                "{question}"
+            );
+        }
+    }
+
+    /// Fail-closed on the words that are only *sometimes* about pay or
+    /// eligibility: the near misses an ordinary question also trips ("payroll",
+    /// "rate your skills", "legal name") stay free text — the run's grounded
+    /// answer is kept — but they are flagged, so the user is the one who decides.
+    #[test]
+    fn a_question_the_core_only_suspects_is_answered_and_flagged() {
+        let bank = repo("app_1");
+        let drafted = save_answers(
+            &bank,
+            &json!({
+                "app_id": "app_1",
+                "answers": [
+                    {
+                        "question": "Have you used payroll software?",
+                        "answer": "Yes, two of them.",
+                        "fact_ids": ["fact_1"]
+                    },
+                    {
+                        "question": "Rate your Rust skills from 1 to 5.",
+                        "answer": "A solid 4.",
+                        "fact_ids": ["fact_2"]
+                    },
+                    {
+                        "question": "What is your legal name?",
+                        "answer": "Ada Lovelace.",
+                        "fact_ids": ["fact_1"]
+                    },
+                ],
+            }),
+            &Defaults::default(),
+            &facts(),
+            "2026-10-16T09:00:00Z",
+        )
+        .expect("grounded answers");
+
+        assert_eq!(drafted.answers.len(), 3);
+        for answer in &drafted.answers {
+            assert_eq!(
+                answer.class,
+                AnswerClass::Other,
+                "a suspicion is not a class: {}",
+                answer.question
+            );
+            assert!(
+                answer.answer.is_some(),
+                "the run's grounded answer is kept: {}",
+                answer.question
+            );
+            assert!(
+                answer.needs_review,
+                "but the user looks at it: {}",
+                answer.question
+            );
+        }
+        assert!(
+            bank.answers().iter().all(|row| row.needs_review),
+            "the flag reaches the stored draft"
+        );
+
+        // A question with none of those words is not flagged.
+        let plain = repo("app_2");
+        save_answers(
+            &plain,
+            &json!({
+                "app_id": "app_2",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+            &Defaults::default(),
+            &facts(),
+            "t",
+        )
+        .expect("a grounded answer");
+        assert!(!plain.answers()[0].needs_review);
     }
 
     // AC1, the core's half: the class of a question is read from its own words,

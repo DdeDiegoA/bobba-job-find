@@ -15,6 +15,8 @@
 --
 -- `needs_review` is the FR-80 flag: salary and eligibility answers come from the
 -- user's Preferences and are always flagged, so they are never answered quietly.
+-- It does not bar reuse — it says "the user must see this when it is used", and
+-- approving the row is the user having seen it.
 -- `answer` is NULL when the core has no confident value (a salary question with
 -- no Salary Floor set): the row waits for the user instead of the run inventing a
 -- number. `fact_ids_json` names the profile facts a free-text answer stands on

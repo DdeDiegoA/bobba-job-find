@@ -287,27 +287,32 @@ pub fn list_answers(
 
 /// The approved answers whose question key is one of `keys` (AC2). Only
 /// approved rows with an answer are reusable, and the key is matched whole.
+///
+/// The keys are the caller's normalized questions: they are bound as parameters
+/// (`question_key IN (?1, ?2, …)`, one `?` per key), never interpolated — the
+/// question text is third-party data and never becomes a statement fragment. An
+/// empty list reads nothing rather than everything, and the partial index on
+/// `question_key` (approved rows only) is what answers this.
 pub fn list_reusable_answers(
     conn: &Connection,
     keys: &[String],
 ) -> Result<Vec<BankAnswer>, ApplyRepoError> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = std::iter::repeat_n("?", keys.len())
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut stmt = conn
         .prepare(&format!(
             "{ANSWER_SELECT} WHERE approved_at IS NOT NULL AND answer IS NOT NULL \
-             ORDER BY approved_at, id"
+             AND question_key IN ({placeholders}) ORDER BY approved_at, id"
         ))
         .map_err(store)?;
-    let rows = stmt
-        .query_map([], answer_row)
+    stmt.query_map(rusqlite::params_from_iter(keys.iter()), answer_row)
         .map_err(store)?
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(store)?;
-    // The keys are the caller's, not SQL: the question text is third-party data
-    // and never becomes a `LIKE` pattern or a statement fragment.
-    Ok(rows
-        .into_iter()
-        .filter(|row| keys.contains(&row.question_key))
-        .collect())
+        .map_err(store)
 }
 
 /// Approve one row: the user confirmed it or replaced its text (AC2/AC3). Either
@@ -773,6 +778,52 @@ mod tests {
         .expect("reuse");
         assert_eq!(reused.len(), 1);
         assert_eq!(reused[0].question, "Which city are you based in?");
+    }
+
+    /// Reuse matches the whole question key, across every application, and only
+    /// for the questions actually asked (AC2). A flagged answer is reusable once
+    /// the user approved it — the flag says "the user looks at this", which
+    /// approving is exactly what satisfies (see `answers::approve`).
+    #[test]
+    fn only_the_asked_questions_come_back_from_the_bank() {
+        let conn = connection();
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        for (id, question) in [
+            ("ans_1", "What is your notice period?"),
+            ("ans_2", "Which city are you based in?"),
+            ("ans_3", "Have you managed a team?"),
+        ] {
+            insert_answer(&conn, &drafted_answer(id, question)).expect("insert");
+            approve_answer(&conn, id, None, "2026-10-16T10:00:00Z").expect("approve");
+        }
+
+        let reused = list_reusable_answers(
+            &conn,
+            &[
+                "have you managed a team".into(),
+                "what is your notice period".into(),
+                "how many years of rust".into(),
+            ],
+        )
+        .expect("reuse");
+        let questions: Vec<&str> = reused.iter().map(|row| row.question.as_str()).collect();
+        assert_eq!(
+            questions,
+            vec!["What is your notice period?", "Have you managed a team?"],
+            "exactly the two asked questions, in approval order"
+        );
+
+        // An empty question list reads nothing at all, not every row.
+        assert!(
+            list_reusable_answers(&conn, &[]).expect("reuse").is_empty(),
+            "no questions, no reuse"
+        );
+        // And a question key nobody approved reads nothing.
+        assert!(
+            list_reusable_answers(&conn, &["what is your dream job".into()])
+                .expect("reuse")
+                .is_empty()
+        );
     }
 
     /// The bank goes with its application (AD-16): no row outlives the

@@ -63,6 +63,9 @@ pub trait ApplyRepo: Send + Sync {
     /// The approved answers whose question key is one of `keys` (AC2): what the
     /// next drafting run is handed for reuse. Matching is on the whole key, so
     /// an unrelated question never inherits an answer.
+    ///
+    /// `needs_review` is not a filter here: it marks an answer the user must see
+    /// when it is used (AC1), and approving it is the user having seen it.
     fn answer_bank_reusable(&self, keys: &[String]) -> Result<Vec<BankAnswer>, ApplyRepoError>;
 
     /// Approve one row: `answer` replaces the stored text when the user edited
