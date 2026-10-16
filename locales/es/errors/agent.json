@@ -1,0 +1,11 @@
+{
+  "errors.agent.auth_expired": "Tu herramienta de IA necesita que vuelvas a iniciar sesión. El resto del trabajo continúa.",
+  "errors.agent.quota_exceeded": "Tu herramienta de IA alcanzó su límite de uso. Se reanudará cuando el límite se restablezca.",
+  "errors.agent.not_found": "No se encontró el modelo o la herramienta de IA.",
+  "errors.agent.timeout": "La tarea de IA tardó demasiado y se detuvo.",
+  "errors.agent.limit_exceeded": "La tarea de IA llegó a su límite y se detuvo antes de terminar.",
+  "errors.agent.cancelled": "La tarea de IA se canceló.",
+  "errors.agent.unsupported": "Esta tarea necesita una herramienta de IA con bloqueo de herramientas verificado, porque lee contenido de la web. Elige un CLI Full para activarla; el resto del trabajo continúa.",
+  "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa.",
+  "errors.agent.invalid_output": "La herramienta de IA respondía en un formato que Boba no puede usar, así que la tarea se detuvo. Inténtalo de nuevo."
+}

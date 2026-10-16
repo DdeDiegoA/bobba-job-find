@@ -1,0 +1,11 @@
+{
+  "errors.agent.auth_expired": "Your AI tool needs you to sign in again. Other work continues.",
+  "errors.agent.quota_exceeded": "Your AI tool has hit its usage limit. It will resume when the limit resets.",
+  "errors.agent.not_found": "The model or AI tool could not be found.",
+  "errors.agent.timeout": "The AI task took too long and was stopped.",
+  "errors.agent.limit_exceeded": "The AI task reached its limit and was stopped before finishing.",
+  "errors.agent.cancelled": "The AI task was cancelled.",
+  "errors.agent.unsupported": "This task needs an AI tool with a verified tool lockdown, because it reads content from the web. Pick a Full CLI to enable it; other work continues.",
+  "errors.agent.crashed": "The AI tool stopped unexpectedly. Other work continues.",
+  "errors.agent.invalid_output": "The AI tool kept answering in a shape Boba can't use, so the task was stopped. Try again."
+}

@@ -1,0 +1,4 @@
+{
+  "errors.preferences.store": "Your preferences could not be read or saved.",
+  "errors.preferences.invalid": "Those preferences can't be saved: check the amount, currency, hours and work modes."
+}

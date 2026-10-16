@@ -43,7 +43,8 @@ cargo deny check      # supply chain / licences / advisories (optional locally)
   router in `src/app/routes.tsx`, design tokens in `src/styles/tokens.css`.
 - `src-tauri/` — Tauri app (`src/lib.rs` registers every MVP plugin) and the
   Rust core crates under `src-tauri/crates/`.
-- `locales/{en,es}/` — shared i18n catalogues, one file per namespace (AD-21).
+- `locales/{en,es}/` — shared i18n catalogues, one file per namespace (AD-21);
+  core error keys sit one file per area under `errors/` (CH7).
 - `agent-pack/` — the portable Boba agent: `system.md` + `skills/<task>/SKILL.md`.
 - `templates/` — Typst CV/cover templates and fonts.
 - `tools/` — dev tools (fake agent CLI).
