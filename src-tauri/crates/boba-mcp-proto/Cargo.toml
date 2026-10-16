@@ -11,3 +11,5 @@ publish = false
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 schemars = { workspace = true }
+# Local IPC endpoint (owner-only socket / pipe) shared by the shim and the core.
+interprocess = { workspace = true }

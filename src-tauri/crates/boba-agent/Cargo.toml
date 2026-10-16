@@ -17,3 +17,6 @@ thiserror = { workspace = true }
 # Run ids (AD-17) and process-group / Job Object spawning (AD-1).
 ulid = { workspace = true }
 process-wrap = { workspace = true, features = ["std"] }
+# MCP endpoint (AD-6): owner-only local socket / named pipe, plus per-run token bytes.
+interprocess = { workspace = true }
+getrandom = { workspace = true }
