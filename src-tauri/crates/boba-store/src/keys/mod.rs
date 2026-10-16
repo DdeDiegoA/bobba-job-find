@@ -190,13 +190,26 @@ impl SecretPort for SecretStore {
     }
 }
 
-/// Register the platform credential store, once per process. If a default store
-/// is already installed (a test mock, or an earlier call) this is a no-op.
+/// Register the credential store, once per process. If a default store is
+/// already installed (a test mock, or an earlier call) this is a no-op.
+///
+/// A **unit-test build never opens a platform store**: it installs the one
+/// shared mock instead, so `platform_store` is unreachable from these tests and
+/// the real macOS keychain can never be reached (S8.1). The integration binary
+/// `tests/db.rs` links the lib without `cfg(test)`, takes the real path, and
+/// installs its own mock before any keychain call, so it stays off the real
+/// keychain too.
 pub fn install_platform_store() -> Result<(), KeyError> {
-    if keyring_core::get_default_store().is_some() {
-        return Ok(());
+    #[cfg(test)]
+    {
+        use_mock_keychain();
     }
-    keyring_core::set_default_store(platform_store()?);
+    #[cfg(not(test))]
+    {
+        if keyring_core::get_default_store().is_none() {
+            keyring_core::set_default_store(platform_store()?);
+        }
+    }
     Ok(())
 }
 
@@ -205,8 +218,7 @@ pub fn install_platform_store() -> Result<(), KeyError> {
 /// Every test helper routes through it (`keys` and `repos::audit`), so the
 /// process-wide default is set exactly once and never replaced: a second
 /// installer used to swap the store under a running test, and one reached the
-/// real macOS keychain. Tests install this before any other keychain call, so
-/// [`install_platform_store`] never opens a platform store from a test (S8.1).
+/// real macOS keychain.
 #[cfg(test)]
 pub(crate) fn use_mock_keychain() -> Arc<CredentialStore> {
     static STORE: std::sync::OnceLock<Arc<CredentialStore>> = std::sync::OnceLock::new();
@@ -220,28 +232,31 @@ pub(crate) fn use_mock_keychain() -> Arc<CredentialStore> {
         .clone()
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(not(test), target_os = "macos"))]
 fn platform_store() -> Result<Arc<CredentialStore>, KeyError> {
     let store: Arc<CredentialStore> = apple_native_keyring_store::keychain::Store::new()
         .map_err(|e| KeyError::Keychain(e.to_string()))?;
     Ok(store)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(not(test), target_os = "windows"))]
 fn platform_store() -> Result<Arc<CredentialStore>, KeyError> {
     let store: Arc<CredentialStore> = windows_native_keyring_store::Store::new()
         .map_err(|e| KeyError::Keychain(e.to_string()))?;
     Ok(store)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(not(test), target_os = "linux"))]
 fn platform_store() -> Result<Arc<CredentialStore>, KeyError> {
     let store: Arc<CredentialStore> = dbus_secret_service_keyring_store::Store::new()
         .map_err(|e| KeyError::Keychain(e.to_string()))?;
     Ok(store)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(all(
+    not(test),
+    not(any(target_os = "macos", target_os = "windows", target_os = "linux"))
+))]
 fn platform_store() -> Result<Arc<CredentialStore>, KeyError> {
     Err(KeyError::NoKeychain)
 }
@@ -286,6 +301,19 @@ mod tests {
     fn store() -> SecretStore {
         use_mock_keychain();
         SecretStore::new("app.bobajobfind.test")
+    }
+
+    // `install_platform_store` is the only door to `platform_store`; in a
+    // unit-test build it installs the one shared mock instead, so a platform
+    // store is unreachable here (S8.1).
+    #[test]
+    fn a_unit_test_build_never_opens_a_platform_store() {
+        install_platform_store().expect("install");
+        let store = keyring_core::get_default_store().expect("default store");
+        assert!(
+            Arc::ptr_eq(&store, &use_mock_keychain()),
+            "a unit-test build must install the shared mock, not a platform store"
+        );
     }
 
     #[test]

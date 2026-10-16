@@ -362,7 +362,8 @@ fn auth_error_classifies_and_pauses_ai() {
 // AC3 (S2.2 regression): the run must not classify until the stderr pipe is
 // closed. `reap()` used to leave the stderr reader racing the classification,
 // so a stderr that closes late (a grandchild still holding it) made an
-// auth-expired run come back `Unsupported` instead of `AuthExpired`.
+// auth-expired run come back `Unsupported` instead of `AuthExpired`. The hold
+// is well under `supervisor::STDERR_JOIN_GRACE`, so the reader still finishes.
 #[cfg(unix)]
 #[test]
 fn auth_error_is_classified_when_stderr_closes_late() {
@@ -372,7 +373,7 @@ fn auth_error_is_classified_when_stderr_closes_late() {
         task(RunBudget::default()),
         spec(&[
             ("BOBA_FAKE_MODE", "fail-auth"),
-            ("BOBA_FAKE_STDERR_HOLD_MS", "700"),
+            ("BOBA_FAKE_STDERR_HOLD_MS", "150"),
         ]),
     );
     let (run_id, events) = drain(handle);

@@ -9,7 +9,7 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use process_wrap::std::JobObject;
@@ -32,6 +32,11 @@ pub enum SupervisorError {
     #[error("the child has no captured stdout")]
     NoStdout,
 }
+
+/// How long `reap` waits for the stderr reader once the child is gone. Long
+/// enough to drain a closed pipe, short enough that a grandchild still holding
+/// stderr open cannot stall the run.
+const STDERR_JOIN_GRACE: Duration = Duration::from_millis(500);
 
 /// One item from the child's stdout stream.
 #[derive(Debug)]
@@ -169,9 +174,18 @@ impl SupervisedProcess {
             let _ = reader.join();
         }
         // Join the stderr reader too: `stderr_so_far()` must never race it, or
-        // an auth failure can be classified from an empty string.
+        // an auth failure can be classified from an empty string. The join is
+        // bounded: a grandchild that inherits stderr can hold the pipe open for
+        // good, and the run must not hang on it. Past the grace the reader is
+        // detached and stderr is whatever it had collected.
         if let Some(reader) = self.stderr_reader.take() {
-            let _ = reader.join();
+            let deadline = Instant::now() + STDERR_JOIN_GRACE;
+            while !reader.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            if reader.is_finished() {
+                let _ = reader.join();
+            }
         }
     }
 }
@@ -188,6 +202,7 @@ impl Drop for SupervisedProcess {
 mod tests {
     use super::*;
     use std::fs;
+    use std::time::Instant;
 
     /// The fake CLI, built on demand so a cold target still works (see
     /// `runtime::fake_cli_path`).
@@ -246,5 +261,28 @@ mod tests {
         std::thread::sleep(Duration::from_millis(600));
         assert!(!marker.exists(), "grandchild survived the group kill");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    // A grandchild that inherits stderr must not hang the run: the stderr join
+    // is bounded, so `wait` returns even while the pipe is still held.
+    #[cfg(unix)]
+    #[test]
+    fn a_grandchild_holding_stderr_does_not_hang_wait() {
+        let mut proc = SupervisedProcess::spawn(&spec(&[
+            ("BOBA_FAKE_MODE", "fail-auth"),
+            ("BOBA_FAKE_STDERR_HOLD_MS", "5000"),
+        ]))
+        .expect("spawn");
+
+        // The CLI itself is done at once; only its stderr is still open.
+        while !matches!(proc.recv_line(Duration::from_secs(5)), Stream::Eof) {}
+
+        let started = Instant::now();
+        proc.wait();
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "wait blocked on a grandchild holding stderr for {:?}",
+            started.elapsed()
+        );
     }
 }
