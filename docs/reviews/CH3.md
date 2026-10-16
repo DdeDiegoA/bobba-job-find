@@ -41,3 +41,22 @@ The full-gate requirement of the 2026-10-15 protocol is met on this branch, and 
 
 - Windows/Linux-specific behaviour (nothing platform-specific in this chore; macOS only).
 - Whether `syn 2.0.119` vs `3.0.6` changes any compiled output — not applicable once the lock is regenerated.
+
+---
+# Round 2 — reviewer-4 (Haiku), 2026-10-16, tip `e96da7c`
+
+**Verdict: APPROVED.** Round 1 P2 (lockfile not reproducible) is resolved.
+
+| Check | Result |
+|---|---|
+| Lock reproducibility | `cargo update -p ammonia --precise 4.2.3` + `cargo update -p rustls --precise 0.23.46` on a fresh `main` worktree produces a `Cargo.lock` **byte-identical** to `8bb9d6b`. |
+| `cargo metadata --locked` / `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | exit 0 |
+| `cargo test --workspace --locked` | exit 0 — 27 suites, 137 passed / 0 failed |
+| `cargo deny check` | exit 0 — advisories, bans, licenses, sources ok |
+| `pnpm install --frozen-lockfile` / `lint` / `typecheck` / `test` | exit 0 |
+| `scripts/check-i18n.mjs` / `scripts/ci/check-workflow-policy.mjs` / `scripts/gen-bindings.mjs --check` | exit 0 |
+
+**Ignore scope:** only `RUSTSEC-2024-0449` (unsafe-libyaml) and `{ crate = "zip@4.6.1" }` are new. `zip` resolves to a single version (4.6.1) in the lock, so the crate-spec ignore cannot cover another zip. `yanked = "deny"` is unchanged. `0BSD` is the only license allowance added.
+
+**Non-blocking:** none.
