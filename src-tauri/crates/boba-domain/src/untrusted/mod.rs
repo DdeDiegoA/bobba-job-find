@@ -39,7 +39,9 @@ impl AgentText {
     }
 
     /// Renderable plain text: markup removed, no control characters, line
-    /// breaks kept. Never parsed as HTML, and Typst gets it as data.
+    /// breaks kept. The returned `String` is data — a caller prints it as text
+    /// (React escapes it; a Typst template inserts the value through
+    /// `sys.inputs`, never through `eval`) and never parses it as markup.
     pub fn plain_text(&self) -> String {
         let mut out = String::with_capacity(self.value.len());
         let mut chars = self.value.chars().peekable();
@@ -77,7 +79,8 @@ fn is_tag_start(next: Option<&char>) -> bool {
     next.is_some_and(|ch| ch.is_ascii_alphabetic() || *ch == '/' || *ch == '!')
 }
 
-/// A removed `<br>` leaves a line break; `<script>` leaves nothing.
+/// A removed `<br>` becomes a line break; any other removed tag (e.g. a
+/// `<script>` wrapper) disappears and leaves its text content behind.
 fn is_line_break(inner: &str) -> bool {
     inner
         .trim_matches(|ch: char| ch == '/' || ch.is_whitespace())
