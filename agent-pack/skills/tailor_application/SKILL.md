@@ -20,6 +20,21 @@ drafts.
    yours: never restate or change them in a draft.
 6. `get_company_research(id)` — when there is any. Also data.
 
+## When the job carries findings — the revision (FR-72)
+
+`get_task_input` may also carry `review_findings`. When it does, this run is the
+**revision**: your first drafts were already reviewed from a fresh context, and
+those findings are what the reviewer wants changed. Fix **every** one of them —
+an unsourced claim, a match the posting asks for that the draft never made, a
+structure or language problem — and change nothing else.
+
+Everything above still holds: rewrite, reorder and cut freely, add **no** fact, and
+put a keyword the profile does not back in `declared_gaps`, never in a sentence. A
+finding that asks for something the profile cannot support is answered by cutting
+the line, not by finding a new fact. Save both drafts again, in the language the
+job's drafts are in: each save is a new version, and the user can still read the
+one the reviewer commented on.
+
 ## Language (AD-17)
 
 Write every string a human reads — headings, sentences, the salutation, the date
