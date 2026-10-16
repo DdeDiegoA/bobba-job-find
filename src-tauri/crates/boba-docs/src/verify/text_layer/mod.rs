@@ -93,30 +93,54 @@ pub fn blocks(document: &DocumentModel) -> Vec<String> {
 
 /// Every block the layer does not show in the document's own order (FR-77).
 ///
-/// Each block the layer shows has to come after the block the document puts
-/// before it; the one that shows up before its time is the one reported.
+/// The layer is read forward: every block has to be found running past the end of
+/// the block before it, so a word that also appears in an earlier block (the
+/// "Experience" of a summary line, say) never stands in for the block itself. The
+/// block that shows up before its time is the one reported.
+///
+/// shortcut: an occurrence has to *end* after the previous one, not start after
+/// it, because the extractor glues adjacent runs together — the end of one block's
+/// line can overlap the start of the next. A block whose whole text sits inside
+/// an earlier block's line is therefore read as out of order; our templates emit
+/// one block per line, so that is a render we have never seen.
 pub fn reading_order(layer: &str, blocks: &[String]) -> Vec<String> {
     let layer = fold(&normalize(layer));
-    let mut previous: Option<usize> = None;
+    let mut cursor = 0;
     let mut violations = Vec::new();
     for block in blocks {
         let needle = fold(&normalize(block));
         if needle.is_empty() {
             continue;
         }
-        // A block the layer does not show is not this check's business: the
-        // contact check owns what must be there and the keyword check owns the
-        // requirement words. Only the order of what *is* there is read here.
-        let Some(position) = layer.find(&needle) else {
-            continue;
-        };
-        if previous.is_some_and(|previous| position < previous) {
-            violations.push(block.clone());
-            continue;
+        match find_block(&layer, &needle, cursor) {
+            Some(start) => cursor = start + needle.len(),
+            // Not where the document puts it: either the layer does not show it
+            // at all — which is not this check's business, the contact check owns
+            // what must be there and the keyword check owns the requirement words
+            // — or the layer already read past it, which is out of order.
+            None => {
+                if layer.contains(&needle) {
+                    violations.push(block.clone());
+                }
+            }
         }
-        previous = Some(position);
     }
     violations
+}
+
+/// The first occurrence of `needle` that ends after `cursor` (FR-77).
+fn find_block(layer: &str, needle: &str, cursor: usize) -> Option<usize> {
+    let mut from = 0;
+    while let Some(offset) = layer[from..].find(needle) {
+        let start = from + offset;
+        if start + needle.len() > cursor {
+            return Some(start);
+        }
+        // Past the rejected occurrence: the needle is never empty, so this always
+        // moves forward, and it stops on a character boundary.
+        from = start + layer[start..].chars().next().map_or(1, char::len_utf8);
+    }
+    None
 }
 
 /// The contact details the layer does not show as literal text (FR-77).
@@ -538,6 +562,32 @@ mod tests {
         assert!(
             !fabricated.is_verified(DocumentKind::Cv, 2),
             "the fabrication check failed"
+        );
+    }
+
+    // FR-77: a heading the parser put after its own line is a violation even when
+    // the heading's word also appears earlier, in the prose (reviewer-1's repro).
+    #[test]
+    fn a_word_that_also_appears_in_the_prose_does_not_hide_a_swapped_block() {
+        let blocks: Vec<String> = [
+            "Ada Lovelace",
+            "Backend developer with experience in Rust.",
+            "Experience",
+            "Shipped the billing pipeline in Rust",
+        ]
+        .iter()
+        .map(|block| block.to_string())
+        .collect();
+
+        let in_order = "Ada Lovelace Backend developer with experience in Rust. Experience\nShipped the billing pipeline in Rust";
+        assert!(reading_order(in_order, &blocks).is_empty());
+
+        // The heading printed after the line it heads. The prose "experience"
+        // must not stand in for it: the block the layer shows too early is named.
+        let swapped = "Ada Lovelace Backend developer with experience in Rust. Shipped the billing pipeline in Rust Experience";
+        assert_eq!(
+            reading_order(swapped, &blocks),
+            ["Shipped the billing pipeline in Rust"]
         );
     }
 

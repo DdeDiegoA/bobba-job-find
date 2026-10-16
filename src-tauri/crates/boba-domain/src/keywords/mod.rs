@@ -133,6 +133,12 @@ pub fn requirement_keywords(requirement: &str) -> Vec<String> {
 ///
 /// `lang` is the language the draft is written in (AD-17): a fact backs a
 /// keyword through its variant in that language.
+///
+/// shortcut: a keyword is backed by the *same* folded word in a fact, never by a
+/// synonym, an abbreviation or a shorter stem, so "Postgres" in a requirement and
+/// "PostgreSQL" in a fact is shown as a gap. Exactness is deliberate — a false
+/// "covered" would tell the user an ATS will find something it will not — and
+/// synonyms are the optional embeddings work (AD-8), not this pass.
 pub fn coverage(
     requirements: &[String],
     profile: &[ProfileFact],
