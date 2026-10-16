@@ -21,6 +21,8 @@ macro_rules! boba_commands {
             crate::commands::preferences::preferences_save,
             crate::commands::email::email_accounts,
             crate::commands::email::email_connect_outlook,
+            crate::commands::email::email_connect_gmail,
+            crate::commands::email::email_connect_imap_smtp,
             crate::commands::email::email_set_mode,
             crate::commands::email::email_disconnect,
             crate::commands::tracker::tracker_board,

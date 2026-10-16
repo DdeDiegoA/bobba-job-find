@@ -15,11 +15,24 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Graph / OAuth (S8.1): the loopback flow, the token endpoint and the Graph API.
 reqwest = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["net", "io-util"] }
 sha2 = { workspace = true }
 base64 = { workspace = true }
 getrandom = { workspace = true }
 url = { workspace = true }
+# --- Gmail send + IMAP/SMTP (S8.2) ---
+# lettre builds the MIME message (encoded words, attachments) for both the Gmail
+# API `raw` field and the SMTP send; async-imap talks IMAP read-only. Both were
+# pinned by the architect (tech-stack.md §11) and are used exactly for that.
+lettre = { workspace = true }
+async-imap = { workspace = true, default-features = false, features = [
+  "runtime-tokio",
+  "tokio",
+] }
+# TLS for the IMAP/SMTP sockets: the platform trust store, the same library
+# lettre uses by default, so there is one TLS backend per connection.
+native-tls = { workspace = true }
+tokio-native-tls = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

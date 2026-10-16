@@ -128,6 +128,10 @@ chromiumoxide = "0.9"
 lettre = "0.11"
 async-imap = "0.12"
 mail-parser = "0.11"
+# Platform TLS for the IMAP/SMTP sockets (S8.2). Already in the lock through
+# lettre/reqwest; pinned here so both crates share the exact same versions.
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 oauth2 = "5.0"
 
 # --- Test / dev ---

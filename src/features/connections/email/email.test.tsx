@@ -10,6 +10,8 @@ vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
     emailAccounts: vi.fn(),
     emailConnectOutlook: vi.fn(),
+    emailConnectGmail: vi.fn(),
+    emailConnectImapSmtp: vi.fn(),
     emailSetMode: vi.fn(),
     emailDisconnect: vi.fn(),
   },
@@ -29,6 +31,16 @@ const account = (over: Partial<ConnectionView> = {}): ConnectionView => ({
   ...over,
 });
 
+/** Both connect forms share label wording, so the tests scope to one of them. */
+async function formOf(heading: string) {
+  const title = await screen.findByRole("heading", { name: heading });
+  return title.closest("form") as HTMLElement;
+}
+
+const outlookForm = () => formOf("Outlook / Microsoft 365");
+const gmailForm = () => formOf("Gmail");
+const imapForm = () => formOf("Other providers (IMAP and SMTP)");
+
 function renderScreen() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -41,6 +53,8 @@ function renderScreen() {
 beforeEach(() => {
   vi.mocked(commands.emailAccounts).mockReset().mockReturnValue(ok([]));
   vi.mocked(commands.emailConnectOutlook).mockReset();
+  vi.mocked(commands.emailConnectGmail).mockReset();
+  vi.mocked(commands.emailConnectImapSmtp).mockReset();
   vi.mocked(commands.emailSetMode).mockReset();
   vi.mocked(commands.emailDisconnect).mockReset();
 });
@@ -48,20 +62,21 @@ beforeEach(() => {
 describe("connecting Outlook (AC1)", () => {
   it("lists the scopes it will ask for in plain language, per mode", async () => {
     renderScreen();
+    const form = await outlookForm();
 
     // Send-only is the default: no reading scope is mentioned.
-    expect(await screen.findByText(/Send mail as you/)).toBeTruthy();
-    expect(screen.queryByText(/Read your mail/)).toBeNull();
+    expect(within(form).getByText(/Send mail as you/)).toBeTruthy();
+    expect(within(form).queryByText(/Read your mail/)).toBeNull();
     // The refresh-token scope is named too, in plain language (AC1).
-    expect(screen.getByText(/Stay connected while you are away/)).toBeTruthy();
+    expect(within(form).getByText(/Stay connected while you are away/)).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText(/Read and send/, { selector: "input" }));
+    fireEvent.click(within(form).getByLabelText(/Read and send/, { selector: "input" }));
 
     // AC1: both delegated scopes, in plain language, before consent.
-    expect(await screen.findByText(/Read your mail/)).toBeTruthy();
-    expect(screen.getByText(/Send mail as you/)).toBeTruthy();
+    expect(within(form).findByText(/Read your mail/)).toBeTruthy();
+    expect(within(form).getByText(/Send mail as you/)).toBeTruthy();
     // NFR-5: it says what it will not ask for.
-    expect(screen.getByText(/No admin consent/)).toBeTruthy();
+    expect(within(form).getByText(/No admin consent/)).toBeTruthy();
   });
 
   it("connects with the address, the chosen mode and an optional own client ID", async () => {
@@ -69,12 +84,13 @@ describe("connecting Outlook (AC1)", () => {
       ok(account({ mode: "read_send", scopes: ["Mail.Read", "Mail.Send"] })),
     );
     renderScreen();
+    const form = await outlookForm();
 
-    fireEvent.change(await screen.findByLabelText(/Mailbox address/), {
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
       target: { value: " me@example.com " },
     });
-    fireEvent.click(screen.getByLabelText(/Read and send/, { selector: "input" }));
-    fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));
+    fireEvent.click(within(form).getByLabelText(/Read and send/, { selector: "input" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Connect Outlook" }));
 
     await waitFor(() =>
       expect(commands.emailConnectOutlook).toHaveBeenCalledWith({
@@ -93,14 +109,15 @@ describe("connecting Outlook (AC1)", () => {
   it("sends the user's own client ID when they provide one", async () => {
     vi.mocked(commands.emailConnectOutlook).mockReturnValue(ok(account()));
     renderScreen();
+    const form = await outlookForm();
 
-    fireEvent.change(await screen.findByLabelText(/Mailbox address/), {
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
       target: { value: "me@example.com" },
     });
-    fireEvent.change(screen.getByLabelText(/your own client ID/), {
+    fireEvent.change(within(form).getByLabelText(/your own client ID/), {
       target: { value: " my-client-id " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Connect Outlook" }));
 
     await waitFor(() =>
       expect(commands.emailConnectOutlook).toHaveBeenCalledWith({
@@ -112,17 +129,166 @@ describe("connecting Outlook (AC1)", () => {
   });
 });
 
+describe("connecting Gmail (AC1)", () => {
+  const gmailAccount = (over: Partial<ConnectionView> = {}) =>
+    account({
+      provider: "gmail",
+      address: "me@gmail.com",
+      scopes: ["https://www.googleapis.com/auth/gmail.send"],
+      ...over,
+    });
+
+  it("asks for gmail.send only and says what it will not do", async () => {
+    renderScreen();
+    const form = await gmailForm();
+
+    // AC1: the one scope, in plain language, before consent.
+    expect(within(form).getByText(/Send mail as you/)).toBeTruthy();
+    // No reading scope is asked for, and there is no mode switch to fake one.
+    expect(within(form).queryByText(/Read your mail/)).toBeNull();
+    expect(within(form).queryByText(/Read and send/)).toBeNull();
+    expect(within(form).getByText(/Boba never reads your Gmail/)).toBeTruthy();
+  });
+
+  it("connects with the address and an optional own client id and secret", async () => {
+    vi.mocked(commands.emailConnectGmail).mockReturnValue(ok(gmailAccount()));
+    renderScreen();
+    const form = await gmailForm();
+
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
+      target: { value: " me@gmail.com " },
+    });
+    fireEvent.change(within(form).getByLabelText(/your own client ID/), {
+      target: { value: " my-client-id.apps.googleusercontent.com " },
+    });
+    fireEvent.change(within(form).getByLabelText(/your client secret/), {
+      target: { value: " GOCSPX-public " },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Connect Gmail" }));
+
+    await waitFor(() =>
+      expect(commands.emailConnectGmail).toHaveBeenCalledWith({
+        address: "me@gmail.com",
+        client_id: "my-client-id.apps.googleusercontent.com",
+        client_secret: "GOCSPX-public",
+      }),
+    );
+
+    // The connection lands in the list as a Gmail, send-only mailbox.
+    const row = (await screen.findByText("me@gmail.com")).closest("li") as HTMLElement;
+    expect(within(row).getByText(/Send mail as you/)).toBeTruthy();
+  });
+});
+
+describe("connecting an IMAP/SMTP account (AC2)", () => {
+  const imapAccount = (over: Partial<ConnectionView> = {}) =>
+    account({
+      provider: "imap_smtp",
+      address: "me@example.com",
+      mode: "read_send",
+      scopes: [],
+      ...over,
+    });
+
+  function fill(form: HTMLElement, security: "TLS" | "STARTTLS" = "TLS") {
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
+      target: { value: " me@example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText("IMAP server"), {
+      target: { value: " imap.example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText("SMTP server"), {
+      target: { value: " smtp.example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText(/App password/), {
+      target: { value: "app-password" },
+    });
+    if (security === "STARTTLS") {
+      fireEvent.change(within(form).getByLabelText("IMAP encryption"), {
+        target: { value: "start_tls" },
+      });
+    }
+  }
+
+  it("tests before saving: a refused password is a translated error and no row", async () => {
+    vi.mocked(commands.emailConnectImapSmtp).mockReturnValue(
+      failed({ code: "unauthorized", message_key: "errors.email.probe_credentials" }),
+    );
+    renderScreen();
+    const form = await imapForm();
+    fill(form);
+    fireEvent.click(within(form).getByRole("button", { name: "Test and save" }));
+
+    // The endpoints and the credential go to the command that probes first.
+    await waitFor(() =>
+      expect(commands.emailConnectImapSmtp).toHaveBeenCalledWith({
+        address: "me@example.com",
+        username: "me@example.com",
+        credential: "app-password",
+        credential_kind: "password",
+        imap_host: "imap.example.com",
+        imap_port: 993,
+        imap_security: "tls",
+        smtp_host: "smtp.example.com",
+        smtp_port: 465,
+        smtp_security: "tls",
+      }),
+    );
+
+    const alert = await within(form).findByRole("alert");
+    expect(alert.textContent).toContain("did not accept that password");
+    expect(alert.textContent).not.toContain("errors.email");
+    // Nothing was saved: the mailbox is not in the list.
+    expect(screen.queryByRole("heading", { name: "me@example.com" })).toBeNull();
+  });
+
+  it("offers the ports that belong to each encryption choice", async () => {
+    vi.mocked(commands.emailConnectImapSmtp).mockReturnValue(ok(imapAccount()));
+    renderScreen();
+    const form = await imapForm();
+
+    // STARTTLS on 143/587 is one choice away, and the defaults follow it.
+    expect((within(form).getByLabelText("IMAP port") as HTMLInputElement).value).toBe("993");
+    expect((within(form).getByLabelText("SMTP port") as HTMLInputElement).value).toBe("465");
+
+    fill(form, "STARTTLS");
+
+    expect((within(form).getByLabelText("IMAP port") as HTMLInputElement).value).toBe("143");
+    fireEvent.click(within(form).getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() =>
+      expect(commands.emailConnectImapSmtp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          imap_port: 143,
+          imap_security: "start_tls",
+          smtp_port: 465,
+          smtp_security: "tls",
+        }),
+      ),
+    );
+
+    // The saved row says what it does, and offers no mode switch: an IMAP/SMTP
+    // account has no OAuth grant to switch.
+    const row = (await screen.findByRole("heading", { name: "me@example.com" })).closest(
+      "li",
+    ) as HTMLElement;
+    expect(within(row).getByText(/never changes anything on the server/)).toBeTruthy();
+    expect(within(row).queryByLabelText(/Read and send/, { selector: "input" })).toBeNull();
+  });
+});
+
 describe("a failed sign-in (AC2)", () => {
   it("shows a translated reason and a way forward, never the raw key", async () => {
     vi.mocked(commands.emailConnectOutlook).mockReturnValue(
       failed({ code: "invalid_input", message_key: "errors.email.state" }),
     );
     renderScreen();
+    const form = await outlookForm();
 
-    fireEvent.change(await screen.findByLabelText(/Mailbox address/), {
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
       target: { value: "me@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));
+    fireEvent.click(within(form).getByRole("button", { name: "Connect Outlook" }));
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("did not belong to this attempt");

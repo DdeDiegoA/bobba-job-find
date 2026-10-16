@@ -17,12 +17,19 @@ use boba_app::ports::repo::email::{
 };
 use boba_app::ports::secret::SecretPort;
 use boba_app::system::SystemClock;
+use boba_mail::gmail::{
+    self, BUNDLED_GMAIL_CLIENT_ID, BUNDLED_GMAIL_CLIENT_SECRET, GMAIL_SEND_SCOPE, GmailSecret,
+};
+use boba_mail::imap::{self, Auth, ImapError, ImapSettings};
 use boba_mail::oauth::{
     self, BUNDLED_GRAPH_CLIENT_ID, OAuthError as FlowError, PendingFlow, ProviderEndpoints,
     STATE_TTL, TokenSet, loopback,
 };
+use boba_mail::smtp::{self, ImapSmtpSecret, SmtpError, SmtpSettings};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::wiring;
@@ -99,6 +106,14 @@ enum EmailFailure {
     /// The keychain refused to store the tokens. Nothing was connected.
     #[error("the keychain refused the write")]
     Keychain,
+    /// The user gave a client id but no client secret. Google needs the public
+    /// installed-app secret at its token endpoint, so the flow cannot complete:
+    /// this is refused before the browser opens, not after.
+    #[error("the client secret is missing")]
+    ClientSecret,
+    /// The connection test before saving failed (AC2), for one of three reasons.
+    #[error("the connection test failed: {0:?}")]
+    Probe(ProbeOutcome),
     /// An internal step failed (the listener task died).
     #[error("internal failure")]
     Internal,
@@ -114,10 +129,15 @@ impl EmailFailure {
     /// The machine-readable category.
     fn code(&self) -> ErrorCode {
         match self {
-            Self::Address | Self::NoBundledClient => ErrorCode::InvalidInput,
+            Self::Address | Self::NoBundledClient | Self::ClientSecret => ErrorCode::InvalidInput,
             Self::Browser => ErrorCode::Unavailable,
             Self::UnknownConnection => ErrorCode::NotFound,
             Self::NeedsReconsent => ErrorCode::Conflict,
+            Self::Probe(outcome) => match outcome {
+                ProbeOutcome::Credentials => ErrorCode::Unauthorized,
+                ProbeOutcome::Unreachable => ErrorCode::Unavailable,
+                ProbeOutcome::Refused | ProbeOutcome::Settings => ErrorCode::InvalidInput,
+            },
             Self::Keychain | Self::Internal | Self::Store(_) => ErrorCode::Internal,
             Self::Flow(flow) => match flow {
                 oauth::OAuthError::Timeout | oauth::OAuthError::Transport => ErrorCode::Unavailable,
@@ -137,9 +157,16 @@ impl EmailFailure {
         match self {
             Self::Address => "errors.email.address",
             Self::NoBundledClient => "errors.email.no_bundled_client",
+            Self::ClientSecret => "errors.email.client_secret",
             Self::Browser => "errors.email.browser",
             Self::UnknownConnection => "errors.email.unknown_connection",
             Self::NeedsReconsent => "errors.email.needs_reconsent",
+            Self::Probe(outcome) => match outcome {
+                ProbeOutcome::Credentials => "errors.email.probe_credentials",
+                ProbeOutcome::Unreachable => "errors.email.probe_unreachable",
+                ProbeOutcome::Refused => "errors.email.probe_refused",
+                ProbeOutcome::Settings => "errors.email.probe_settings",
+            },
             Self::Keychain => "errors.email.keychain",
             Self::Internal => "errors.email.internal",
             Self::Store(_) => "errors.email.store",
@@ -193,21 +220,13 @@ pub async fn email_connect_outlook(
     let accounts = wiring::port::<dyn EmailRepo>(&app)?;
     let secrets = wiring::port::<dyn SecretPort>(&app)?;
 
-    let address = input.address.trim().to_string();
-    if address.is_empty() || !address.contains('@') {
-        return Err(EmailFailure::Address.into());
-    }
-
+    let address = mailbox_address(&input.address)?;
     // AC1: Boba's bundled public client, or the user's own client id.
-    let (client_id, client_id_kind) = match input.client_id.as_deref().map(str::trim) {
-        Some(id) if !id.is_empty() => (id.to_string(), ClientIdKind::Byo),
-        _ => match BUNDLED_GRAPH_CLIENT_ID {
-            Some(id) => (id.to_string(), ClientIdKind::Bundled),
-            None => {
-                return Err(EmailFailure::NoBundledClient.into());
-            }
-        },
-    };
+    let (client_id, client_id_kind) = bundled_or_byo(
+        input.client_id.as_deref(),
+        BUNDLED_GRAPH_CLIENT_ID,
+        EmailFailure::NoBundledClient,
+    )?;
 
     // The mode's mail scopes, plus the standard scope that asks for a refresh
     // token — without it the connection dies when the access token expires and
@@ -217,15 +236,399 @@ pub async fn email_connect_outlook(
 
     let endpoints = ProviderEndpoints::microsoft_graph();
     let (listener, redirect_uri) = loopback::bind().map_err(EmailFailure::from)?;
-    let mut flow = PendingFlow::new(
+    let flow = PendingFlow::new(
         endpoints.clone(),
         client_id.clone(),
-        redirect_uri.clone(),
+        redirect_uri,
         &requested,
     )
     .map_err(EmailFailure::from)?;
+    let tokens = finish_flow(&app, flow, listener).await?;
 
-    open_in_browser(&app, &flow.authorize_url().map_err(EmailFailure::from)?)?;
+    // AC1/FR-40: the tokens go to the keychain, addressed by an opaque
+    // reference; the row keeps the reference and the granted scopes only.
+    let account = connection_row(
+        accounts.as_ref(),
+        MailProvider::MicrosoftGraph,
+        address,
+        input.mode,
+        client_id,
+        client_id_kind,
+        tokens.scopes.clone(),
+    )?;
+    secrets
+        .put(&account.secret_ref, &tokens.to_json())
+        .map_err(|_| EmailFailure::Keychain)?;
+    accounts
+        .upsert_account(&account)
+        .map_err(EmailFailure::Store)?;
+    Ok(ConnectionView::from(account))
+}
+
+/// The Connect Gmail form: the address, and an optional BYO client id with its
+/// public installed-app secret (AC1).
+#[derive(Debug, Clone, Deserialize, Type)]
+pub struct ConnectGmailInput {
+    /// The mailbox address, as typed by the user. Boba never asks for a
+    /// `gmail.readonly` scope to guess it (NFR-5).
+    pub address: String,
+    /// The user's own Google client id, when they have one ("advanced").
+    pub client_id: Option<String>,
+    /// The public value Google prints next to that client id. Not confidential by
+    /// Google's own documentation, and required at the token endpoint.
+    pub client_secret: Option<String>,
+}
+
+/// Connect Gmail with delegated OAuth (AC1).
+///
+/// Same loopback flow as Outlook (PKCE `S256`, single-use `state`, loopback-only),
+/// with one deliberate difference: the requested scope is `gmail.send` and nothing
+/// else. Boba's bundled client cannot read Gmail — reading is IMAP (S8.3), a BYO
+/// client (S8.5) or a `.eml` import — so the connection is stored send-only and
+/// `covers(ReadSend)` stays false.
+#[tauri::command]
+#[specta::specta]
+pub async fn email_connect_gmail(
+    app: tauri::AppHandle,
+    input: ConnectGmailInput,
+) -> AppResult<ConnectionView> {
+    let accounts = wiring::port::<dyn EmailRepo>(&app)?;
+    let secrets = wiring::port::<dyn SecretPort>(&app)?;
+
+    let address = mailbox_address(&input.address)?;
+    // AC1: the user's own client (id **and** secret), or Boba's bundled pair.
+    // Resolved before the browser opens, so a half-configured client is a form
+    // error instead of a failed consent screen.
+    let (client_id, client_id_kind, client_secret) = gmail_client(
+        input.client_id.as_deref(),
+        input.client_secret.as_deref(),
+        BUNDLED_GMAIL_CLIENT_ID,
+        BUNDLED_GMAIL_CLIENT_SECRET,
+    )?;
+
+    let (listener, redirect_uri) = loopback::bind().map_err(EmailFailure::from)?;
+    let mut flow = PendingFlow::new(
+        gmail::endpoints(),
+        client_id.clone(),
+        redirect_uri,
+        &[GMAIL_SEND_SCOPE],
+    )
+    .map_err(EmailFailure::from)?;
+    if let Some(secret) = &client_secret {
+        flow = flow.with_client_secret(secret.clone());
+    }
+    let tokens = finish_flow(&app, flow, listener).await?;
+
+    let account = connection_row(
+        accounts.as_ref(),
+        MailProvider::Gmail,
+        address,
+        EmailMode::SendOnly,
+        client_id,
+        client_id_kind,
+        tokens.scopes.clone(),
+    )?;
+    let stored = GmailSecret {
+        tokens: tokens.clone(),
+        client_secret,
+    };
+    secrets
+        .put(&account.secret_ref, &stored.to_json())
+        .map_err(|_| EmailFailure::Keychain)?;
+    accounts
+        .upsert_account(&account)
+        .map_err(EmailFailure::Store)?;
+    Ok(ConnectionView::from(account))
+}
+
+/// A typed mailbox address, or the error the UI shows.
+fn mailbox_address(address: &str) -> Result<String, EmailFailure> {
+    let address = address.trim().to_string();
+    if address.is_empty() || !address.contains('@') {
+        return Err(EmailFailure::Address);
+    }
+    Ok(address)
+}
+
+/// Boba's bundled public client id, or the user's own (AC1).
+fn bundled_or_byo(
+    byo: Option<&str>,
+    bundled: Option<&str>,
+    missing: EmailFailure,
+) -> Result<(String, ClientIdKind), EmailFailure> {
+    match byo {
+        Some(id) if !id.is_empty() => Ok((id.to_string(), ClientIdKind::Byo)),
+        _ => match bundled {
+            Some(id) => Ok((id.to_string(), ClientIdKind::Bundled)),
+            None => Err(missing),
+        },
+    }
+}
+
+/// Which Google client a Gmail connection uses (AC1).
+///
+/// The user's own client needs its **public installed-app secret**: Google
+/// demands it at the token endpoint even with PKCE, so an id without one is
+/// refused here — before the browser opens. Boba's bundled client exists only
+/// when the build set both `BOBA_GMAIL_CLIENT_ID` and `BOBA_GMAIL_CLIENT_SECRET`
+/// (never committed: a client id belongs to a registration, not to the tree).
+fn gmail_client(
+    byo_id: Option<&str>,
+    byo_secret: Option<&str>,
+    bundled_id: Option<&str>,
+    bundled_secret: Option<&str>,
+) -> Result<(String, ClientIdKind, Option<String>), EmailFailure> {
+    let clean = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+
+    if let Some(id) = clean(byo_id) {
+        let secret = clean(byo_secret).ok_or(EmailFailure::ClientSecret)?;
+        return Ok((id, ClientIdKind::Byo, Some(secret)));
+    }
+    match (clean(bundled_id), clean(bundled_secret)) {
+        (Some(id), Some(secret)) => Ok((id, ClientIdKind::Bundled, Some(secret))),
+        _ => Err(EmailFailure::NoBundledClient),
+    }
+}
+
+/// How an IMAP/SMTP account authenticates (AC2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MailCredentialKind {
+    /// The provider's app password.
+    Password,
+    /// An OAuth 2.0 access token, offered as `XOAUTH2`. Spelled out, so the wire
+    /// value is not split into `x_o_auth2` by the case conversion.
+    #[serde(rename = "xoauth2")]
+    XOAuth2,
+}
+
+/// Whether the socket is secured from the first byte or upgraded (AC2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MailSecurity {
+    /// Implicit TLS (IMAP 993, SMTP 465).
+    Tls,
+    /// Plain TCP upgraded with `STARTTLS` (IMAP 143, SMTP 587).
+    StartTls,
+}
+
+impl From<MailSecurity> for boba_mail::imap::Security {
+    fn from(security: MailSecurity) -> Self {
+        match security {
+            MailSecurity::Tls => Self::Tls,
+            MailSecurity::StartTls => Self::StartTls,
+        }
+    }
+}
+
+/// The Connect IMAP/SMTP form (AC2).
+#[derive(Debug, Clone, Deserialize, Type)]
+pub struct ConnectImapSmtpInput {
+    /// The mailbox address, as typed by the user.
+    pub address: String,
+    /// The login both protocols use, usually the address itself.
+    pub username: String,
+    /// The app password, or the access token for `XOAUTH2`.
+    pub credential: String,
+    /// Which of the two that is.
+    pub credential_kind: MailCredentialKind,
+    /// IMAP host.
+    pub imap_host: String,
+    /// IMAP port: 993 for TLS, 143 for `STARTTLS`.
+    pub imap_port: u16,
+    /// How the IMAP socket is protected.
+    pub imap_security: MailSecurity,
+    /// Submission host.
+    pub smtp_host: String,
+    /// Submission port: 465 for TLS, 587 for `STARTTLS`.
+    pub smtp_port: u16,
+    /// How the submission socket is protected.
+    pub smtp_security: MailSecurity,
+}
+
+impl ConnectImapSmtpInput {
+    /// The adapter's settings and the credential, or what is missing.
+    fn parts(self) -> Result<(ImapSettings, SmtpSettings, Auth), EmailFailure> {
+        let credential = match self.credential_kind {
+            MailCredentialKind::Password => Auth::Password(self.credential),
+            MailCredentialKind::XOAuth2 => Auth::XOAuth2(self.credential),
+        };
+        let username = self.username.trim().to_string();
+        let imap = ImapSettings {
+            host: self.imap_host.trim().to_string(),
+            port: self.imap_port,
+            security: self.imap_security.into(),
+            username: username.clone(),
+        };
+        let smtp = SmtpSettings {
+            host: self.smtp_host.trim().to_string(),
+            port: self.smtp_port,
+            security: self.smtp_security.into(),
+            username,
+        };
+        // The adapters own the settings rules; an empty credential is not one
+        // (the secret itself is only ever read by the protocol).
+        let empty = match &credential {
+            Auth::Password(secret) | Auth::XOAuth2(secret) => secret.trim().is_empty(),
+        };
+        if imap.validate().is_err() || smtp.validate().is_err() || empty {
+            return Err(EmailFailure::Probe(ProbeOutcome::Settings));
+        }
+        Ok((imap, smtp, credential))
+    }
+}
+
+/// Why a connection test failed, in the three ways the user can act on (AC2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeOutcome {
+    /// The server rejected the app password or the token.
+    Credentials,
+    /// The server could not be reached at all.
+    Unreachable,
+    /// The server refused the connection, or would not speak the protocol.
+    Refused,
+    /// The form is incomplete.
+    Settings,
+}
+
+impl From<ImapError> for ProbeOutcome {
+    fn from(error: ImapError) -> Self {
+        match error {
+            ImapError::Connect => Self::Unreachable,
+            ImapError::Credentials => Self::Credentials,
+            ImapError::Tls | ImapError::Refused | ImapError::Protocol | ImapError::Settings => {
+                Self::Refused
+            }
+        }
+    }
+}
+
+impl From<SmtpError> for ProbeOutcome {
+    fn from(error: SmtpError) -> Self {
+        match error {
+            SmtpError::Connect => Self::Unreachable,
+            SmtpError::Credentials => Self::Credentials,
+            SmtpError::Tls | SmtpError::Refused | SmtpError::Protocol | SmtpError::Settings => {
+                Self::Refused
+            }
+        }
+    }
+}
+
+/// Connect an IMAP/SMTP account (AC2).
+///
+/// The connection test runs **before anything is saved**: the IMAP probe opens
+/// `INBOX` read-only and the submission probe authenticates, and only when both
+/// pass are the endpoints and the credential written to the keychain and the
+/// connection to the store. A wrong password therefore leaves no trace.
+#[tauri::command]
+#[specta::specta]
+pub async fn email_connect_imap_smtp(
+    app: tauri::AppHandle,
+    input: ConnectImapSmtpInput,
+) -> AppResult<ConnectionView> {
+    let accounts = wiring::port::<dyn EmailRepo>(&app)?;
+    let secrets = wiring::port::<dyn SecretPort>(&app)?;
+    Ok(
+        connect_imap_smtp_with(&LiveProbe, accounts.as_ref(), secrets.as_ref(), input)
+            .await
+            .map(ConnectionView::from)?,
+    )
+}
+
+/// The connection test one IMAP/SMTP account must pass before it is saved (AC2).
+///
+/// It is a value so the save can be exercised without a provider's TLS
+/// endpoints; the real one is [`LiveProbe`].
+trait MailProbe: Send + Sync {
+    /// Both endpoints, IMAP first; `Err` is why the account is not saved.
+    fn probe<'a>(
+        &'a self,
+        imap: &'a ImapSettings,
+        smtp: &'a SmtpSettings,
+        credential: &'a Auth,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>>;
+}
+
+/// The probes as the app runs them (the real sockets, read-only).
+struct LiveProbe;
+
+impl MailProbe for LiveProbe {
+    fn probe<'a>(
+        &'a self,
+        imap: &'a ImapSettings,
+        smtp: &'a SmtpSettings,
+        credential: &'a Auth,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>> {
+        Box::pin(async move {
+            // AC2: the IMAP test never writes — it opens `INBOX` with `EXAMINE`,
+            // so nothing on the server changes — and the submission test only
+            // authenticates. Both run before anything is saved.
+            imap::test_connection(imap, credential)
+                .await
+                .map_err(ProbeOutcome::from)?;
+            smtp::test_connection(smtp, credential)
+                .await
+                .map_err(ProbeOutcome::from)
+        })
+    }
+}
+
+/// The connect itself, over the two ports (so it is testable without an app).
+async fn connect_imap_smtp_with(
+    probe: &dyn MailProbe,
+    accounts: &dyn EmailRepo,
+    secrets: &dyn SecretPort,
+    input: ConnectImapSmtpInput,
+) -> Result<EmailAccount, EmailFailure> {
+    let address = mailbox_address(&input.address)?;
+    let (imap, smtp, credential) = input.parts()?;
+
+    probe
+        .probe(&imap, &smtp, &credential)
+        .await
+        .map_err(EmailFailure::Probe)?;
+
+    // Nothing is stored before this line: a failed probe leaves no connection.
+    let account = connection_row(
+        accounts,
+        MailProvider::ImapSmtp,
+        address,
+        // An IMAP/SMTP account reads (read-only) and sends, and holds no OAuth
+        // grant, so `covers` has nothing to compare.
+        EmailMode::ReadSend,
+        String::new(),
+        ClientIdKind::Byo,
+        Vec::new(),
+    )?;
+    let stored = ImapSmtpSecret {
+        imap,
+        smtp,
+        credential,
+    };
+    secrets
+        .put(&account.secret_ref, &stored.to_json())
+        .map_err(|_| EmailFailure::Keychain)?;
+    accounts
+        .upsert_account(&account)
+        .map_err(EmailFailure::Store)?;
+    Ok(account)
+}
+
+/// Drive one loopback authorisation to tokens (AC1, AC2): open the user's browser
+/// and take the single callback. The PKCE verifier and the `state` never leave the
+/// flow, so the UI cannot re-implement the security-critical part differently.
+async fn finish_flow(
+    app: &tauri::AppHandle,
+    mut flow: PendingFlow,
+    listener: std::net::TcpListener,
+) -> Result<TokenSet, EmailFailure> {
+    open_in_browser(app, &flow.authorize_url().map_err(EmailFailure::from)?)?;
 
     // The listener accepts exactly one callback and closes (AC2). It runs on a
     // blocking thread so the flow's own deadline is the only wait.
@@ -239,7 +642,7 @@ pub async fn email_connect_outlook(
     let code = flow
         .take_callback(&callback, std::time::Instant::now())
         .map_err(EmailFailure::from)?;
-    let scopes: Vec<String> = flow.scopes().to_vec();
+    let scopes = flow.scopes().to_vec();
 
     let http = oauth::http_client().map_err(EmailFailure::from)?;
     // The code is exchanged with the PKCE verifier, which stays inside the flow.
@@ -247,38 +650,41 @@ pub async fn email_connect_outlook(
         .exchange(&http, &code)
         .await
         .map_err(EmailFailure::from)?;
+    Ok(TokenSet::new(&response, &scopes))
+}
 
-    // AC1/FR-40: the tokens go to the keychain, addressed by an opaque
-    // reference; the row keeps the reference and the granted scopes only.
+/// The row for one authorised connection.
+///
+/// Reconnects replace the connection for the same mailbox instead of adding a
+/// duplicate, and the timestamps are the store's (AD-16).
+fn connection_row(
+    accounts: &dyn EmailRepo,
+    provider: MailProvider,
+    address: String,
+    mode: EmailMode,
+    client_id: String,
+    client_id_kind: ClientIdKind,
+    scopes: Vec<String>,
+) -> Result<EmailAccount, EmailFailure> {
     let now = SystemClock.now_rfc3339();
     let existing = accounts
-        .find_account(MailProvider::MicrosoftGraph, &address)
+        .find_account(provider, &address)
         .map_err(EmailFailure::Store)?;
     let id = existing
         .as_ref()
         .map_or_else(boba_store::repos::email::new_account_id, |a| a.id.clone());
-    let secret_ref = format!("mail:{id}");
-    let tokens = TokenSet::new(&response, &scopes);
-    secrets
-        .put(&secret_ref, &tokens.to_json())
-        .map_err(|_| EmailFailure::Keychain)?;
-
-    let account = EmailAccount {
+    Ok(EmailAccount {
+        secret_ref: format!("mail:{id}"),
         id,
-        provider: MailProvider::MicrosoftGraph,
+        provider,
         address,
-        mode: input.mode,
+        mode,
         client_id,
         client_id_kind,
-        scopes: tokens.scopes,
-        secret_ref,
+        scopes,
         connected_at: existing.map_or_else(|| now.clone(), |a| a.connected_at),
         updated_at: now,
-    };
-    accounts
-        .upsert_account(&account)
-        .map_err(EmailFailure::Store)?;
-    Ok(ConnectionView::from(account))
+    })
 }
 
 /// Switch a connection between send-only and read+send (AC3).
@@ -369,7 +775,7 @@ async fn revoke_tokens(
     let Ok(Some(stored)) = secrets.get(&account.secret_ref) else {
         return Ok(());
     };
-    let Ok(tokens) = TokenSet::from_json(&stored) else {
+    let Some(tokens) = stored_tokens(account.provider, &stored) else {
         return Ok(());
     };
 
@@ -387,11 +793,23 @@ async fn revoke_tokens(
 }
 
 /// Open the authorisation URL in the user's own browser, never in a webview.
-fn open_in_browser(app: &tauri::AppHandle, url: &str) -> AppResult<()> {
+fn open_in_browser(app: &tauri::AppHandle, url: &str) -> Result<(), EmailFailure> {
     use tauri_plugin_opener::OpenerExt as _;
     app.opener()
         .open_url(url.to_string(), None::<&str>)
-        .map_err(|_| EmailFailure::Browser.into())
+        .map_err(|_| EmailFailure::Browser)
+}
+
+/// The tokens one connection's keychain entry holds, whatever else it carries
+/// (S8.1 stores a Graph token set, S8.2 a Gmail entry with the public client
+/// secret next to it). An entry of an unknown shape is "nothing to revoke".
+fn stored_tokens(provider: MailProvider, stored: &str) -> Option<TokenSet> {
+    match provider {
+        MailProvider::Gmail => GmailSecret::from_json(stored)
+            .ok()
+            .map(|entry| entry.tokens),
+        MailProvider::MicrosoftGraph | MailProvider::ImapSmtp => TokenSet::from_json(stored).ok(),
+    }
 }
 
 #[cfg(test)]
@@ -402,6 +820,7 @@ mod tests {
     use boba_app::ports::secret::SecretError;
     use boba_store::db::{Store, StoreConfig};
     use boba_store::keys::DbKey;
+    use std::sync::Mutex;
 
     use super::*;
 
@@ -525,6 +944,259 @@ mod tests {
                 .expect("disconnect")
         );
         assert!(store.get_account(&account.id).expect("read").is_none());
+    }
+
+    /// A keychain that records what was written, so "nothing was saved" is
+    /// checked rather than assumed.
+    #[derive(Default)]
+    struct RecordingSecrets(Mutex<Vec<(String, String)>>);
+
+    impl RecordingSecrets {
+        /// The references the connection wrote to.
+        fn writes(&self) -> Vec<String> {
+            self.0
+                .lock()
+                .expect("lock")
+                .iter()
+                .map(|(reference, _)| reference.clone())
+                .collect()
+        }
+
+        /// The last value written, so the entry itself can be read back.
+        fn last_value(&self) -> Option<String> {
+            self.0
+                .lock()
+                .expect("lock")
+                .last()
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    impl SecretPort for RecordingSecrets {
+        fn put(&self, reference: &str, value: &str) -> Result<(), SecretError> {
+            self.0
+                .lock()
+                .expect("lock")
+                .push((reference.to_string(), value.to_string()));
+            Ok(())
+        }
+
+        fn get(&self, _reference: &str) -> Result<Option<String>, SecretError> {
+            Ok(None)
+        }
+
+        fn delete(&self, _reference: &str) -> Result<bool, SecretError> {
+            Ok(false)
+        }
+    }
+
+    fn imap_smtp_form(port: u16) -> ConnectImapSmtpInput {
+        ConnectImapSmtpInput {
+            address: "me@example.com".to_string(),
+            username: "me@example.com".to_string(),
+            credential: "app-password".to_string(),
+            credential_kind: MailCredentialKind::Password,
+            imap_host: "127.0.0.1".to_string(),
+            imap_port: port,
+            imap_security: MailSecurity::Tls,
+            smtp_host: "127.0.0.1".to_string(),
+            smtp_port: port,
+            smtp_security: MailSecurity::Tls,
+        }
+    }
+
+    /// A connection test whose answer the test chooses.
+    struct StubProbe(Option<ProbeOutcome>);
+
+    impl MailProbe for StubProbe {
+        fn probe<'a>(
+            &'a self,
+            _imap: &'a ImapSettings,
+            _smtp: &'a SmtpSettings,
+            _credential: &'a Auth,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>> {
+            let answer = self.0;
+            Box::pin(async move { answer.map_or(Ok(()), Err) })
+        }
+    }
+
+    /// AC2: the connection test runs first, so a mailbox that does not answer
+    /// leaves no connection and no keychain entry behind.
+    #[tokio::test]
+    async fn a_failed_probe_persists_nothing() {
+        let store = open_store("probe");
+        let secrets = RecordingSecrets::default();
+
+        // Port 1 is closed: the IMAP probe cannot even connect.
+        let failure =
+            connect_imap_smtp_with(&LiveProbe, store.as_ref(), &secrets, imap_smtp_form(1))
+                .await
+                .expect_err("the probe must fail");
+
+        let error = AppError::from(failure);
+        assert_eq!(error.code, ErrorCode::Unavailable);
+        assert_eq!(error.message_key, "errors.email.probe_unreachable");
+        assert!(
+            store.list_accounts().expect("read").is_empty(),
+            "a failed test must not save the connection"
+        );
+        assert!(
+            secrets.writes().is_empty(),
+            "a failed test must not write a keychain entry"
+        );
+    }
+
+    /// A refused credential is the other way the test fails, and it too writes
+    /// nothing (AC2).
+    #[tokio::test]
+    async fn a_refused_credential_is_reported_and_saves_nothing() {
+        let store = open_store("refused");
+        let secrets = RecordingSecrets::default();
+
+        let failure = connect_imap_smtp_with(
+            &StubProbe(Some(ProbeOutcome::Credentials)),
+            store.as_ref(),
+            &secrets,
+            imap_smtp_form(993),
+        )
+        .await
+        .expect_err("a refused credential must fail");
+
+        let error = AppError::from(failure);
+        assert_eq!(error.code, ErrorCode::Unauthorized);
+        assert_eq!(error.message_key, "errors.email.probe_credentials");
+        assert!(store.list_accounts().expect("read").is_empty());
+        assert!(secrets.writes().is_empty());
+    }
+
+    /// AC2: when both tests pass, the connection is saved — the endpoints and the
+    /// credential in the keychain, the account in the store (never the reverse).
+    #[tokio::test]
+    async fn a_passing_probe_saves_the_account_and_its_keychain_entry() {
+        let store = open_store("saved");
+        let secrets = RecordingSecrets::default();
+
+        let mut form = imap_smtp_form(993);
+        form.imap_host = "imap.example.com".to_string();
+        form.smtp_host = "smtp.example.com".to_string();
+        form.smtp_port = 587;
+        form.smtp_security = MailSecurity::StartTls;
+        form.credential_kind = MailCredentialKind::XOAuth2;
+        form.credential = "the-token".to_string();
+
+        let account = connect_imap_smtp_with(&StubProbe(None), store.as_ref(), &secrets, form)
+            .await
+            .expect("both tests passed");
+
+        assert_eq!(account.provider, MailProvider::ImapSmtp);
+        assert_eq!(account.address, "me@example.com");
+        assert_eq!(account.mode, EmailMode::ReadSend);
+        assert!(
+            account.scopes.is_empty(),
+            "an IMAP/SMTP account holds no OAuth grant"
+        );
+
+        let stored = store
+            .get_account(&account.id)
+            .expect("read")
+            .expect("saved");
+        assert_eq!(stored.id, account.id);
+
+        // The keychain entry is what the sender and the sync owner will read:
+        // both endpoints, and the credential that was probed.
+        assert_eq!(secrets.writes(), vec![account.secret_ref.clone()]);
+        let entry = ImapSmtpSecret::from_json(&secrets.last_value().expect("value")).expect("json");
+        assert_eq!(entry.imap.host, "imap.example.com");
+        assert_eq!(entry.imap.port, 993);
+        assert_eq!(entry.smtp.host, "smtp.example.com");
+        assert_eq!(entry.smtp.port, 587);
+        assert_eq!(Auth::XOAuth2("the-token".to_string()), entry.credential);
+    }
+
+    /// The IMAP/SMTP form maps onto the adapter's settings, and refuses an
+    /// incomplete one before any network call.
+    #[test]
+    fn an_incomplete_imap_smtp_form_is_refused_as_settings() {
+        let mut form = imap_smtp_form(993);
+        form.imap_host = "  ".to_string();
+        assert!(matches!(
+            form.parts(),
+            Err(EmailFailure::Probe(ProbeOutcome::Settings))
+        ));
+
+        let mut form = imap_smtp_form(993);
+        form.smtp_port = 0;
+        assert!(matches!(
+            form.parts(),
+            Err(EmailFailure::Probe(ProbeOutcome::Settings))
+        ));
+
+        let mut form = imap_smtp_form(993);
+        form.credential = "   ".to_string();
+        assert!(matches!(
+            form.parts(),
+            Err(EmailFailure::Probe(ProbeOutcome::Settings))
+        ));
+
+        let mut form = imap_smtp_form(993);
+        form.credential_kind = MailCredentialKind::XOAuth2;
+        form.credential = "the-token".to_string();
+        let (imap, smtp, credential) = form.parts().expect("complete");
+        assert_eq!(imap.port, 993);
+        assert_eq!(smtp.port, 993);
+        assert_eq!(credential, Auth::XOAuth2("the-token".to_string()));
+    }
+
+    /// F2: a BYO client id without its public secret cannot complete the flow, so
+    /// it is refused before the browser opens.
+    #[test]
+    fn a_client_id_without_its_secret_is_refused() {
+        assert!(matches!(
+            gmail_client(
+                Some(" client-id "),
+                None,
+                Some("bundled"),
+                Some("bundled-secret")
+            ),
+            Err(EmailFailure::ClientSecret)
+        ));
+        assert!(matches!(
+            gmail_client(Some("client-id"), Some("  "), None, None),
+            Err(EmailFailure::ClientSecret)
+        ));
+        // With its secret, the user's own client wins over the bundled one.
+        assert!(matches!(
+            gmail_client(
+                Some(" client-id "),
+                Some(" public-secret "),
+                Some("bundled"),
+                Some("bundled-secret")
+            ),
+            Ok((id, ClientIdKind::Byo, Some(secret)))
+                if id == "client-id" && secret == "public-secret"
+        ));
+    }
+
+    /// F3: the bundled path exists only when the build set both values.
+    #[test]
+    fn the_bundled_client_needs_its_id_and_its_secret() {
+        assert!(matches!(
+            gmail_client(None, None, Some("bundled"), Some("bundled-secret")),
+            Ok((id, ClientIdKind::Bundled, Some(secret)))
+                if id == "bundled" && secret == "bundled-secret"
+        ));
+        assert!(matches!(
+            gmail_client(None, None, Some("bundled"), None),
+            Err(EmailFailure::NoBundledClient)
+        ));
+        assert!(matches!(
+            gmail_client(None, None, None, Some("bundled-secret")),
+            Err(EmailFailure::NoBundledClient)
+        ));
+        assert!(matches!(
+            gmail_client(None, None, None, None),
+            Err(EmailFailure::NoBundledClient)
+        ));
     }
 
     /// An unknown id is a typed NotFound, never a panic (AD-3).
