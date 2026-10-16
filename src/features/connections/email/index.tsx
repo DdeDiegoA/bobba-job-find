@@ -2,13 +2,20 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { ConnectionView, EmailMode, MailProvider } from "@/lib/ipc/bindings";
+import type {
+  ConnectionView,
+  EmailMode,
+  MailCredentialKind,
+  MailProvider,
+  MailSecurity,
+} from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import {
   GMAIL_SCOPES,
   SCOPES_BY_MODE,
   useConnectGmail,
+  useConnectImapSmtp,
   useConnectOutlook,
   useDisconnectEmail,
   useEmailAccounts,
@@ -16,6 +23,29 @@ import {
 } from "./use-email";
 
 const MODES: EmailMode[] = ["send_only", "read_send"];
+
+const SECURITIES: MailSecurity[] = ["tls", "start_tls"];
+const CREDENTIAL_KINDS: MailCredentialKind[] = ["password", "xoauth2"];
+
+/** Wording for the two choices, as resolvable keys (AD-21). */
+const SECURITY_LABELS: Record<MailSecurity, string> = {
+  tls: "connections_email:imap.security.tls",
+  start_tls: "connections_email:imap.security.start_tls",
+};
+
+const CREDENTIAL_LABELS: Record<MailCredentialKind, string> = {
+  password: "connections_email:imap.credential_kind.password",
+  xoauth2: "connections_email:imap.credential_kind.xoauth2",
+};
+
+/**
+ * The provider ports that belong to each encryption choice. A password or token
+ * is never sent on an unencrypted socket, so these are the only two options.
+ */
+const DEFAULT_PORTS: Record<MailSecurity, { imap: number; smtp: number }> = {
+  tls: { imap: 993, smtp: 465 },
+  start_tls: { imap: 143, smtp: 587 },
+};
 
 /**
  * The screen's wording, as qualified `namespace:key` literals (AD-21). Keys live
@@ -340,6 +370,201 @@ function ConnectGmail() {
 }
 
 /**
+ * The IMAP/SMTP connect form (S8.2, AC2): the endpoints of both protocols, one
+ * credential, and the encryption for each. "Test and save" is honest naming: the
+ * core probes IMAP (read-only) and the submission endpoint first, and saves the
+ * connection only when both answer.
+ */
+function ConnectImapSmtp() {
+  const { t } = useTranslation("connections_email");
+  const { t: tError } = useTranslation();
+  const connect = useConnectImapSmtp();
+  const [address, setAddress] = useState("");
+  const [username, setUsername] = useState("");
+  const [credential, setCredential] = useState("");
+  const [credentialKind, setCredentialKind] = useState<MailCredentialKind>("password");
+  const [imapHost, setImapHost] = useState("");
+  const [imapPort, setImapPort] = useState(DEFAULT_PORTS.tls.imap);
+  const [imapSecurity, setImapSecurity] = useState<MailSecurity>("tls");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState(DEFAULT_PORTS.tls.smtp);
+  const [smtpSecurity, setSmtpSecurity] = useState<MailSecurity>("tls");
+
+  const error = connect.error && isAppError(connect.error) ? connect.error : null;
+
+  return (
+    <form
+      className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4"
+      aria-labelledby="email-connect-imap-title"
+      onSubmit={(event) => {
+        event.preventDefault();
+        connect.mutate({
+          address: address.trim(),
+          username: username.trim() === "" ? address.trim() : username.trim(),
+          credential,
+          credential_kind: credentialKind,
+          imap_host: imapHost.trim(),
+          imap_port: imapPort,
+          imap_security: imapSecurity,
+          smtp_host: smtpHost.trim(),
+          smtp_port: smtpPort,
+          smtp_security: smtpSecurity,
+        });
+      }}
+    >
+      <h2 id="email-connect-imap-title" className="font-display text-lg text-fg">
+        {t("imap.title")}
+      </h2>
+      <p className="text-sm text-fg-muted">{t("imap.description")}</p>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("address")}
+        <input
+          type="email"
+          required
+          value={address}
+          placeholder={t("address.placeholder")}
+          onChange={(event) => setAddress(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("imap.username")}
+        <input
+          value={username}
+          placeholder={t("address.placeholder")}
+          onChange={(event) => setUsername(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <span className="text-xs text-fg-subtle">{t("imap.username.hint")}</span>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("imap.credential_kind")}
+        <select
+          value={credentialKind}
+          onChange={(event) => setCredentialKind(event.target.value as MailCredentialKind)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        >
+          {CREDENTIAL_KINDS.map((kind) => (
+            <option key={kind} value={kind}>
+              {t(CREDENTIAL_LABELS[kind])}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm text-fg">
+        {t("imap.credential")}
+        <input
+          type="password"
+          required
+          value={credential}
+          autoComplete="off"
+          onChange={(event) => setCredential(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+      </label>
+
+      <fieldset className="grid grid-cols-2 gap-2">
+        <legend className="text-sm font-medium text-fg">{t("imap.host")}</legend>
+        <input
+          required
+          value={imapHost}
+          aria-label={t("imap.host")}
+          placeholder="imap.example.com"
+          onChange={(event) => setImapHost(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <input
+          type="number"
+          required
+          min={1}
+          max={65535}
+          value={imapPort}
+          aria-label={t("imap.port")}
+          onChange={(event) => setImapPort(Number(event.target.value))}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        {/* The port follows the encryption choice until the user types their own. */}
+        <select
+          value={imapSecurity}
+          aria-label={t("imap.security")}
+          onChange={(event) => {
+            const next = event.target.value as MailSecurity;
+            if (imapPort === DEFAULT_PORTS[imapSecurity].imap)
+              setImapPort(DEFAULT_PORTS[next].imap);
+            setImapSecurity(next);
+          }}
+          className="col-span-2 h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        >
+          {SECURITIES.map((security) => (
+            <option key={security} value={security}>
+              {t(SECURITY_LABELS[security])}
+            </option>
+          ))}
+        </select>
+      </fieldset>
+
+      <fieldset className="grid grid-cols-2 gap-2">
+        <legend className="text-sm font-medium text-fg">{t("imap.smtp_host")}</legend>
+        <input
+          required
+          value={smtpHost}
+          aria-label={t("imap.smtp_host")}
+          placeholder="smtp.example.com"
+          onChange={(event) => setSmtpHost(event.target.value)}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <input
+          type="number"
+          required
+          min={1}
+          max={65535}
+          value={smtpPort}
+          aria-label={t("imap.smtp_port")}
+          onChange={(event) => setSmtpPort(Number(event.target.value))}
+          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        />
+        <select
+          value={smtpSecurity}
+          aria-label={t("imap.smtp_security")}
+          onChange={(event) => {
+            const next = event.target.value as MailSecurity;
+            if (smtpPort === DEFAULT_PORTS[smtpSecurity].smtp)
+              setSmtpPort(DEFAULT_PORTS[next].smtp);
+            setSmtpSecurity(next);
+          }}
+          className="col-span-2 h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+        >
+          {SECURITIES.map((security) => (
+            <option key={security} value={security}>
+              {t(SECURITY_LABELS[security])}
+            </option>
+          ))}
+        </select>
+      </fieldset>
+
+      <p className="text-xs text-fg-subtle">{t("imap.read_only")}</p>
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" disabled={connect.isPending}>
+          {connect.isPending ? t("imap.testing") : t("imap.save")}
+        </Button>
+      </div>
+
+      {error ? (
+        <div role="alert" className="flex flex-col gap-1 text-sm text-danger">
+          <p>{renderAppError(error, tError)}</p>
+          <p className="text-fg-muted">{t("troubleshoot")}</p>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+/**
  * Email connections (S8.1, S8.2, EXPERIENCE §5). Connects Outlook or Gmail
  * through the loopback OAuth flow, switches a connection between send-only and
  * read+send, and disconnects it.
@@ -378,6 +603,7 @@ export default function ConnectionsEmail() {
       <div className={cn("flex flex-col gap-3", rows.length > 0 && "border-border border-t pt-4")}>
         <ConnectOutlook />
         <ConnectGmail />
+        <ConnectImapSmtp />
       </div>
     </section>
   );

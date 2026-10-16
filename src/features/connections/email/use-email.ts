@@ -1,6 +1,7 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ConnectGmailInput,
+  type ConnectImapSmtpInput,
   type ConnectionView,
   type ConnectOutlookInput,
   commands,
@@ -50,6 +51,18 @@ export function useConnectGmail() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: ConnectGmailInput) => commands.emailConnectGmail(input).then(unwrap),
+    onSuccess: (account: ConnectionView) => upsertAccount(queryClient, account),
+  });
+}
+
+/**
+ * Connect an IMAP/SMTP account (AC2). The core tests both connections first and
+ * only then saves, so a wrong password fails here without leaving a connection.
+ */
+export function useConnectImapSmtp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ConnectImapSmtpInput) => commands.emailConnectImapSmtp(input).then(unwrap),
     onSuccess: (account: ConnectionView) => upsertAccount(queryClient, account),
   });
 }

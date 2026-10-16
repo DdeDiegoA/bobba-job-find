@@ -399,7 +399,9 @@ fn gmail_client(
 pub enum MailCredentialKind {
     /// The provider's app password.
     Password,
-    /// An OAuth 2.0 access token, offered as `XOAUTH2`.
+    /// An OAuth 2.0 access token, offered as `XOAUTH2`. Spelled out, so the wire
+    /// value is not split into `x_o_auth2` by the case conversion.
+    #[serde(rename = "xoauth2")]
     XOAuth2,
 }
 

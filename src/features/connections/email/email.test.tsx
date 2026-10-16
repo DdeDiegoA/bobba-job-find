@@ -11,6 +11,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
     emailAccounts: vi.fn(),
     emailConnectOutlook: vi.fn(),
     emailConnectGmail: vi.fn(),
+    emailConnectImapSmtp: vi.fn(),
     emailSetMode: vi.fn(),
     emailDisconnect: vi.fn(),
   },
@@ -38,6 +39,7 @@ async function formOf(heading: string) {
 
 const outlookForm = () => formOf("Outlook / Microsoft 365");
 const gmailForm = () => formOf("Gmail");
+const imapForm = () => formOf("Other providers (IMAP and SMTP)");
 
 function renderScreen() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -52,6 +54,7 @@ beforeEach(() => {
   vi.mocked(commands.emailAccounts).mockReset().mockReturnValue(ok([]));
   vi.mocked(commands.emailConnectOutlook).mockReset();
   vi.mocked(commands.emailConnectGmail).mockReset();
+  vi.mocked(commands.emailConnectImapSmtp).mockReset();
   vi.mocked(commands.emailSetMode).mockReset();
   vi.mocked(commands.emailDisconnect).mockReset();
 });
@@ -174,6 +177,103 @@ describe("connecting Gmail (AC1)", () => {
     // The connection lands in the list as a Gmail, send-only mailbox.
     const row = (await screen.findByText("me@gmail.com")).closest("li") as HTMLElement;
     expect(within(row).getByText(/Send mail as you/)).toBeTruthy();
+  });
+});
+
+describe("connecting an IMAP/SMTP account (AC2)", () => {
+  const imapAccount = (over: Partial<ConnectionView> = {}) =>
+    account({
+      provider: "imap_smtp",
+      address: "me@example.com",
+      mode: "read_send",
+      scopes: [],
+      ...over,
+    });
+
+  function fill(form: HTMLElement, security: "TLS" | "STARTTLS" = "TLS") {
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
+      target: { value: " me@example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText("IMAP server"), {
+      target: { value: " imap.example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText("SMTP server"), {
+      target: { value: " smtp.example.com " },
+    });
+    fireEvent.change(within(form).getByLabelText(/App password/), {
+      target: { value: "app-password" },
+    });
+    if (security === "STARTTLS") {
+      fireEvent.change(within(form).getByLabelText("IMAP encryption"), {
+        target: { value: "start_tls" },
+      });
+    }
+  }
+
+  it("tests before saving: a refused password is a translated error and no row", async () => {
+    vi.mocked(commands.emailConnectImapSmtp).mockReturnValue(
+      failed({ code: "unauthorized", message_key: "errors.email.probe_credentials" }),
+    );
+    renderScreen();
+    const form = await imapForm();
+    fill(form);
+    fireEvent.click(within(form).getByRole("button", { name: "Test and save" }));
+
+    // The endpoints and the credential go to the command that probes first.
+    await waitFor(() =>
+      expect(commands.emailConnectImapSmtp).toHaveBeenCalledWith({
+        address: "me@example.com",
+        username: "me@example.com",
+        credential: "app-password",
+        credential_kind: "password",
+        imap_host: "imap.example.com",
+        imap_port: 993,
+        imap_security: "tls",
+        smtp_host: "smtp.example.com",
+        smtp_port: 465,
+        smtp_security: "tls",
+      }),
+    );
+
+    const alert = await within(form).findByRole("alert");
+    expect(alert.textContent).toContain("did not accept that password");
+    expect(alert.textContent).not.toContain("errors.email");
+    // Nothing was saved: the mailbox is not in the list.
+    expect(screen.queryByRole("heading", { name: "me@example.com" })).toBeNull();
+  });
+
+  it("offers the ports that belong to each encryption choice", async () => {
+    vi.mocked(commands.emailConnectImapSmtp).mockReturnValue(ok(imapAccount()));
+    renderScreen();
+    const form = await imapForm();
+
+    // STARTTLS on 143/587 is one choice away, and the defaults follow it.
+    expect((within(form).getByLabelText("IMAP port") as HTMLInputElement).value).toBe("993");
+    expect((within(form).getByLabelText("SMTP port") as HTMLInputElement).value).toBe("465");
+
+    fill(form, "STARTTLS");
+
+    expect((within(form).getByLabelText("IMAP port") as HTMLInputElement).value).toBe("143");
+    fireEvent.click(within(form).getByRole("button", { name: "Test and save" }));
+
+    await waitFor(() =>
+      expect(commands.emailConnectImapSmtp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          imap_port: 143,
+          imap_security: "start_tls",
+          smtp_port: 465,
+          smtp_security: "tls",
+        }),
+      ),
+    );
+
+    // The saved row says what it does, and offers no mode switch: an IMAP/SMTP
+    // account has no OAuth grant to switch.
+    const row = (await screen.findByRole("heading", { name: "me@example.com" })).closest(
+      "li",
+    ) as HTMLElement;
+    expect(within(row).getByText(/never changes anything on the server/)).toBeTruthy();
+    expect(within(row).queryByLabelText(/Read and send/, { selector: "input" })).toBeNull();
   });
 });
 

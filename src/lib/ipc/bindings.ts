@@ -383,8 +383,11 @@ export type FactView = {
 export type MailCredentialKind =
   /**  The provider's app password. */
   | "password"
-  /**  An OAuth 2.0 access token, offered as `XOAUTH2`. */
-  | "x_o_auth2";
+  /**
+   *  An OAuth 2.0 access token, offered as `XOAUTH2`. Spelled out, so the wire
+   *  value is not split into `x_o_auth2` by the case conversion.
+   */
+  | "xoauth2";
 
 /**  Which mailbox provider a connection belongs to (architecture §11). */
 export type MailProvider =
