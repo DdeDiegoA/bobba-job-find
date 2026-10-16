@@ -619,17 +619,20 @@ fn run_process<R: AgentRepo>(
         }
     }
 
+    // ADR-010 §1, ruling (d): the stream is over, so whether it ever showed the
+    // init event is now settled. A run that reads third-party content and never
+    // did is not a verified one.
+    let unverified = state.task.reads_untrusted() && !opened;
+
     let status = proc.wait();
 
-    // A run that *finished* without ever showing its init event is a run nothing
-    // vouched for: a silent or reshaped CLI must not pass as verified (ADR-010
-    // §1). A run that failed instead is reported by its own classification —
-    // auth, quota, crash — which is the more useful answer, and a stream with no
-    // lines at all is a CLI that called no tool.
-    if status.as_ref().is_some_and(|status| status.success())
-        && state.task.reads_untrusted()
-        && !opened
-    {
+    // The verdict is taken here and the *reason* is settled last: a run that
+    // failed on its own — auth expired, quota, a crash — keeps that answer,
+    // because it is the actionable one (FR-21: an auth failure must pause AI
+    // work, not read as "this CLI is unsupported"), and a stream with no lines at
+    // all is a CLI that called no tool. A run that *succeeded* unverified is
+    // refused: nothing vouched for what it did.
+    if unverified && status.as_ref().is_some_and(|status| status.success()) {
         return Outcome::Failed(FailureReason::Unsupported);
     }
 
@@ -1173,6 +1176,154 @@ mod tests {
                 event,
                 AgentEvent::Text { text } if text == "done"
             )),
+            "{events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A CLI that says nothing at all and exits clean cannot vouch for the tool
+    /// set: the run is refused rather than reported as a success (ruling (d)).
+    #[test]
+    fn a_silent_cli_that_exits_clean_is_refused_for_an_untrusted_run() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![("BOBA_FAKE_MODE".to_string(), "silent".to_string())],
+                },
+            },
+        );
+        let run_id = handle.run_id.clone();
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::Finished { .. })),
+            "an unverified run must not report success: {events:?}"
+        );
+        let run = repo.get_run(&run_id).unwrap().expect("run");
+        assert_eq!(run.status, RunStatus::Failed.id());
+        assert_eq!(run.failure_reason.as_deref(), Some("unsupported"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// A stream whose first work arrives before any init event cannot vouch for
+    /// the tool set either (a CLI that lost `--output-format stream-json`, say):
+    /// the untrusted run stops at the first line of its own work.
+    #[test]
+    fn an_untrusted_run_whose_stream_never_opens_with_its_init_event_stops() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![("BOBA_FAKE_MODE".to_string(), "echo".to_string())],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::Unsupported,
+                    ..
+                })
+            ),
+            "{events:?}"
+        );
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                AgentEvent::ToolCall { .. } | AgentEvent::ToolResult { .. }
+            )),
+            "the run did work before it was verified: {events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// An auth failure on an untrusted run keeps its own classification: the
+    /// missing init event is not a second, louder reason to report, and FR-21
+    /// needs the auth signal to pause AI work.
+    #[test]
+    fn an_untrusted_run_that_fails_still_reports_why() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let handle = runtime.start(
+            task(),
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![("BOBA_FAKE_MODE".to_string(), "fail-auth".to_string())],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::AuthExpired,
+                    ..
+                })
+            ),
             "{events:?}"
         );
         std::fs::remove_dir_all(root).ok();

@@ -4,6 +4,8 @@
 //! Modes:
 //!   replay        — print `BOBA_FAKE_LINES` (newline-separated JSONL), exit 0
 //!   echo          — print `one` and `two`, exit 0
+//!   silent        — print nothing and exit 0: a CLI that never showed the init
+//!                   event an untrusted run is verified against
 //!   claude-stream — print a Claude Code `stream-json` run (init event, one
 //!                   assistant message, result); the init event's tool list is
 //!                   `BOBA_FAKE_TOOLS` (comma-separated, default one boba tool),
@@ -23,6 +25,7 @@ fn main() {
     let mode = std::env::var("BOBA_FAKE_MODE").unwrap_or_else(|_| "echo".to_string());
     match mode.as_str() {
         "echo" => println!("one\ntwo"),
+        "silent" => {}
         "replay" | "emit-lines" => replay(),
         "claude-stream" => claude_stream(),
         "spawn-child" => spawn_child(),
