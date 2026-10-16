@@ -9,6 +9,7 @@
   "errors.agent.cancelled": "La tarea de IA se canceló.",
   "errors.agent.unsupported": "Esta tarea necesita una herramienta de IA con bloqueo de herramientas verificado, porque lee contenido de la web. Elige un CLI Full para activarla; el resto del trabajo continúa.",
   "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa.",
+  "errors.agent.invalid_output": "La herramienta de IA respondía en un formato que Boba no puede usar, así que la tarea se detuvo. Inténtalo de nuevo.",
   "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar.",
   "errors.profile.store": "No se pudo leer o guardar tu perfil.",
   "errors.profile.no_variant": "Escribe el texto en inglés o español.",

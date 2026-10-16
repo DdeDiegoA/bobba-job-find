@@ -4,6 +4,14 @@
 //! Modes:
 //!   replay        — print `BOBA_FAKE_LINES` (newline-separated JSONL), exit 0
 //!   echo          — print `one` and `two`, exit 0
+//!   silent        — print nothing and exit 0: a CLI that never showed the init
+//!                   event an untrusted run is verified against
+//!   silent-fail   — the same, exiting non-zero
+//!   claude-stream — print a Claude Code `stream-json` run (init event, one
+//!                   assistant message, result); the init event's tool list is
+//!                   `BOBA_FAKE_TOOLS` (comma-separated, default one boba tool),
+//!                   which is how ADR-010's run-time observation is tested both
+//!                   ways
 //!   spawn-child   — spawn a background grandchild that touches
 //!                   `BOBA_FAKE_MARKER` after `BOBA_FAKE_DELAY_MS`, then exit 0
 //!   emit-lines    — alias of replay, kept for readability in fixtures
@@ -18,7 +26,10 @@ fn main() {
     let mode = std::env::var("BOBA_FAKE_MODE").unwrap_or_else(|_| "echo".to_string());
     match mode.as_str() {
         "echo" => println!("one\ntwo"),
+        "silent" => {}
+        "silent-fail" => std::process::exit(3),
         "replay" | "emit-lines" => replay(),
+        "claude-stream" => claude_stream(),
         "spawn-child" => spawn_child(),
         "fail-auth" => fail_auth(),
         other => {
@@ -28,6 +39,25 @@ fn main() {
     }
 }
 
+/// A Claude Code `stream-json` run, in the recorded shape (2.1.301).
+fn claude_stream() {
+    let tools = std::env::var("BOBA_FAKE_TOOLS")
+        .unwrap_or_else(|_| "mcp__boba__get_task_input".to_string());
+    let tools: Vec<String> = tools
+        .split(',')
+        .filter(|tool| !tool.is_empty())
+        .map(|tool| format!("\"{tool}\""))
+        .collect();
+    println!(
+        r#"{{"type":"system","subtype":"init","cwd":".","tools":[{}],"mcp_servers":[{{"name":"boba","status":"connected"}}],"claude_code_version":"2.1.301"}}"#,
+        tools.join(",")
+    );
+    println!(r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"done"}}]}}}}"#);
+    println!(
+        r#"{{"type":"result","subtype":"success","result":"done","num_turns":1,"total_cost_usd":0.01,"usage":{{"input_tokens":10,"output_tokens":2}}}}"#
+    );
+}
+
 fn replay() {
     match std::env::var("BOBA_FAKE_LINES") {
         Ok(blob) => {
@@ -35,8 +65,13 @@ fn replay() {
                 println!("{line}");
             }
         }
-        // Default recording: a full, well-formed run.
+        // Default recording: a full, well-formed run, opened the way a Claude
+        // Code `stream-json` run is — with its init event, whose tool list is
+        // where ADR-010 §1's observation comes from.
         Err(_) => {
+            println!(
+                r#"{{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input","mcp__boba__propose_posting_features"]}}"#
+            );
             println!(r#"{{"type":"started","cli":"claude_code","model":"sonnet"}}"#);
             println!(r#"{{"type":"text","text":"Working on it"}}"#);
             println!(r#"{{"type":"tool_call","name":"get_posting","input":{{"id":"01H"}}}}"#);

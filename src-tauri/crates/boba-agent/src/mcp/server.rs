@@ -10,8 +10,8 @@
 //! no submit, send, delete or settings tool, so no request can reach one (AD-5).
 
 use std::io::{self, BufReader, Write};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -19,6 +19,8 @@ use boba_mcp_proto::schema as wire;
 use boba_mcp_proto::tool;
 use interprocess::local_socket::traits::{Listener as _, Stream as _};
 use serde_json::{Value, json};
+
+use crate::tasks::{OutputAttempts, OutputVerdict, check_output};
 
 /// How often the accept loop re-checks whether the run was revoked.
 const POLL: Duration = Duration::from_millis(20);
@@ -66,6 +68,10 @@ pub struct McpEndpoint {
 struct RunState {
     task: String,
     token: String,
+    /// The run's own input text: what `get_task_input` returns. It is the run's
+    /// data, not the app's, so the endpoint serves it without reaching the
+    /// repos (AC1).
+    input: String,
     revoked: AtomicBool,
     calls: AtomicU32,
     /// The run's `max_tool_calls`; `None` is unlimited.
@@ -73,6 +79,10 @@ struct RunState {
     limits: Limits,
     connections: AtomicU32,
     handler: Arc<dyn ToolHandler>,
+    /// The run's invalid-output budget (AC2): an output the task's schema
+    /// refuses goes back to the agent, and the run ends once it is spent.
+    outputs: Mutex<OutputAttempts>,
+    output_failed: AtomicBool,
 }
 
 /// Keeps the live-connection count honest however a connection ends.
@@ -85,12 +95,14 @@ impl Drop for ConnectionGuard {
 }
 
 impl McpEndpoint {
-    /// Listen for this run's shim. `token` came from `config::prepare`, and
-    /// `budget` is the task's MCP call cap.
+    /// Listen for this run's shim. `token` came from `config::prepare`,
+    /// `input` is the run's own task text, and `budget` is the task's MCP call
+    /// cap.
     pub fn start(
         endpoint: &str,
         task: &str,
         token: &str,
+        input: &str,
         budget: Option<u32>,
         handler: Arc<dyn ToolHandler>,
         limits: Limits,
@@ -100,12 +112,15 @@ impl McpEndpoint {
         let state = Arc::new(RunState {
             task: task.to_string(),
             token: token.to_string(),
+            input: input.to_string(),
             revoked: AtomicBool::new(false),
             calls: AtomicU32::new(0),
             budget,
             limits,
             connections: AtomicU32::new(0),
             handler,
+            outputs: Mutex::new(OutputAttempts::default()),
+            output_failed: AtomicBool::new(false),
         });
         let accept_state = Arc::clone(&state);
         let accept = thread::Builder::new()
@@ -126,6 +141,13 @@ impl McpEndpoint {
     /// Tool calls served so far, for the run's report.
     pub fn calls(&self) -> u32 {
         self.state.calls.load(Ordering::SeqCst)
+    }
+
+    /// Whether the run's output stayed invalid after its retries (AC2). The
+    /// runtime ends the run on this rather than reading a payload the core has
+    /// already refused.
+    pub fn failed_output(&self) -> bool {
+        self.state.output_failed.load(Ordering::SeqCst)
     }
 }
 
@@ -298,6 +320,31 @@ fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
         );
     }
 
+    // The run's own input is the run's, not the app's: the endpoint serves it
+    // directly, so no repo has to know about it (AC1).
+    if name == "get_task_input" {
+        return wire::result(id, wire::tool_content(&json!({ "input": state.input })));
+    }
+
+    // A write tool's arguments are the task's **output**: checked against the
+    // catalog's schema before anything stores them. An invalid one goes back to
+    // the agent; once the retry budget is spent the run is marked failed and
+    // stops answering, so the task fails visibly instead of looping (AC2).
+    if spec.kind.is_write() {
+        let mut attempts = state
+            .outputs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Err(invalid) = check_output(&state.task, name, &args) {
+            let verdict = attempts.refused();
+            drop(attempts);
+            if verdict == OutputVerdict::Fail {
+                state.output_failed.store(true, Ordering::SeqCst);
+            }
+            return wire::error(id, wire::CODE_INVALID_PARAMS, &invalid.to_string());
+        }
+    }
+
     match state.handler.call(&state.task, name, &args) {
         Ok(value) => {
             let payload = if spec.untrusted {
@@ -451,6 +498,7 @@ mod tests {
             &root.endpoint("01RUN"),
             task,
             token,
+            "the run's own input",
             budget,
             Arc::clone(&recorder) as Arc<dyn ToolHandler>,
             limits,
@@ -571,16 +619,76 @@ mod tests {
     fn revoking_the_run_stops_answering_even_a_valid_token() {
         let (root, endpoint, recorder) = start_endpoint("t", tool::NARRATE_SCORES, None);
         let mut client = Client::connect(&root.endpoint("01RUN"), "t");
-        assert!(client.call_tool("get_task_input", json!({}))["result"].is_object());
+        assert!(client.call_tool("get_score_card", json!({"id": "01H"}))["result"].is_object());
 
         endpoint.revoke();
-        let refused = client.call_tool("get_task_input", json!({}));
+        let refused = client.call_tool("get_score_card", json!({"id": "01H"}));
         assert_eq!(
             refused["error"]["code"],
             wire::CODE_UNAUTHORIZED,
             "{refused}"
         );
         assert_eq!(recorder.calls().len(), 1);
+    }
+
+    /// AC1: the run's own input is served by the endpoint, so no repo needs to
+    /// know about it — and it never reaches the handler.
+    #[test]
+    fn get_task_input_serves_the_runs_own_input() {
+        let (root, _endpoint, recorder) = start_endpoint("t", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        let answer = client.call_tool("get_task_input", json!({}));
+        let text = answer["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(payload["input"], "the run's own input");
+        assert!(
+            recorder.calls().is_empty(),
+            "the run's own input must not reach the repos"
+        );
+    }
+
+    /// AC2: an output that does not match its schema goes back to the agent, and
+    /// after the retries the run is marked failed so the runtime can stop it.
+    #[test]
+    fn an_invalid_output_is_retried_and_then_fails_the_run() {
+        let (root, endpoint, recorder) = start_endpoint("t", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        // Two retries, then the run is failed: the third refusal is the last.
+        for attempt in 1..=3 {
+            let refused = client.call_tool("propose_posting_features", json!({"features": {}}));
+            assert_eq!(
+                refused["error"]["code"],
+                wire::CODE_INVALID_PARAMS,
+                "attempt {attempt}: {refused}"
+            );
+            assert_eq!(endpoint.failed_output(), attempt > 2, "attempt {attempt}");
+        }
+        assert!(
+            recorder.calls().is_empty(),
+            "an invalid output must never reach the repos"
+        );
+
+        // A valid output still passes: the budget only counts refusals.
+        let ok = client.call_tool(
+            "propose_posting_features",
+            json!({"id": "pst_1", "features": {"skills": []}}),
+        );
+        assert!(ok["result"].is_object(), "{ok}");
+        assert_eq!(recorder.calls().len(), 1);
+    }
+
+    /// AC2: a read tool is not an output, so it is never schema-checked.
+    #[test]
+    fn a_read_tool_is_not_checked_against_an_output_schema() {
+        let (root, endpoint, recorder) = start_endpoint("t", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        let read = client.call_tool("get_pending_postings", json!({"limit": 5}));
+        assert!(read["result"].is_object(), "{read}");
+        assert!(recorder.calls().len() == 1);
+        assert!(!endpoint.failed_output());
     }
 
     #[test]

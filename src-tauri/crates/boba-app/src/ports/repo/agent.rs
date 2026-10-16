@@ -39,6 +39,9 @@ pub struct NewAgentRun {
     /// `CliKind::id`.
     pub cli: String,
     pub model: Option<String>,
+    /// The agent pack this run rendered (`pack::version()`), so a stored
+    /// artifact traces back to the exact prompts that produced it (AC2).
+    pub pack_version: String,
 }
 
 /// The terminal update for a run (architecture 5.4).
@@ -60,6 +63,8 @@ pub struct AgentRunRecord {
     pub input_trust: String,
     pub cli: String,
     pub model: Option<String>,
+    /// The agent pack this run rendered; `''` for runs recorded before S2.4.
+    pub pack_version: String,
     pub status: String,
     pub failure_reason: Option<String>,
     pub started_at: String,

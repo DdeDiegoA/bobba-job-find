@@ -9,17 +9,18 @@
 //! — while the two tasks that only read the user's own input keep running with a
 //! security badge.
 //!
-//! The gate is a pure decision over evidence the driver probes (`--help`
-//! capabilities), the version `--version` reported, and whether the runtime has
-//! **observed** the locked-down CLI agree to the pinning. The caller (the
-//! composition root, which owns the `cli_install` row) enforces it.
+//! The gate has **two halves, at two moments** (orquestador ruling, 2026-10-16):
 //!
-//! Ruling (c), orquestador 2026-10-16: no CLI is verified until the run-time
-//! observation ADR-010 §1 asks for exists (the CLI's init event listing only
-//! boba tools, wired in S2.4), so **no untrusted task is lifted yet** — the
-//! verdict takes [`LockdownConfirmation`] as an explicit input and the
-//! composition root passes [`LockdownConfirmation::NotObserved`] until S2.4
-//! supplies [`LockdownConfirmation::Observed`].
+//! 1. **Before a run starts**, [`support`] decides over evidence the driver
+//!    probes (`--help` capabilities) and the version `--version` reported: an
+//!    untrusted task may start only on a CLI this build can pin.
+//! 2. **Before any tool call**, the runtime reads the run's own init event and
+//!    [`init_event_is_locked_down`] checks it: the CLI must report only this
+//!    app's tools, or the run aborts. Nothing is cached or persisted, so a
+//!    scheduled run after a restart is checked just as strictly.
+//!
+//! The caller (the composition root, which owns the `cli_install` row) supplies
+//! the probed evidence; the decision itself is here.
 
 use crate::drivers::{Capabilities, CliKind};
 use boba_app::ports::agent::AgentTaskKind;
@@ -47,21 +48,6 @@ pub enum Unverified {
     /// `tool_lockdown` is lost until the driver is updated (ADR-010 §1). The
     /// payload is the verified `(major, minor)` line.
     VersionOutsideVerifiedRange { verified: (u64, u64) },
-    /// The pinned config exists for this version, but nothing has watched the
-    /// CLI agree to it: the init-event observation is S2.4's (ruling (c),
-    /// 2026-10-16), and until it lands no untrusted task runs.
-    Unobserved,
-}
-
-/// Whether the run-time observation ADR-010 §1 asks for has confirmed this
-/// CLI's lockdown.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LockdownConfirmation {
-    /// The runtime watched this CLI's init event and it listed only boba tools.
-    Observed,
-    /// No observer exists yet (S2.4): the pinned config is in place, but nothing
-    /// has seen the CLI agree to it, so nothing untrusted runs (ruling (c)).
-    NotObserved,
 }
 
 /// The lockdown verdict for one CLI install.
@@ -101,14 +87,12 @@ pub enum Fallback {
     DeterministicRules,
 }
 
-/// The lockdown verdict for `cli` at `version`, given its probed capabilities
-/// and whether the run-time observation has confirmed it.
-pub fn tool_lockdown(
-    cli: CliKind,
-    version: &str,
-    capabilities: &Capabilities,
-    confirmation: LockdownConfirmation,
-) -> Lockdown {
+/// The lockdown verdict for `cli` at `version`, given its probed capabilities.
+///
+/// A `Verified` verdict is what lets an untrusted run **start**; it says nothing
+/// about the run itself, which is checked again from its own init event before
+/// it may call a tool (ADR-010 §1).
+pub fn tool_lockdown(cli: CliKind, version: &str, capabilities: &Capabilities) -> Lockdown {
     let Some(evidence) = lockdown_evidence(cli) else {
         return Lockdown::Unverified(Unverified::NoVerifiedConfig);
     };
@@ -118,10 +102,7 @@ pub fn tool_lockdown(
         return Lockdown::Unverified(Unverified::NoVerifiedConfig);
     }
     match version_line(version) {
-        Some(line) if line == evidence.verified => match confirmation {
-            LockdownConfirmation::Observed => Lockdown::Verified(evidence.method),
-            LockdownConfirmation::NotObserved => Lockdown::Unverified(Unverified::Unobserved),
-        },
+        Some(line) if line == evidence.verified => Lockdown::Verified(evidence.method),
         _ => Lockdown::Unverified(Unverified::VersionOutsideVerifiedRange {
             verified: evidence.verified,
         }),
@@ -134,11 +115,10 @@ pub fn support(
     cli: CliKind,
     version: &str,
     capabilities: &Capabilities,
-    confirmation: LockdownConfirmation,
 ) -> TaskSupport {
     match (
         task.reads_untrusted(),
-        tool_lockdown(cli, version, capabilities, confirmation),
+        tool_lockdown(cli, version, capabilities),
     ) {
         (_, Lockdown::Verified(_)) => TaskSupport::Supported,
         (false, Lockdown::Unverified(reason)) => TaskSupport::SupportedWithBadge(reason),
@@ -153,8 +133,8 @@ pub fn support(
 ///
 /// `verified` is the `(major, minor)` line the driver's fixtures cover: a newer
 /// release keeps its lockdown only once the driver is updated and re-verified.
-/// Having this evidence is necessary but not sufficient: the run-time
-/// observation ([`LockdownConfirmation`]) decides.
+/// Having this evidence is necessary but not sufficient: the run's own init
+/// event is what verifies a run (ADR-010 §1).
 struct Evidence {
     method: LockdownMethod,
     /// Capabilities the config being pinned depends on.
@@ -164,17 +144,20 @@ struct Evidence {
 
 fn lockdown_evidence(cli: CliKind) -> Option<Evidence> {
     match cli {
-        // The most a CLI's own flags can say, both halves documented in the
-        // recorded `--help` and checked in the test below: `--strict-mcp-config`
-        // (only the servers in our config, i.e. `boba` alone) and `--allowedTools`
-        // listing the run's own boba tools. That is *not* proof that the CLI's
-        // native tools are gone: an allowlist pre-approves, it does not remove,
-        // so this evidence alone never verifies a run — the run-time observation
-        // is what says the tool set really is ours (reviewer round 2; ruling (c):
-        // that observation is S2.4's).
+        // Method 1: the run's own init event lists the available tools
+        // (ADR-010 §1). The pinned config is what makes that list ours —
+        // `--strict-mcp-config` (only the servers in our config, i.e. `boba`
+        // alone), `--tools ""` (which *removes* the built-in set, rather than
+        // pre-approving an allowlist) and `--allowedTools` — and every flag is
+        // checked against the recorded `--help` in the test below. What the
+        // driver pins is necessary but not sufficient: the init event is checked
+        // on every run, before any tool call.
         CliKind::ClaudeCode => Some(Evidence {
-            method: LockdownMethod::PinnedLockdownConfig,
-            required: |caps| caps.mcp && caps.tool_allowlist,
+            method: LockdownMethod::InitEventToolList,
+            // All three are probed from the recorded `--help`. Without
+            // `stream_json` there is no init event to observe, so nothing can be
+            // verified and the pin is not trustworthy either.
+            required: |caps| caps.mcp && caps.tool_allowlist && caps.stream_json,
             verified: (2, 1),
         }),
         // Codex's `--sandbox read-only`, OpenCode's permission deny and Aider's
@@ -194,7 +177,7 @@ fn lockdown_evidence(cli: CliKind) -> Option<Evidence> {
 /// the test below: nothing is guessed (AD-4). They are necessary but **not
 /// sufficient** for a verified lockdown — an allowlist is not a removal — so the
 /// caller adds them to every run's argv (a narrower tool set is never worse) and
-/// the verdict still waits for the run-time observation (S2.4).
+/// the run itself is what the init-event check verifies.
 pub fn pinned_args(cli: CliKind, task_id: &str) -> Option<Vec<String>> {
     match cli {
         CliKind::ClaudeCode => {
@@ -206,6 +189,13 @@ pub fn pinned_args(cli: CliKind, task_id: &str) -> Option<Vec<String>> {
                 .join(",");
             Some(vec![
                 "--strict-mcp-config".to_string(),
+                // `--tools ""` **removes** the CLI's own built-in tools (its
+                // `--help`: "Use \"\" to disable all tools"). This is the
+                // removal the run-time observation can verify: an allowlist
+                // pre-approves, it does not take anything away, so on its own it
+                // would leave every native tool in the init event.
+                "--tools".to_string(),
+                String::new(),
                 "--allowedTools".to_string(),
                 allowed,
             ])
@@ -283,40 +273,23 @@ mod tests {
     #[test]
     fn the_recorded_cli_versions_are_inside_their_verified_range() {
         assert!(matches!(
-            tool_lockdown(
-                CliKind::ClaudeCode,
-                CLAUDE_VERSION,
-                &claude_caps(),
-                LockdownConfirmation::Observed
-            ),
-            Lockdown::Verified(LockdownMethod::PinnedLockdownConfig)
+            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &claude_caps()),
+            Lockdown::Verified(LockdownMethod::InitEventToolList)
         ));
         // Gemini's `--exclude-tools` values are not pinned by a recorded fixture
         // yet, so its lockdown is not verified however good its version is.
         assert_eq!(
-            tool_lockdown(
-                CliKind::GeminiCli,
-                GEMINI_VERSION,
-                &gemini_caps(),
-                LockdownConfirmation::Observed
-            ),
+            tool_lockdown(CliKind::GeminiCli, GEMINI_VERSION, &gemini_caps()),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
     }
 
-    /// Ruling (c), 2026-10-16: nothing is verified until the runtime observation
-    /// exists (S2.4), however well the CLI's version and pinned config check out.
+    /// The gate's first half (orquestador ruling, 2026-10-16): an untrusted task
+    /// may **start** on a CLI this build can pin and whose version is in range.
+    /// The second half is the run's own init event, checked by the runtime before
+    /// any tool call ([`init_event_is_locked_down`]).
     #[test]
-    fn nothing_is_verified_until_the_run_time_observation_exists() {
-        assert_eq!(
-            tool_lockdown(
-                CliKind::ClaudeCode,
-                CLAUDE_VERSION,
-                &claude_caps(),
-                LockdownConfirmation::NotObserved
-            ),
-            Lockdown::Unverified(Unverified::Unobserved)
-        );
+    fn a_pinned_cli_may_start_an_untrusted_run() {
         for kind in [
             AgentTaskKind::ExtractPostings,
             AgentTaskKind::NarrateScores,
@@ -324,20 +297,31 @@ mod tests {
             AgentTaskKind::ReviewApplication,
             AgentTaskKind::ClassifyEmails,
         ] {
-            assert!(matches!(
-                support(
-                    kind,
-                    CliKind::ClaudeCode,
-                    CLAUDE_VERSION,
-                    &claude_caps(),
-                    LockdownConfirmation::NotObserved
-                ),
-                TaskSupport::Unsupported {
-                    reason: Unverified::Unobserved,
-                    ..
-                }
-            ));
+            assert_eq!(
+                support(kind, CliKind::ClaudeCode, CLAUDE_VERSION, &claude_caps()),
+                TaskSupport::Supported,
+                "{kind:?} must be allowed to start on a pinned CLI"
+            );
         }
+
+        // And the pin is only trusted when the CLI can actually report the init
+        // event the run is verified against.
+        let no_stream = Capabilities {
+            stream_json: false,
+            ..claude_caps()
+        };
+        assert_eq!(
+            support(
+                AgentTaskKind::ExtractPostings,
+                CliKind::ClaudeCode,
+                CLAUDE_VERSION,
+                &no_stream
+            ),
+            TaskSupport::Unsupported {
+                reason: Unverified::NoVerifiedConfig,
+                fallback: None,
+            }
+        );
     }
 
     #[test]
@@ -345,7 +329,7 @@ mod tests {
         // Evidence, not invention: a flag may be pinned only if the CLI's
         // recorded help lists it, and every tool named must be one of our own.
         let claude_help = include_str!("../drivers/fixtures/claude_code_help.txt");
-        for flag in ["--strict-mcp-config", "--allowedTools"] {
+        for flag in ["--strict-mcp-config", "--tools", "--allowedTools"] {
             assert!(
                 claude_help.contains(flag),
                 "claude does not document {flag}"
@@ -355,17 +339,24 @@ mod tests {
             claude_help.contains("Comma-separated list of allowed tools"),
             "the allowlist separator is documented"
         );
+        assert!(
+            claude_help.contains(r#"Use "" to disable all tools"#),
+            "the removal of the built-in tool set is documented"
+        );
 
         let pinned = pinned_args(CliKind::ClaudeCode, "extract_postings").expect("pinned");
         assert_eq!(pinned[0], "--strict-mcp-config");
-        assert_eq!(pinned[1], "--allowedTools");
-        let allowed: Vec<&str> = pinned[2].split(',').collect();
+        // The removal comes before the allowlist, and takes an empty value.
+        assert_eq!(pinned[1], "--tools");
+        assert_eq!(pinned[2], "");
+        assert_eq!(pinned[3], "--allowedTools");
+        let allowed: Vec<&str> = pinned[4].split(',').collect();
         let expected: Vec<String> = boba_mcp_proto::tool::tools_for_task("extract_postings")
             .into_iter()
             .map(|spec| format!("mcp__{}__{}", boba_mcp_proto::tool::SERVER_NAME, spec.name))
             .collect();
         assert_eq!(allowed, expected, "the allowlist is this task's own tools");
-        assert_eq!(pinned.len(), 3, "{pinned:?}");
+        assert_eq!(pinned.len(), 5, "{pinned:?}");
 
         for cli in [
             CliKind::GeminiCli,
@@ -406,12 +397,7 @@ mod tests {
     fn a_version_outside_the_verified_range_loses_lockdown() {
         for version in ["1.9.0", "2.2.0", "3.0.0", "unknown", ""] {
             assert_eq!(
-                tool_lockdown(
-                    CliKind::ClaudeCode,
-                    version,
-                    &claude_caps(),
-                    LockdownConfirmation::Observed
-                ),
+                tool_lockdown(CliKind::ClaudeCode, version, &claude_caps()),
                 Lockdown::Unverified(Unverified::VersionOutsideVerifiedRange { verified: (2, 1) }),
                 "{version:?} must not keep tool_lockdown"
             );
@@ -421,8 +407,7 @@ mod tests {
             tool_lockdown(
                 CliKind::ClaudeCode,
                 "claude 2.1.400 (Claude Code)",
-                &claude_caps(),
-                LockdownConfirmation::Observed
+                &claude_caps()
             ),
             Lockdown::Verified(_)
         ));
@@ -432,12 +417,7 @@ mod tests {
     fn a_cli_with_no_verified_lockdown_config_never_gets_lockdown() {
         for cli in [CliKind::Aider, CliKind::OpenCode, CliKind::Codex] {
             assert_eq!(
-                tool_lockdown(
-                    cli,
-                    "1.0.0",
-                    &Capabilities::default(),
-                    LockdownConfirmation::Observed
-                ),
+                tool_lockdown(cli, "1.0.0", &Capabilities::default()),
                 Lockdown::Unverified(Unverified::NoVerifiedConfig),
                 "{}",
                 cli.display_name()
@@ -452,8 +432,7 @@ mod tests {
             tool_lockdown(
                 CliKind::ClaudeCode,
                 CLAUDE_VERSION,
-                &Capabilities::default(),
-                LockdownConfirmation::Observed
+                &Capabilities::default()
             ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
@@ -463,12 +442,7 @@ mod tests {
             ..Capabilities::default()
         };
         assert_eq!(
-            tool_lockdown(
-                CliKind::ClaudeCode,
-                CLAUDE_VERSION,
-                &no_allowlist,
-                LockdownConfirmation::Observed
-            ),
+            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &no_allowlist),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
     }
@@ -487,13 +461,7 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                support(
-                    kind,
-                    CliKind::Aider,
-                    "1.0.0",
-                    &Capabilities::default(),
-                    LockdownConfirmation::Observed
-                ),
+                support(kind, CliKind::Aider, "1.0.0", &Capabilities::default()),
                 TaskSupport::Unsupported {
                     reason: Unverified::NoVerifiedConfig,
                     fallback,
@@ -503,13 +471,7 @@ mod tests {
             );
             // And the same on a Full CLI whose version moved out of range.
             assert_eq!(
-                support(
-                    kind,
-                    CliKind::ClaudeCode,
-                    "2.2.0",
-                    &claude_caps(),
-                    LockdownConfirmation::Observed
-                ),
+                support(kind, CliKind::ClaudeCode, "2.2.0", &claude_caps()),
                 TaskSupport::Unsupported {
                     reason: Unverified::VersionOutsideVerifiedRange { verified: (2, 1) },
                     fallback,
@@ -527,23 +489,11 @@ mod tests {
             AgentTaskKind::TranslateProfile,
         ] {
             assert_eq!(
-                support(
-                    kind,
-                    CliKind::Aider,
-                    "1.0.0",
-                    &Capabilities::default(),
-                    LockdownConfirmation::Observed
-                ),
+                support(kind, CliKind::Aider, "1.0.0", &Capabilities::default()),
                 TaskSupport::SupportedWithBadge(Unverified::NoVerifiedConfig)
             );
             assert_eq!(
-                support(
-                    kind,
-                    CliKind::ClaudeCode,
-                    "2.1.289",
-                    &claude_caps(),
-                    LockdownConfirmation::Observed
-                ),
+                support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()),
                 TaskSupport::Supported
             );
         }
@@ -558,8 +508,7 @@ mod tests {
                 AgentTaskKind::ProfileImport,
                 CliKind::ClaudeCode,
                 "2.2.0",
-                &claude_caps(),
-                LockdownConfirmation::Observed
+                &claude_caps()
             ),
             TaskSupport::SupportedWithBadge(Unverified::VersionOutsideVerifiedRange {
                 verified: (2, 1)
@@ -579,13 +528,7 @@ mod tests {
             AgentTaskKind::TranslateProfile,
         ] {
             assert_eq!(
-                support(
-                    kind,
-                    CliKind::ClaudeCode,
-                    "2.1.289",
-                    &claude_caps(),
-                    LockdownConfirmation::Observed
-                ),
+                support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()),
                 TaskSupport::Supported,
                 "{:?} must run on a Full CLI",
                 kind
@@ -620,15 +563,13 @@ mod tests {
                 );
             }
         }
-        // And today the pinned config alone verifies nothing (ruling (c)).
-        assert!(matches!(
-            tool_lockdown(
-                CliKind::ClaudeCode,
-                CLAUDE_VERSION,
-                &claude_caps(),
-                LockdownConfirmation::NotObserved
-            ),
-            Lockdown::Unverified(_)
-        ));
+        // The pinned config is what the run's init event is checked against, so
+        // the verifiable CLI must actually have one.
+        assert_eq!(
+            pinned_args(CliKind::ClaudeCode, "extract_postings")
+                .expect("pinned")
+                .len(),
+            5
+        );
     }
 }

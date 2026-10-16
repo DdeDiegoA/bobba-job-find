@@ -9,23 +9,23 @@
 //! `Arc<dyn AgentPort>`. Nothing here edits `lib.rs`, and no `boba-agent` type
 //! learns a global path.
 //!
-//! What is live after this chore: every run gets its own workspace, token and
-//! MCP endpoint, its own `mcp.json`, an event stream the UI can follow, and a
-//! CLI command built from the driver's evidence **and** ADR-010's gate — the
-//! lock-down verdict comes from the probed `cli_install` row, and a task that
-//! reads third-party content is refused unless that CLI's lock-down is verified.
+//! What is live after this slice: every run gets its own workspace, token and
+//! MCP endpoint, its own CLI config, the rendered agent pack, an event stream the
+//! UI can follow, and a CLI command built from the driver's evidence **and**
+//! ADR-010's two halves — the gate decides whether an untrusted task may start
+//! from the probed `cli_install` row ([`lock_down`]), and the runtime refuses the
+//! run unless its own init event lists only this app's tools.
 //! What is deliberately *not* live: the data behind most catalog tools (profile,
-//! postings, scores, mail, documents land in later slices), the CLI argv for the
-//! CLIs whose MCP flag is not a plain `--flag <path>`, and the observation that
-//! will let a verified CLI run untrusted tasks (S2.4). Gaps are explicit
-//! refusals here rather than silence — see [`RepoTools`], [`command_builder`] and
-//! [`lock_down`].
+//! postings, scores, mail, documents land in later slices), and a verified
+//! lock-down for the CLIs whose driver has nothing to pin them with. Gaps are
+//! explicit refusals here rather than silence — see [`RepoTools`] and
+//! [`command_builder`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use boba_agent::drivers::{Capabilities, CliKind};
-use boba_agent::lockdown::{self, LockdownConfirmation, TaskSupport, Unverified};
+use boba_agent::drivers::{Capabilities, CliKind, McpWiring};
+use boba_agent::lockdown::{self, TaskSupport, Unverified};
 use boba_agent::mcp::config::{RunSandbox, SandboxConfig};
 use boba_agent::mcp::server::ToolHandler;
 use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
@@ -60,8 +60,10 @@ pub fn agent_runtime<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) -> Agen
                 _store: Arc::clone(store),
             }),
         )
-        .with_command_builder(Arc::new(command_builder(shim.err())))
+        .with_command_builder(Arc::new(command_builder(shim.clone())))
         // ADR-010 §2: every task goes through this gate before a run exists.
+        // The gate is only the first half; the run's own init event is the
+        // second, and the runtime enforces it before any tool call.
         .with_gate(task_gate(Arc::clone(store)))
 }
 
@@ -188,30 +190,31 @@ fn terminal_of(event: &AgentEvent) -> Option<(TaskOutcome, Option<String>)> {
     }
 }
 
-/// The minimal CLI invocation for a task: the CLI, its MCP-config flag pointed
-/// at this run's `mcp.json`, the pinned lockdown config, its non-interactive
-/// flags, and the prompt.
+/// The minimal CLI invocation for a task: the CLI, how it reaches this run's
+/// `boba-mcp` server, the pinned lockdown config, its non-interactive flags, and
+/// the prompt.
 ///
 /// Two refusals come first, both fail-closed:
 /// 1. **No sidecar.** Without `boba-mcp` the CLI would run with its own native
 ///    tools and none of ours, so no run starts (AD-6).
-/// 2. **A prompt that could be parsed as an option.** Neither CLI documents an
+/// 2. **A prompt that could be parsed as an option.** No CLI documents an
 ///    end-of-options `--`, so a prompt starting with `-` is refused instead of
 ///    guessed at.
 ///
 /// What a task is allowed to *do* is not decided here: ADR-010's gate runs in
-/// the runtime, before a run exists ([`task_gate`]).
+/// the runtime, before a run exists ([`task_gate`]), and the runtime re-checks
+/// the CLI's own init event before an untrusted run continues.
 ///
-/// A CLI whose argv is not wired yet (Codex, OpenCode, Aider — their MCP flag
-/// is not a plain `--flag <path>`, or they take no prompt) is refused here too;
-/// that stays the driver's work (S2.4).
+/// A CLI that cannot reach our MCP server at all (Aider) is refused here: a run
+/// on it could neither read its input nor write its output.
 fn command_builder(
-    shim_error: Option<String>,
+    shim: Result<PathBuf, String>,
 ) -> impl Fn(&AgentTask, &RunSandbox) -> CommandSpec + Send + Sync {
     move |task: &AgentTask, sandbox: &RunSandbox| {
-        if let Some(why) = &shim_error {
-            return refusal(task, why);
-        }
+        let shim = match &shim {
+            Ok(path) => path,
+            Err(why) => return refusal(task, why),
+        };
         if task.prompt.starts_with('-') {
             return refusal(
                 task,
@@ -221,15 +224,34 @@ fn command_builder(
         let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
             return refusal(task, "unknown agent CLI");
         };
-        let (Some(mcp_flag), Some(argv)) = (
-            kind.mcp_config_flag(),
-            kind.non_interactive_argv(&task.prompt),
-        ) else {
-            return refusal(
-                task,
-                "no minimal argv for this CLI yet (its MCP flag is not `--flag <path>`, or it \
-                 takes no prompt); that arrives with the driver argv work",
-            );
+        let Some(argv) = kind.non_interactive_argv(&task.prompt) else {
+            return refusal(task, "this CLI has no non-interactive invocation");
+        };
+        // How this run reaches `boba-mcp` (AD-6). Two of the four need the CLI
+        // to be told where the server is; the token and the endpoint always
+        // travel in the process environment, never in argv.
+        let wiring = match kind.mcp_wiring() {
+            McpWiring::ConfigFile(flag) => {
+                vec![flag.to_string(), sandbox.config.display().to_string()]
+            }
+            // Codex takes config overrides; its own help names this one.
+            McpWiring::Overrides => vec![
+                "-c".to_string(),
+                format!(
+                    "mcp_servers.{}.command={}",
+                    tool::SERVER_NAME,
+                    shim.display()
+                ),
+            ],
+            // The CLI reads its own config file from the run's workspace, which
+            // the runtime wrote when it prepared the run.
+            McpWiring::WorkspaceFile(_) => Vec::new(),
+            McpWiring::Unsupported => {
+                return refusal(
+                    task,
+                    "this CLI has no MCP support, so a run could not reach Boba's tools",
+                );
+            }
         };
         // The flags that pin this CLI's lockdown for this task. A CLI the gate
         // lets an untrusted task through always has them (`lockdown`'s own
@@ -239,7 +261,7 @@ fn command_builder(
 
         CommandSpec {
             program: PathBuf::from(kind.binary_names()[0]),
-            args: [mcp_flag.to_string(), sandbox.config.display().to_string()]
+            args: wiring
                 .into_iter()
                 .chain(pinned.unwrap_or_default())
                 .chain(argv)
@@ -257,9 +279,10 @@ fn command_builder(
 /// runtime consults it before a run gets a workspace, a token or a CLI, so no
 /// caller can route around it.
 ///
-/// Until S2.4 wires the run-time observation of a pinned lockdown,
-/// [`lock_down`] refuses every untrusted task on every CLI (orquestador ruling
-/// (c), 2026-10-16) — a hard gate, with no user override.
+/// This answers one question — may an untrusted task **start** on this CLI? The
+/// question that follows, "did the CLI keep to the pin?", is the run's own init
+/// event, checked by the runtime before any tool call (ADR-010 §1). Nothing is
+/// cached, so a scheduled run after a restart is checked just as strictly.
 fn task_gate(store: Arc<Store>) -> Arc<TaskGate> {
     Arc::new(move |task: &AgentTask| {
         let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
@@ -281,6 +304,9 @@ fn task_gate(store: Arc<Store>) -> Arc<TaskGate> {
 /// No probed install (a CLI the user added by hand, or an unreadable store) is
 /// no evidence at all, so the verdict is taken from an empty one — which still
 /// lets the user's own input through and refuses everything untrusted.
+///
+/// A CLI whose version leaves its driver's verified range loses `tool_lockdown`
+/// however well it behaved last time (ADR-010 §1).
 fn lock_down(store: &Store, kind: CliKind, task: &AgentTask) -> TaskSupport {
     let probed = store
         .read({
@@ -301,15 +327,7 @@ fn lock_down(store: &Store, kind: CliKind, task: &AgentTask) -> TaskSupport {
             )
         },
     );
-    // `NotObserved` until S2.4's runtime watches the CLI's init event (ruling
-    // (c), 2026-10-16): the pinned config alone never lifts the gate.
-    lockdown::support(
-        task.kind,
-        kind,
-        &version,
-        &capabilities,
-        LockdownConfirmation::NotObserved,
-    )
+    lockdown::support(task.kind, kind, &version, &capabilities)
 }
 
 /// A command that cannot start: the run fails fast, is recorded and is reported,
@@ -343,6 +361,11 @@ impl ToolHandler for RepoTools {
         match tool::find(tool_name) {
             // Defence in depth: the endpoint already refuses unknown names.
             None => Err(format!("no tool `{tool_name}`")),
+            // And it already answers this one: the run's own input is the run's,
+            // not the app's (S2.4).
+            Some(spec) if spec.name == "get_task_input" => {
+                Err("the run's own input is served by the MCP endpoint itself".to_string())
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -356,7 +379,7 @@ impl ToolHandler for RepoTools {
 /// [`tests::every_catalog_tool_is_answered_explicitly`] fails otherwise.
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
-        "get_task_input" => "S2.4 (task registry: per-run inputs)",
+        "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
         "get_profile_facts"
         | "get_preferences"
         | "propose_profile_facts"
@@ -416,6 +439,7 @@ mod tests {
             cli: cli.to_string(),
             model: None,
             prompt: "extract the offers".to_string(),
+            target_language: "en".to_string(),
             budget: boba_app::ports::agent::RunBudget::default(),
             env: Vec::new(),
         }
@@ -509,7 +533,9 @@ mod tests {
                 spec.name
             );
             assert!(
-                message.contains(spec.name) || message.contains("no data source"),
+                message.contains(spec.name)
+                    || message.contains("no data source")
+                    || message.contains("served by the MCP endpoint"),
                 "unhelpful answer for {}: {message}",
                 spec.name
             );
@@ -593,7 +619,7 @@ mod tests {
     fn a_trusted_task_gets_the_cli_argv_with_this_runs_mcp_config() {
         // Trusted kinds are the ones whose input is the user's own (AD-4/ADR-010).
         // A Full CLI, so its runs carry the pinned lockdown config.
-        let builder = command_builder(None);
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         for cli in ["claude_code", "gemini_cli"] {
             let sandbox = run_sandbox(&format!("argv-{cli}"));
             let trusted = task_of(
@@ -623,11 +649,13 @@ mod tests {
         }
     }
 
-    /// P1 (ruling (c), 2026-10-16): ADR-010's gate refuses every untrusted task
-    /// until S2.4 observes a pinned lockdown — on an unprobed CLI, on a version
-    /// outside its driver's range, and on Claude Code with a pinned config.
+    /// ADR-010's gate, first half (orquestador ruling, 2026-10-16): an untrusted
+    /// task is refused on a CLI nothing probed and on a version outside its
+    /// driver's range, and is allowed to **start** on a CLI this build can pin.
+    /// What the run may then do is decided by its own init event, which the
+    /// runtime checks before any tool call.
     #[test]
-    fn untrusted_tasks_are_refused_by_the_gate() {
+    fn the_gate_decides_whether_an_untrusted_task_may_start() {
         let unterprobed = task_gate(store("unprobed"));
         let untrusted = task("aider");
         assert_eq!(
@@ -652,27 +680,42 @@ mod tests {
             }
         );
 
-        // A Full CLI with its proof complete but no observation yet.
+        // A Full CLI with its pin in place: the run may start, and the run's own
+        // init event is what verifies it from there (ADR-010 §1).
         let full = task_gate(store_with_cli(
             "full",
             CliKind::ClaudeCode,
-            "2.1.289",
+            "2.1.301",
             claude_caps(),
         ));
+        assert_eq!(full(&task("claude_code")), TaskSupport::Supported);
+
+        // A CLI that cannot report the init event the run is verified against
+        // can never be pinned, so nothing untrusted starts on it.
+        let no_stream = Capabilities {
+            stream_json: false,
+            ..claude_caps()
+        };
+        let unverifiable = task_gate(store_with_cli(
+            "no-stream",
+            CliKind::ClaudeCode,
+            "2.1.301",
+            no_stream,
+        ));
         assert_eq!(
-            full(&task("claude_code")),
+            unverifiable(&task("claude_code")),
             TaskSupport::Unsupported {
-                reason: Unverified::Unobserved,
+                reason: Unverified::NoVerifiedConfig,
                 fallback: None,
             }
         );
-        // `classify_emails` still has its deterministic fallback.
+        // `classify_emails` keeps its deterministic fallback there.
         let mut classify = task("claude_code");
         classify.kind = boba_app::ports::agent::AgentTaskKind::ClassifyEmails;
         assert_eq!(
-            full(&classify),
+            unverifiable(&classify),
             TaskSupport::Unsupported {
-                reason: Unverified::Unobserved,
+                reason: Unverified::NoVerifiedConfig,
                 fallback: Some(lockdown::Fallback::DeterministicRules),
             }
         );
@@ -700,7 +743,7 @@ mod tests {
             })
         );
 
-        let builder = command_builder(None);
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         let spec = builder(&user, &run_sandbox("badge"));
         assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
         assert!(
@@ -713,8 +756,9 @@ mod tests {
     /// our MCP server, and only that task's own tools.
     #[test]
     fn a_user_task_on_a_full_cli_carries_its_pinned_lockdown() {
-        let full = store_with_cli("pinned", CliKind::ClaudeCode, "2.1.289", claude_caps());
-        let builder = command_builder(None);
+        let full = store_with_cli("pinned", CliKind::ClaudeCode, "2.1.301", claude_caps());
+        let full_gate = task_gate(Arc::clone(&full));
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         let sandbox = run_sandbox("pinned");
 
         let user = task_of(
@@ -725,7 +769,7 @@ mod tests {
         let spec = builder(&user, &sandbox);
 
         // The gate is what allows it; the argv is what pins it.
-        assert!(task_gate(full)(&user).is_supported());
+        assert!(full_gate(&user).is_supported());
         assert_eq!(spec.args[0], "--mcp-config");
         assert_eq!(spec.args[1], sandbox.config.display().to_string());
         assert!(
@@ -748,7 +792,7 @@ mod tests {
     /// P1: no sidecar means no tools, so no run may start.
     #[test]
     fn a_missing_shim_refuses_every_run() {
-        let builder = command_builder(Some("the boba-mcp sidecar is missing".to_string()));
+        let builder = command_builder(Err("the boba-mcp sidecar is missing".to_string()));
         let sandbox = run_sandbox("no-shim");
 
         for task in [
@@ -769,7 +813,7 @@ mod tests {
 
     #[test]
     fn a_prompt_that_could_be_an_option_is_refused() {
-        let builder = command_builder(None);
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         let sandbox = run_sandbox("dash-prompt");
         let mut hostile = task_of(
             "claude_code",
@@ -782,23 +826,119 @@ mod tests {
         assert!(spec.program.to_string_lossy().contains("boba-refused-"));
     }
 
+    /// Every CLI that can reach `boba-mcp` gets a live argv; the one that cannot
+    /// is refused rather than launched with no tools at all (AD-6).
     #[test]
-    fn a_cli_without_wired_argv_fails_fast_instead_of_guessing() {
-        let builder = command_builder(None);
-        for cli in ["codex", "opencode", "aider"] {
-            let sandbox = run_sandbox(&format!("unsupported-{cli}"));
-            let trusted = task_of(
+    fn a_cli_without_mcp_is_refused_and_the_others_are_wired() {
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
+        let trusted = |cli: &str| {
+            task_of(
                 cli,
                 boba_app::ports::agent::AgentTaskKind::ProfileImport,
                 InputTrust::User,
-            );
-            let spec = builder(&trusted, &sandbox);
+            )
+        };
+
+        // Aider has no MCP support: a run on it could neither read its input nor
+        // write its output, so it never gets an invented argv.
+        let spec = builder(&trusted("aider"), &run_sandbox("aider"));
+        assert!(
+            spec.program.to_string_lossy().contains("boba-refused-"),
+            "{spec:?}"
+        );
+        assert!(spec.args.is_empty());
+
+        for cli in ["claude_code", "gemini_cli", "codex", "opencode"] {
+            let spec = builder(&trusted(cli), &run_sandbox(&format!("wired-{cli}")));
+            assert_eq!(spec.program, PathBuf::from(cli_program(cli)), "{cli}");
+            assert!(!spec.args.is_empty(), "{cli}");
+        }
+    }
+
+    fn cli_program(cli: &str) -> &'static str {
+        CliKind::ALL
+            .into_iter()
+            .find(|kind| kind.id() == cli)
+            .expect("a known CLI")
+            .binary_names()[0]
+    }
+
+    /// Codex takes config overrides instead of a config file, and OpenCode reads
+    /// its own config from the workspace. Both name our server; neither puts the
+    /// run's token on the command line (AD-6).
+    #[test]
+    fn the_mcp_server_is_wired_the_way_each_cli_takes_it() {
+        let shim = PathBuf::from("/app/binaries/boba-mcp");
+        let builder = command_builder(Ok(shim.clone()));
+        let trusted = |cli: &str| {
+            task_of(
+                cli,
+                boba_app::ports::agent::AgentTaskKind::ProfileImport,
+                InputTrust::User,
+            )
+        };
+
+        let sandbox = run_sandbox("codex");
+        let spec = builder(&trusted("codex"), &sandbox);
+        assert_eq!(
+            spec.args[0..2],
+            [
+                "-c".to_string(),
+                format!("mcp_servers.boba.command={}", shim.display())
+            ],
+            "{spec:?}"
+        );
+
+        // OpenCode reads the config the runtime wrote into its workspace, so its
+        // argv carries no config at all.
+        let spec = builder(&trusted("opencode"), &run_sandbox("opencode"));
+        assert!(!spec.args.iter().any(|arg| arg.contains("mcp")), "{spec:?}");
+
+        // And for no CLI does the run's token reach argv.
+        for cli in ["claude_code", "gemini_cli", "codex", "opencode"] {
+            let sandbox = run_sandbox(&format!("token-{cli}"));
+            let spec = builder(&trusted(cli), &sandbox);
             assert!(
-                spec.program.to_string_lossy().contains("boba-refused-"),
-                "{cli} must not get an invented argv: {:?}",
-                spec.program
+                !spec.args.iter().any(|arg| arg.contains(&sandbox.token)),
+                "{cli} put the run token on the command line"
             );
-            assert!(spec.args.is_empty());
+        }
+    }
+
+    /// The workspace config an in-workspace CLI reads: its own file, naming the
+    /// shim and carrying the endpoint and token as the shim's environment.
+    #[test]
+    fn a_workspace_cli_gets_its_own_config_file() {
+        let config = CliKind::OpenCode
+            .workspace_mcp_config(
+                Path::new("/app/binaries/boba-mcp"),
+                "/app/ipc/01RUN.sock",
+                "a-token",
+            )
+            .expect("OpenCode reads a workspace config");
+        assert_eq!(config.0, "opencode.json");
+        assert_eq!(config.1["mcp"]["boba"]["type"], "local");
+        assert_eq!(
+            config.1["mcp"]["boba"]["command"][0],
+            "/app/binaries/boba-mcp"
+        );
+        assert_eq!(
+            config.1["mcp"]["boba"]["environment"]["BOBA_RUN_TOKEN"],
+            "a-token"
+        );
+        assert_eq!(
+            config.1["mcp"]["boba"]["environment"]["BOBA_IPC_ENDPOINT"],
+            "/app/ipc/01RUN.sock"
+        );
+
+        // The CLIs that take their config another way have none.
+        for kind in [CliKind::ClaudeCode, CliKind::GeminiCli, CliKind::Codex] {
+            assert!(
+                kind.workspace_mcp_config(Path::new("/bin/boba-mcp"), "e", "t")
+                    .is_none(),
+                "{}",
+                kind.display_name()
+            );
         }
     }
 }

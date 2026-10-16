@@ -32,6 +32,19 @@ pub enum AgentTaskKind {
 }
 
 impl AgentTaskKind {
+    /// Every kind, in the order the UI lists them. Mirrors
+    /// `boba_mcp_proto::tool::ALL_TASKS`: a task the catalog does not know is a
+    /// task the core cannot run.
+    pub const ALL: [AgentTaskKind; 7] = [
+        AgentTaskKind::ProfileImport,
+        AgentTaskKind::ExtractPostings,
+        AgentTaskKind::NarrateScores,
+        AgentTaskKind::TailorApplication,
+        AgentTaskKind::ReviewApplication,
+        AgentTaskKind::ClassifyEmails,
+        AgentTaskKind::TranslateProfile,
+    ];
+
     /// Stable id used in the DB (`agent_run.task_kind`) and diagnostics.
     pub const fn id(self) -> &'static str {
         match self {
@@ -79,6 +92,10 @@ pub struct AgentTask {
     pub cli: String,
     pub model: Option<String>,
     pub prompt: String,
+    /// The **content** language the deliverables are written in (BCP-47,
+    /// AD-17), filled into the agent pack for this run. Separate from the UI
+    /// locale: it follows the posting, not the user's setting.
+    pub target_language: String,
     pub budget: RunBudget,
     /// Extra environment for the run (per-run MCP token, workspace paths, and
     /// test scenarios). Secrets are passed here, never on the command line.
@@ -148,6 +165,9 @@ pub enum FailureReason {
     /// The CLI cannot run this task safely (ADR-010's tool-lockdown gate): the
     /// task is unsupported on this install, with no user override.
     Unsupported,
+    /// The task's output stayed invalid after its retries: the run stops rather
+    /// than storing a payload the core cannot use (AC2).
+    InvalidOutput,
     /// The CLI crashed or exited nonzero for an unclassified reason.
     Crashed,
 }
@@ -162,6 +182,7 @@ impl FailureReason {
             FailureReason::LimitExceeded => "limit_exceeded",
             FailureReason::Cancelled => "cancelled",
             FailureReason::Unsupported => "unsupported",
+            FailureReason::InvalidOutput => "invalid_output",
             FailureReason::Crashed => "crashed",
         }
     }
@@ -176,6 +197,7 @@ impl FailureReason {
             FailureReason::LimitExceeded => "errors.agent.limit_exceeded",
             FailureReason::Cancelled => "errors.agent.cancelled",
             FailureReason::Unsupported => "errors.agent.unsupported",
+            FailureReason::InvalidOutput => "errors.agent.invalid_output",
             FailureReason::Crashed => "errors.agent.crashed",
         }
     }
@@ -242,6 +264,7 @@ mod tests {
             cli: "claude_code".to_string(),
             model: None,
             prompt: "translate".to_string(),
+            target_language: "en".to_string(),
             budget: RunBudget::default(),
             env: Vec::new(),
         };

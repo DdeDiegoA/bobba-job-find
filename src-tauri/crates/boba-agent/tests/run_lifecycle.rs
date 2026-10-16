@@ -76,6 +76,7 @@ fn task(budget: RunBudget) -> AgentTask {
         cli: "claude_code".to_string(),
         model: Some("sonnet".to_string()),
         prompt: "extract".to_string(),
+        target_language: "en".to_string(),
         budget,
         env: vec![],
     }
@@ -97,6 +98,7 @@ impl AgentRepo for FakeRepo {
             input_trust: run.input_trust,
             cli: run.cli,
             model: run.model,
+            pack_version: run.pack_version,
             status: RunStatus::Running.id().to_string(),
             failure_reason: None,
             started_at: "2026-10-05T00:00:00.000Z".to_string(),
@@ -299,6 +301,8 @@ fn tool_call_limit_fails_with_limit_exceeded() {
     let repo = Arc::new(FakeRepo::default());
     let runtime = runtime(Arc::clone(&repo));
     let lines = [
+        // A Claude `stream-json` run opens with its init event (ADR-010 §1).
+        r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
         r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
         r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
         r#"{"type":"tool_call","name":"get_posting","input":{}}"#,
