@@ -1,1 +1,24 @@
-{}
+{
+  "steps.language.title": "Language & theme",
+  "steps.language.body": "Choose how Boba talks to you. Every screen follows right away, and you can change both later in Settings.",
+  "steps.language.language": "Language",
+  "steps.language.locale.en": "English",
+  "steps.language.locale.es": "Español",
+  "steps.language.theme": "Theme",
+  "steps.language.themeOption.system": "Follow the system",
+  "steps.language.themeOption.light": "Light",
+  "steps.language.themeOption.dark": "Dark",
+  "wizard.title": "Boba setup",
+  "wizard.progressAria": "Onboarding progress",
+  "wizard.stepOf": "Step {current} of {total}",
+  "wizard.step.done": "Done",
+  "wizard.step.current": "Current step",
+  "wizard.step.upcoming": "Upcoming",
+  "wizard.back": "Back",
+  "wizard.next": "Next",
+  "wizard.skip": "Skip for now",
+  "wizard.resume.title": "Pick up where you left off",
+  "wizard.resume.body": "You stopped at {step}. Your answers are saved.",
+  "wizard.resume.action": "Resume setup",
+  "wizard.resume.restart": "Start over"
+}

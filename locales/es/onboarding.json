@@ -1,1 +1,24 @@
-{}
+{
+  "steps.language.title": "Idioma y tema",
+  "steps.language.body": "Elige cómo te habla Boba. Todas las pantallas cambian al instante y puedes cambiar ambos más tarde en Ajustes.",
+  "steps.language.language": "Idioma",
+  "steps.language.locale.en": "English",
+  "steps.language.locale.es": "Español",
+  "steps.language.theme": "Tema",
+  "steps.language.themeOption.system": "Seguir el sistema",
+  "steps.language.themeOption.light": "Claro",
+  "steps.language.themeOption.dark": "Oscuro",
+  "wizard.title": "Configuración de Boba",
+  "wizard.progressAria": "Progreso de la configuración inicial",
+  "wizard.stepOf": "Paso {current} de {total}",
+  "wizard.step.done": "Hecho",
+  "wizard.step.current": "Paso actual",
+  "wizard.step.upcoming": "Pendiente",
+  "wizard.back": "Atrás",
+  "wizard.next": "Siguiente",
+  "wizard.skip": "Saltar por ahora",
+  "wizard.resume.title": "Continúa donde lo dejaste",
+  "wizard.resume.body": "Te quedaste en {step}. Tus respuestas están guardadas.",
+  "wizard.resume.action": "Continuar",
+  "wizard.resume.restart": "Empezar de nuevo"
+}
