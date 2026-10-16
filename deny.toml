@@ -50,6 +50,27 @@ ignore = [
     # Revisit: citationberg allows quick-xml >=0.41, or typst bumps its citation stack.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml via citationberg/hayagriva/typst-library; citations unused by our templates, unreachable" },
+    # --- CH3 (2026-10-15): unsafe-libyaml, approved by Diego. ---
+    # unsafe-libyaml 0.2.11 (unmaintained; upstream archived 2024-03-25, patched = [] i.e. no safe
+    # upgrade exists, no known vuln).
+    # Path: serde_yaml 0.9.34+deprecated -> hayagriva / typst-library -> typst -> boba-docs.
+    # Reached only from CSL/bibliography parsing (hayagriva) and typst's `yaml()` / data-file
+    # loading. Unreachable: our four templates (cv|cover/{classic,modern}.typ) only do
+    # `json(sys.inputs.data)` — no #cite, #bibliography, yaml() or file reads — and never parse
+    # untrusted YAML. Same reachability argument as CH2's RUSTSEC-2024-0320.
+    # Revisit: hayagriva/typst drops serde_yaml (re-assessed by every E7 slice, see the standing
+    # guard in docs/product/backlog.md and IB-2).
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml/hayagriva/typst-library; unmaintained, no safe upgrade, YAML path unreachable from our templates" },
+    # zip 4.6.1 — yanked crate, scoped ignore (Diego 2026-10-15). Crate spec, not an advisory id:
+    # the `yanked` check stays `deny` for every other crate.
+    # Every zip 4.x release (4.0.0 .. 4.6.1) is yanked, so `cargo update -p zip` cannot resolve at all
+    # ("failed to select a version for the requirement `zip = \"^4\"`"): there is nothing to upgrade to.
+    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (bundle extraction). Every tauri-plugin-updater
+    # release up to 3.0.0-alpha.3 requires zip ^4, so a bump cannot avoid it either.
+    # Unreachable: the updater is unused until S10.5 (no update checks in the MVP, NFR-1 opt-in) and
+    # zip only runs when a downloaded bundle is extracted.
+    # Revisit: a non-yanked zip 4.x is published, or tauri-plugin-updater drops the zip dependency.
+    { crate = "zip@4.6.1", reason = "Diego 2026-10-15: entire zip 4.x yanked; every tauri-plugin-updater release (<=3.0.0-alpha.3) requires zip ^4; reached only via updater bundle extraction, updater unused until S10.5. Revisit: a non-yanked zip 4.x appears or tauri-plugin-updater drops zip." },
 ]
 
 [licenses]
@@ -67,6 +88,8 @@ allow = [
     "CC-BY-4.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
+    # Diego 2026-10-15: interprocess deps doctest-file/recvmsg (S2.3a)
+    "0BSD",
 ]
 confidence-threshold = 0.9
 

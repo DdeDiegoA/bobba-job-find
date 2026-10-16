@@ -88,7 +88,7 @@
 | Embeddings (optional) | **fastembed** (ONNX via `ort`) — model `MultilingualE5Small` | 7.1 | Apache-2.0 | On-device F3 semantic score, CPU-only | Python sentence-transformers sidecar (ADR-007); remote embedding API (breaks local-first) |
 | Scheduling | **cron** (expression parsing) + tokio interval loop | 0.17 | MIT/Apache | Simple, and catches up after sleep (AD-18) | tokio-cron-scheduler (stale, own job store) |
 | Process supervision | **process-wrap** (tokio) | 10.0 | MIT/Apache | Process groups / Job Objects, kill-tree | command-group (superseded by process-wrap) |
-| Local IPC | **interprocess** (local sockets / named pipes) | 2.4 | MIT/Apache | core ↔ boba-mcp | localhost TCP (any local process can connect; firewall prompts) |
+| Local IPC | **interprocess** (local sockets / named pipes) | 2.4 | 0BSD/Apache-2.0, plus transitive 0BSD (doctest-file, recvmsg) | core ↔ boba-mcp | localhost TCP (any local process can connect; firewall prompts) |
 | Binary discovery | **which**, **dirs** | 8.0 / 7.0 | MIT | Agent CLI and browser detection | — |
 | OS locale | **sys-locale** | 0.3 | MIT/Apache | Default UI language | — |
 | MCP | **rmcp** (official Rust MCP SDK) | 3.5 | MIT/Apache | Server side in boba-mcp, stdio transport | TS MCP SDK (would need Node at runtime) |
