@@ -11,6 +11,7 @@ publish = false
 boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 # Storage / crypto — versions pinned once in the workspace manifest (S1.1).

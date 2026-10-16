@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::repo::agent::AgentRepo;
+use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
@@ -31,6 +32,8 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         Arc::new(SqliteSystemRepo::new(store.clone(), keychain_service())),
     );
     mount_port::<dyn ProfileRepo>(app, store.clone());
+    // The ingestion owner writes `posting` + `posting_source` (S4.2).
+    mount_port::<dyn IngestionRepo>(app, store.clone());
     // The agent runtime is built by this slice (CH5): it needs the app handle
     // for the event sink and the app-data paths, so it cannot be a plain
     // `store.clone()` line.
