@@ -131,24 +131,52 @@ struct Evidence {
 
 fn verified_evidence(cli: CliKind) -> Option<Evidence> {
     match cli {
-        // The init event names the tools, and the pinned config allows only
-        // `boba` ones; both need the stream-json and MCP flags.
+        // Pinned config: `--mcp-config` plus `--strict-mcp-config` (only the
+        // servers in our config, i.e. `boba` alone) and the stream-json init
+        // event, which is what confirms no native tool survived the pinning.
         CliKind::ClaudeCode => Some(Evidence {
             method: LockdownMethod::InitEventToolList,
             required: |caps| caps.stream_json && caps.mcp,
             verified: (2, 1),
         }),
-        // `excludeTools` is what pins Gemini's lockdown.
-        CliKind::GeminiCli => Some(Evidence {
-            method: LockdownMethod::PinnedLockdownConfig,
-            required: |caps| caps.mcp && caps.tool_allowlist,
-            verified: (0, 4),
-        }),
         // Codex's `--sandbox read-only`, OpenCode's permission deny and Aider's
         // complete lack of MCP are not verified by this build yet: their argv is
         // not wired either, so they stay unsupported rather than assumed safe.
-        CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
+        // Gemini probes `--exclude-tools`, but the tool list that would pin its
+        // lockdown is not covered by a recorded fixture yet, and an incomplete
+        // exclusion list is worse than none.
+        CliKind::GeminiCli | CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
     }
+}
+
+/// The flags that pin this CLI's lockdown, or `None` when this build has no
+/// verified way to pin it.
+///
+/// Every flag here is checked against the driver's recorded `--help` fixture in
+/// the test below: nothing is guessed (AD-4). The caller must add them to the
+/// run's argv, and a task is only `Verified` once
+/// [`init_event_is_locked_down`] confirms the result at run start.
+pub fn pinned_args(cli: CliKind) -> Option<&'static [&'static str]> {
+    match cli {
+        CliKind::ClaudeCode => Some(&["--strict-mcp-config"]),
+        CliKind::GeminiCli | CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
+    }
+}
+
+/// ADR-010's check for a CLI verified by its init event: the tool list it
+/// reports contains only this app's MCP tools (`mcp__boba__*`).
+///
+/// Fail-closed by construction: an empty list, a renamed tool or a single native
+/// tool fails the check, so the run is refused instead of running with tools the
+/// `untrusted_content` envelope does not protect.
+pub fn init_event_is_locked_down(tools: &[String]) -> bool {
+    !tools.is_empty() && tools.iter().all(|tool| is_boba_tool(tool))
+}
+
+/// Whether the CLI reported one of this app's MCP tools (Claude Code names an
+/// MCP tool `mcp__<server>__<tool>`; our server is `boba-mcp-proto`'s).
+fn is_boba_tool(tool: &str) -> bool {
+    tool.starts_with(&format!("mcp__{}__", boba_mcp_proto::tool::SERVER_NAME))
 }
 
 /// The `(major, minor)` a version string reports, e.g. `2.1.289 (Claude Code)`.
@@ -201,10 +229,55 @@ mod tests {
             tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &claude_caps()),
             Lockdown::Verified(LockdownMethod::InitEventToolList)
         ));
-        assert!(matches!(
+        // Gemini's `--exclude-tools` values are not pinned by a recorded fixture
+        // yet, so its lockdown is not verified however good its version is.
+        assert_eq!(
             tool_lockdown(CliKind::GeminiCli, GEMINI_VERSION, &gemini_caps()),
-            Lockdown::Verified(LockdownMethod::PinnedLockdownConfig)
-        ));
+            Lockdown::Unverified(Unverified::NoVerifiedConfig)
+        );
+    }
+
+    #[test]
+    fn the_pinned_lockdown_flags_are_the_ones_the_cli_documents() {
+        // Evidence, not invention: a flag may be pinned only if the CLI's
+        // recorded help lists it.
+        let claude_help = include_str!("../drivers/fixtures/claude_code_help.txt");
+        let pinned = pinned_args(CliKind::ClaudeCode).expect("claude pins its lockdown");
+        assert_eq!(pinned, ["--strict-mcp-config"]);
+        for flag in pinned {
+            assert!(
+                claude_help.contains(flag),
+                "claude does not document {flag}"
+            );
+        }
+        for cli in [
+            CliKind::GeminiCli,
+            CliKind::Codex,
+            CliKind::OpenCode,
+            CliKind::Aider,
+        ] {
+            assert_eq!(pinned_args(cli), None, "{}", cli.display_name());
+        }
+    }
+
+    #[test]
+    fn the_init_event_is_what_confirms_claude_is_locked_down() {
+        // ADR-010 §1: the init event lists the available tools, and only boba's.
+        let only_boba = [
+            "mcp__boba__get_task_input".to_string(),
+            "mcp__boba__save_document_draft".to_string(),
+        ];
+        assert!(init_event_is_locked_down(&only_boba));
+        for native in ["Bash", "WebFetch", "Write", "Read", "boba"] {
+            let mut tools = only_boba.to_vec();
+            tools.push(native.to_string());
+            assert!(
+                !init_event_is_locked_down(&tools),
+                "{native} must fail the check"
+            );
+        }
+        // A CLI that reports no tools is not the configuration we verified.
+        assert!(!init_event_is_locked_down(&[]));
     }
 
     #[test]
@@ -250,13 +323,13 @@ mod tests {
             ),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
-        // Gemini needs its exclude-tools flag to pin the lockdown.
-        let no_allowlist = Capabilities {
+        // Without the stream-json init event there is nothing to confirm with.
+        let no_stream_json = Capabilities {
             mcp: true,
             ..Capabilities::default()
         };
         assert_eq!(
-            tool_lockdown(CliKind::GeminiCli, GEMINI_VERSION, &no_allowlist),
+            tool_lockdown(CliKind::ClaudeCode, CLAUDE_VERSION, &no_stream_json),
             Lockdown::Unverified(Unverified::NoVerifiedConfig)
         );
     }
