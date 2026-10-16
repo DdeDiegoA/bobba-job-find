@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use boba_domain::profile::{
-    FactDraft, FactKind, Lang, ProfileFact, ProfileRuleError, Provenance, new_ulid,
+    FactDraft, FactKind, Lang, NewRevision, ProfileFact, ProfileRuleError, Provenance, new_ulid,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -41,9 +41,6 @@ pub enum ProfileError {
     /// History was asked to restore a revision of another item.
     #[error("unknown revision: {0}")]
     UnknownRevision(String),
-    /// `profile_version` reached `u32::MAX`; the profile is beyond repair.
-    #[error("the profile version overflowed")]
-    VersionOverflow,
 }
 
 impl ProfileError {
@@ -56,7 +53,6 @@ impl ProfileError {
             Self::UnknownKind(_) => "errors.profile.unknown_kind",
             Self::UnknownItem(_) => "errors.profile.unknown_item",
             Self::UnknownRevision(_) => "errors.profile.unknown_revision",
-            Self::VersionOverflow => "errors.profile.version_overflow",
         }
     }
 }
@@ -174,20 +170,20 @@ impl ProfileService {
         };
         draft.validate()?;
 
-        // An edit supersedes the revision in force; a new item starts its own
-        // ULID chain. Both bump the profile version (AC3).
-        let (item_id, supersedes) = match input.item_id.clone() {
-            Some(item_id) => {
-                let current = self
-                    .repo
-                    .fact_latest(&item_id)?
-                    .ok_or_else(|| ProfileError::UnknownItem(item_id.clone()))?;
-                (item_id, Some(current.id))
-            }
-            None => (new_ulid(), None),
-        };
+        // An edit keeps the item's ULID, a new item starts one. What the
+        // revision supersedes and the version it creates are resolved by the
+        // repo inside one transaction (AC3), never here.
+        let is_new = input.item_id.is_none();
+        let item_id = input.item_id.clone().unwrap_or_else(new_ulid);
+        if !is_new {
+            // Friendly error: the atomic append is the authority, this only
+            // turns a missing item into NotFound instead of a store failure.
+            self.repo
+                .fact_latest(&item_id)?
+                .ok_or_else(|| ProfileError::UnknownItem(item_id.clone()))?;
+        }
 
-        self.append_revision(&item_id, supersedes, draft, Provenance::User, None)?;
+        self.append_revision(&item_id, is_new, draft, Provenance::User, None)?;
         self.snapshot()
     }
 
@@ -213,14 +209,13 @@ impl ProfileService {
             .fact_get(revision_id)?
             .filter(|fact| fact.item_id == item_id)
             .ok_or_else(|| ProfileError::UnknownRevision(revision_id.to_string()))?;
-        let current = self
-            .repo
-            .fact_latest(item_id)?
-            .ok_or_else(|| ProfileError::UnknownItem(item_id.to_string()))?;
+        if self.repo.fact_latest(item_id)?.is_none() {
+            return Err(ProfileError::UnknownItem(item_id.to_string()));
+        }
 
         self.append_revision(
             item_id,
-            Some(current.id),
+            false,
             source.draft(),
             source.provenance,
             source.agent_run_id,
@@ -228,37 +223,29 @@ impl ProfileService {
         self.snapshot()
     }
 
-    /// Append one revision and bump the profile version (AC3).
+    /// Append one revision; the repo resolves what it supersedes and the
+    /// version, in one transaction (AC3).
     fn append_revision(
         &self,
         item_id: &str,
-        supersedes: Option<String>,
+        is_new: bool,
         draft: FactDraft,
         provenance: Provenance,
         agent_run_id: Option<String>,
     ) -> Result<(), ProfileError> {
-        let version = self
-            .repo
-            .profile_version()?
-            .checked_add(1)
-            .ok_or(ProfileError::VersionOverflow)?;
-        let created_at = self.clock.now_rfc3339();
-        let fact = ProfileFact {
+        let revision = NewRevision {
             id: new_ulid(),
             item_id: item_id.to_string(),
-            kind: draft.kind,
-            text_en: draft.text_en,
-            text_es: draft.text_es,
-            evidence: draft.evidence,
-            detail_json: draft.detail_json,
-            supersedes,
-            profile_version: version,
+            is_new,
+            draft,
             provenance,
             agent_run_id,
-            created_at,
+            created_at: self.clock.now_rfc3339(),
         };
-        self.repo.fact_append(&fact)?;
-        self.repo.profile_set_version(version, &fact.created_at)?;
+        let fact = self.repo.fact_append_revision(&revision)?;
+        if fact.item_id != revision.item_id {
+            return Err(ProfileError::UnknownItem(revision.item_id));
+        }
         Ok(())
     }
 }
@@ -508,7 +495,7 @@ mod tests {
             svc.save(input("skill", Some("Rust"), None))
                 .unwrap_err()
                 .message_key(),
-            "errors.profile.version_overflow"
+            "errors.profile.store"
         );
     }
 

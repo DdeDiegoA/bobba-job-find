@@ -3,10 +3,11 @@
 //! through its queries. The adapter is `boba-store`.
 //!
 //! A fact is immutable (AD-15): the port can **append** a revision, never update
-//! or delete one. `proposal_delete` is the one removal, and it only drops a
+//! or delete one, and appending is one transaction so a version and its row can
+//! never drift apart. `proposal_delete` is the one removal, and it only drops a
 //! pending proposal the user has confirmed or discarded (S3.5).
 
-use boba_domain::profile::{FactProposal, ProfileFact};
+use boba_domain::profile::{FactProposal, NewRevision, ProfileFact};
 use thiserror::Error;
 
 /// A repo-level failure, stringified so the port stays free of the adapter's
@@ -26,9 +27,6 @@ pub trait ProfileRepo: Send + Sync {
     /// The current `profile.version`; `0` before the first fact exists (AD-15).
     fn profile_version(&self) -> Result<u32, ProfileRepoError>;
 
-    /// Store the profile version and its `updated_at` (UTC RFC 3339, AD-17).
-    fn profile_set_version(&self, version: u32, updated_at: &str) -> Result<(), ProfileRepoError>;
-
     /// The latest revision of every item, ordered by kind then creation.
     fn facts_current(&self) -> Result<Vec<ProfileFact>, ProfileRepoError>;
 
@@ -41,8 +39,15 @@ pub trait ProfileRepo: Send + Sync {
     /// Every revision of one item, newest first (History, AC3).
     fn fact_history(&self, item_id: &str) -> Result<Vec<ProfileFact>, ProfileRepoError>;
 
-    /// Append a revision. There is no update and no delete (AD-15).
-    fn fact_append(&self, fact: &ProfileFact) -> Result<(), ProfileRepoError>;
+    /// Append one immutable revision and bump `profile.version` in **one**
+    /// transaction (AD-15). The adapter resolves what the revision supersedes
+    /// and which version it creates, so two concurrent edits cannot fork an item
+    /// and a crash cannot leave the version behind the facts.
+    ///
+    /// Fails when `is_new` is `false` and the item has no current revision, or
+    /// when `is_new` is `true` and the item already has one.
+    fn fact_append_revision(&self, revision: &NewRevision)
+    -> Result<ProfileFact, ProfileRepoError>;
 
     /// Proposals awaiting review, newest first (S3.5, S3.6).
     fn proposals_pending(&self) -> Result<Vec<FactProposal>, ProfileRepoError>;

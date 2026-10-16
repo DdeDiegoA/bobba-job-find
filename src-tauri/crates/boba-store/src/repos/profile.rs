@@ -7,7 +7,9 @@
 //! and the migration's triggers reject one if it ever appears.
 
 use boba_app::ports::repo::profile::{ProfileRepo, ProfileRepoError};
-use boba_domain::profile::{FactDraft, FactKind, FactProposal, ProfileFact, Provenance};
+use boba_domain::profile::{
+    FactDraft, FactKind, FactProposal, NewRevision, ProfileFact, Provenance,
+};
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
 
 use crate::db::{Store, StoreError};
@@ -61,6 +63,49 @@ pub fn profile_version_get(conn: &Connection) -> rusqlite::Result<u32> {
         |row| row.get(0),
     )?;
     Ok(version.max(0) as u32)
+}
+
+/// Append one revision and bump the profile version in **one** transaction
+/// (AD-15): `supersedes` and the version are resolved here, so concurrent edits
+/// cannot fork an item and a crash cannot leave the version behind the facts.
+///
+/// Fails when `is_new` disagrees with whether the item has a current revision.
+pub fn fact_append_revision(
+    conn: &mut Connection,
+    revision: &NewRevision,
+) -> Result<ProfileFact, ProfileRepoError> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| ProfileRepoError::new(e.to_string()))?;
+    let current =
+        fact_latest(&tx, &revision.item_id).map_err(|e| ProfileRepoError::new(e.to_string()))?;
+    let supersedes = match (current, revision.is_new) {
+        (Some(existing), false) => Some(existing.id),
+        (None, true) => None,
+        (Some(_), true) => {
+            return Err(ProfileRepoError::new(format!(
+                "profile item {} already exists",
+                revision.item_id
+            )));
+        }
+        (None, false) => {
+            return Err(ProfileRepoError::new(format!(
+                "profile item {} has no current revision",
+                revision.item_id
+            )));
+        }
+    };
+    let version = profile_version_get(&tx)
+        .map_err(|e| ProfileRepoError::new(e.to_string()))?
+        .checked_add(1)
+        .ok_or_else(|| ProfileRepoError::new("the profile version overflowed"))?;
+    let fact = revision.clone().into_fact(supersedes, version);
+    fact_append(&tx, &fact).map_err(|e| ProfileRepoError::new(e.to_string()))?;
+    profile_set_version(&tx, version, &fact.created_at)
+        .map_err(|e| ProfileRepoError::new(e.to_string()))?;
+    tx.commit()
+        .map_err(|e| ProfileRepoError::new(e.to_string()))?;
+    Ok(fact)
 }
 
 /// Store the profile version with the change's timestamp (UTC RFC 3339, AD-17).
@@ -235,13 +280,6 @@ impl ProfileRepo for Store {
         read(self, profile_version_get)
     }
 
-    fn profile_set_version(&self, version: u32, updated_at: &str) -> Result<(), ProfileRepoError> {
-        let updated_at = updated_at.to_owned();
-        write(self, move |conn| {
-            profile_set_version(conn, version, &updated_at)
-        })
-    }
-
     fn facts_current(&self) -> Result<Vec<ProfileFact>, ProfileRepoError> {
         read(self, facts_current)
     }
@@ -261,9 +299,15 @@ impl ProfileRepo for Store {
         read(self, move |conn| fact_history(conn, &item_id))
     }
 
-    fn fact_append(&self, fact: &ProfileFact) -> Result<(), ProfileRepoError> {
-        let fact = fact.clone();
-        write(self, move |conn| fact_append(conn, &fact))
+    fn fact_append_revision(
+        &self,
+        revision: &NewRevision,
+    ) -> Result<ProfileFact, ProfileRepoError> {
+        let revision = revision.clone();
+        self.execute(move |conn| {
+            fact_append_revision(conn, &revision).map_err(|e| StoreError::Sqlite(e.to_string()))
+        })
+        .map_err(|e| ProfileRepoError::new(e.to_string()))
     }
 
     fn proposals_pending(&self) -> Result<Vec<FactProposal>, ProfileRepoError> {
@@ -543,12 +587,14 @@ mod tests {
         let store = open_store(&dir);
         assert_eq!(store.profile_version().unwrap(), 0);
 
-        let revision = fact("01ITEM", "01REV1", 1, None, Some("Nimbus"), None);
-        store.fact_append(&revision).unwrap();
-        store.profile_set_version(1, &revision.created_at).unwrap();
+        let created = store
+            .fact_append_revision(&revision("01ITEM", "01REV1", true, Some("Nimbus"), None))
+            .unwrap();
+        assert_eq!(created.profile_version, 1);
+        assert_eq!(created.supersedes, None);
 
         assert_eq!(store.profile_version().unwrap(), 1);
-        assert_eq!(store.facts_current().unwrap(), vec![revision.clone()]);
+        assert_eq!(store.facts_current().unwrap(), vec![created.clone()]);
         assert_eq!(store.fact_latest("01ITEM").unwrap().unwrap().id, "01REV1");
         assert_eq!(store.fact_history("01ITEM").unwrap().len(), 1);
         assert_eq!(store.fact_get("01REV1").unwrap().unwrap().item_id, "01ITEM");
@@ -564,12 +610,113 @@ mod tests {
             source_excerpt: None,
             untrusted_origin: true,
             agent_run_id: "run_01".to_string(),
-            created_at: revision.created_at.clone(),
+            created_at: created.created_at.clone(),
         };
         store.proposal_append(&proposal).unwrap();
         assert_eq!(store.proposals_pending().unwrap(), vec![proposal]);
         assert!(store.proposal_delete("01P1").unwrap());
         assert!(store.proposals_pending().unwrap().is_empty());
+    }
+
+    // AD-15: the append resolves the parent and the version in one transaction,
+    // so a second save for the same item chains instead of forking.
+    #[test]
+    fn a_second_append_chains_instead_of_forking() {
+        let mut conn = conn();
+        let first = fact_append_revision(
+            &mut conn,
+            &revision("01ITEM", "01REV1", true, Some("v1"), None),
+        )
+        .unwrap();
+        let second = fact_append_revision(
+            &mut conn,
+            &revision("01ITEM", "01REV2", false, Some("v2"), None),
+        )
+        .unwrap();
+
+        assert_eq!(second.supersedes.as_deref(), Some("01REV1"));
+        assert_eq!(second.profile_version, first.profile_version + 1);
+        assert_eq!(profile_version_get(&conn).unwrap(), second.profile_version);
+        let current = facts_current(&conn).unwrap();
+        assert_eq!(current.len(), 1, "one item, one current revision: no fork");
+        assert_eq!(current[0].id, "01REV2");
+    }
+
+    // AD-15 in the schema: a fork, a duplicated version or a second root row is
+    // rejected even if some other code path tries to write one.
+    #[test]
+    fn forks_and_duplicate_versions_are_rejected_by_the_schema() {
+        let conn = conn();
+        fact_append(&conn, &fact("01ITEM", "01REV1", 1, None, Some("v1"), None)).unwrap();
+
+        // The legitimate successor of 01REV1.
+        fact_append(
+            &conn,
+            &fact("01ITEM", "01REV2", 2, Some("01REV1"), Some("v2"), None),
+        )
+        .unwrap();
+
+        // A second row claiming to supersede 01REV1: the fork the schema rejects.
+        let forked = fact("01ITEM", "01FORK", 3, Some("01REV1"), Some("fork"), None);
+        assert!(
+            fact_append(&conn, &forked).is_err(),
+            "one child per revision"
+        );
+        // The same item and version twice.
+        let duplicate = fact("01ITEM", "01DUP", 2, Some("01REV2"), Some("dup"), None);
+        assert!(
+            fact_append(&conn, &duplicate).is_err(),
+            "one row per item version"
+        );
+        assert_eq!(facts_current(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_append_rejects_a_wrong_is_new_flag() {
+        let mut conn = conn();
+        fact_append_revision(
+            &mut conn,
+            &revision("01ITEM", "01REV1", true, Some("v1"), None),
+        )
+        .unwrap();
+
+        let again = fact_append_revision(
+            &mut conn,
+            &revision("01ITEM", "01REV2", true, Some("v2"), None),
+        );
+        assert!(again.is_err(), "is_new on an existing item");
+
+        let missing = fact_append_revision(
+            &mut conn,
+            &revision("01OTHER", "01REV3", false, Some("v3"), None),
+        );
+        assert!(missing.is_err(), "is_new = false on an unknown item");
+        assert_eq!(profile_version_get(&conn).unwrap(), 1, "nothing drifted");
+        assert_eq!(facts_current(&conn).unwrap().len(), 1);
+    }
+
+    fn revision(
+        item_id: &str,
+        id: &str,
+        is_new: bool,
+        en: Option<&str>,
+        es: Option<&str>,
+    ) -> NewRevision {
+        NewRevision {
+            id: id.to_string(),
+            item_id: item_id.to_string(),
+            is_new,
+            draft: FactDraft {
+                kind: FactKind::Experience,
+                text_en: en.map(str::to_string),
+                text_es: es.map(str::to_string),
+                evidence: None,
+                detail_json: "{}".to_string(),
+            },
+            provenance: Provenance::User,
+            agent_run_id: None,
+            created_at: "2026-10-15T12:00:00.000Z".to_string(),
+        }
     }
 
     fn open_store(dir: &TempDir) -> Store {

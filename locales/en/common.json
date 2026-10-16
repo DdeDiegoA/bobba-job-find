@@ -15,6 +15,5 @@
   "errors.profile.unknown_kind": "That profile section does not exist.",
   "errors.profile.unknown_item": "That profile item no longer exists.",
   "errors.profile.unknown_revision": "That version no longer exists.",
-  "errors.profile.version_overflow": "Your profile version is out of range.",
   "errors.profile.missing_id": "The profile item id is missing."
 }

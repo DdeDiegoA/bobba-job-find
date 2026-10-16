@@ -26,7 +26,7 @@ fn to_app(error: ProfileError) -> AppError {
     let code = match error {
         ProfileError::Rule(_) | ProfileError::UnknownKind(_) => ErrorCode::InvalidInput,
         ProfileError::UnknownItem(_) | ProfileError::UnknownRevision(_) => ErrorCode::NotFound,
-        ProfileError::Repo(_) | ProfileError::VersionOverflow => ErrorCode::Internal,
+        ProfileError::Repo(_) => ErrorCode::Internal,
     };
     AppError::new(code, error.message_key())
 }

@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use boba_domain::profile::{FactProposal, ProfileFact};
+use boba_domain::profile::{FactProposal, NewRevision, ProfileFact};
 
 use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
 
@@ -49,13 +49,6 @@ impl FakeProfileRepo {
 impl ProfileRepo for FakeProfileRepo {
     fn profile_version(&self) -> Result<u32, ProfileRepoError> {
         Ok(self.state.lock().unwrap().version)
-    }
-
-    fn profile_set_version(&self, version: u32, updated_at: &str) -> Result<(), ProfileRepoError> {
-        let mut state = self.state.lock().unwrap();
-        state.version = version;
-        state.updated_at = updated_at.to_string();
-        Ok(())
     }
 
     fn facts_current(&self) -> Result<Vec<ProfileFact>, ProfileRepoError> {
@@ -105,9 +98,49 @@ impl ProfileRepo for FakeProfileRepo {
         Ok(history)
     }
 
-    fn fact_append(&self, fact: &ProfileFact) -> Result<(), ProfileRepoError> {
-        self.state.lock().unwrap().facts.push(fact.clone());
-        Ok(())
+    /// Same contract as the store: resolve `supersedes` and the version under
+    /// the lock, so a fork or a version drift cannot be reached by a test leak.
+    fn fact_append_revision(
+        &self,
+        revision: &NewRevision,
+    ) -> Result<ProfileFact, ProfileRepoError> {
+        let mut state = self.state.lock().unwrap();
+        let current = state
+            .facts
+            .iter()
+            .find(|fact| {
+                fact.item_id == revision.item_id
+                    && !state
+                        .facts
+                        .iter()
+                        .any(|next| next.supersedes.as_deref() == Some(fact.id.as_str()))
+            })
+            .cloned();
+        let supersedes = match (current, revision.is_new) {
+            (Some(existing), false) => Some(existing.id),
+            (None, true) => None,
+            (Some(_), true) => {
+                return Err(ProfileRepoError::new(format!(
+                    "profile item {} already exists",
+                    revision.item_id
+                )));
+            }
+            (None, false) => {
+                return Err(ProfileRepoError::new(format!(
+                    "profile item {} has no current revision",
+                    revision.item_id
+                )));
+            }
+        };
+        let version = state
+            .version
+            .checked_add(1)
+            .ok_or_else(|| ProfileRepoError::new("the profile version overflowed"))?;
+        let fact = revision.clone().into_fact(supersedes, version);
+        state.version = version;
+        state.updated_at = fact.created_at.clone();
+        state.facts.push(fact.clone());
+        Ok(fact)
     }
 
     fn proposals_pending(&self) -> Result<Vec<FactProposal>, ProfileRepoError> {

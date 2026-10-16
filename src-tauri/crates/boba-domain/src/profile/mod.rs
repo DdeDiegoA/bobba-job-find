@@ -234,6 +234,48 @@ impl ProfileFact {
     }
 }
 
+/// A revision to append, before the store resolves what it supersedes and which
+/// version it creates (AD-15).
+///
+/// The adapter resolves both **inside one transaction**, so two concurrent edits
+/// cannot fork an item and a crash cannot leave `profile.version` behind the
+/// facts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewRevision {
+    /// ULID of the new revision row.
+    pub id: String,
+    /// The item this revision belongs to (a fresh ULID for a new item).
+    pub item_id: String,
+    /// `true` when the item does not exist yet.
+    pub is_new: bool,
+    pub draft: FactDraft,
+    pub provenance: Provenance,
+    pub agent_run_id: Option<String>,
+    /// UTC RFC 3339, from the injected clock (AD-17).
+    pub created_at: String,
+}
+
+impl NewRevision {
+    /// Materialise the row once the store has resolved what it supersedes and
+    /// the profile version it created.
+    pub fn into_fact(self, supersedes: Option<String>, profile_version: u32) -> ProfileFact {
+        ProfileFact {
+            id: self.id,
+            item_id: self.item_id,
+            kind: self.draft.kind,
+            text_en: self.draft.text_en,
+            text_es: self.draft.text_es,
+            evidence: self.draft.evidence,
+            detail_json: self.draft.detail_json,
+            supersedes,
+            profile_version,
+            provenance: self.provenance,
+            agent_run_id: self.agent_run_id,
+            created_at: self.created_at,
+        }
+    }
+}
+
 /// A fact an agent proposed and the user has not confirmed (S3.5, S3.6).
 ///
 /// `untrusted_origin` is the producing run's `input_trust` (ADR-010): `true` for

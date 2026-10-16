@@ -53,7 +53,11 @@ CREATE TABLE profile_fact (
     CHECK ((provenance = 'agent_proposal') = (agent_run_id IS NOT NULL))
 ) STRICT;
 
-CREATE INDEX profile_fact_item ON profile_fact (item_id, profile_version);
+-- AD-15: an item has one revision per version and one child per revision, so a
+-- fork or a duplicated version is rejected by the schema, not just avoided by
+-- the single-writer actor.
+CREATE UNIQUE INDEX profile_fact_item ON profile_fact (item_id, profile_version);
+CREATE UNIQUE INDEX profile_fact_supersedes ON profile_fact (supersedes);
 
 -- AC3 (AD-15): facts are immutable. Enforced in SQL so no code path can rewrite
 -- the text a document cites; editing appends a revision instead.
