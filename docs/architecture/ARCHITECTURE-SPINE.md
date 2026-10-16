@@ -209,6 +209,7 @@ Arrows mean "may depend on". Nothing depends on `src-tauri/src`. Adapters never 
 | Long work | Anything that can take more than 300 ms runs as a core task that emits `*.progressed` and `*.finished` events and can be cancelled through `CancellationToken`. |
 | MCP tools | `snake_case` verbs (`get_pending_postings`, `propose_posting_features`, `save_document_draft`). Inputs and outputs are JSON-Schema'd in `boba-mcp-proto`. Write tools are named `propose_*` or `save_*_draft`. |
 | Agent pack | `agent-pack/skills/<task>/SKILL.md` (Agent Skills format) + `agent-pack/system.md`. One skill per `AgentTask`. Rendered per CLI into the run workspace (`CLAUDE.md` / `AGENTS.md` / `GEMINI.md`). |
+| Wiring | One composition root (ADR-012): `lib.rs` calls `wiring::mount` once; ports are registered as one `app.manage::<Arc<dyn Port>>(…);` line each in `src-tauri/src/wiring/port_list.rs` (`merge=union`). Commands obtain ports only via `wiring::port::<dyn P>(&app)`, which returns `ErrorCode::Locked` when the store is not open. |
 | Tests | Domain: pure unit tests and golden ScoreCards. Adapters: recorded HTTP fixtures, with no live network in CI. UI: Vitest + Testing Library. E2E: WebdriverIO + tauri-driver on Linux/Windows. |
 
 ## Stack

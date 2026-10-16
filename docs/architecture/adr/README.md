@@ -15,3 +15,4 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [009](./009-key-custody-signing-and-locked-state.md) | DB key custody across unsigned builds; Locked state; snapshot & restore | Accepted · Approved (Diego) | AD-13, AD-18, AD-20, AD-22 |
 | [010](./010-untrusted-content-requires-tool-lockdown.md) | Untrusted-content tasks require verified tool lockdown; agent output untrusted | Accepted · Approved (Diego) | AD-4, AD-6, AD-7 |
 | [011](./011-audit-chain-canonical-form.md) | Audit chain: frozen canonical form and anchor semantics | Accepted | AD-12 |
+| [012](./012-composition-root-and-port-wiring.md) | Composition root and port wiring | Accepted | AD-3, AD-14 |
