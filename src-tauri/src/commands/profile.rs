@@ -15,19 +15,24 @@ use boba_app::profile::{
 use boba_app::system::SystemClock;
 use tauri::Manager;
 
-/// The service over the mounted repo. `Ok(None)` means the store is not wired
-/// yet; the caller turns that into a typed error.
+/// The service over the mounted repo.
 fn service(app: &tauri::AppHandle) -> AppResult<ProfileService> {
-    let repo = app
-        .try_state::<Arc<dyn ProfileRepo>>()
-        .map(|state| state.inner().clone())
-        .ok_or_else(store_not_mounted)?;
+    // CH4 (ADR-012) swaps this call for `wiring::port::<dyn ProfileRepo>(app)?`.
+    let repo = port(app)?;
     Ok(ProfileService::new(repo, Arc::new(SystemClock)))
 }
 
+/// ADR-012 point 4: until CH4 ships the shared helper, a port comes from Tauri
+/// state or the app is Locked. Commands must not call `try_state` themselves;
+/// this is the one place that does, waiting to be replaced.
+fn port(app: &tauri::AppHandle) -> AppResult<Arc<dyn ProfileRepo>> {
+    app.try_state::<Arc<dyn ProfileRepo>>()
+        .map(|state| state.inner().clone())
+        .ok_or_else(store_not_mounted)
+}
+
 /// The store is not mounted yet: no key is in hand, so the app is effectively
-/// locked (ADR-009). CH4 owns the composition root (ADR-012) and will replace
-/// the state lookup with `wiring::port::<dyn ProfileRepo>(&app)`.
+/// locked (ADR-009). The shared helper returns exactly this.
 fn store_not_mounted() -> AppError {
     AppError::locked("errors.store.locked")
 }
