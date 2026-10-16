@@ -2,6 +2,9 @@
 # per line without a merge conflict (backlog ownership convention 3, AD-3).
 src-tauri/src/ipc/command_list.rs merge=union
 
+# Port registration list: parallel slices append one mount_port line (ADR-012).
+src-tauri/src/wiring/port_list.rs merge=union
+
 # Port/repo module declaration lists: parallel slices append one line per port,
 # so keep them union-merged too (S1.3p, AD-3).
 src-tauri/crates/boba-app/src/ports/mod.rs merge=union
