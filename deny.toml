@@ -61,6 +61,29 @@ ignore = [
     # Revisit: hayagriva/typst drops serde_yaml (re-assessed by every E7 slice, see the standing
     # guard in docs/product/backlog.md and IB-2).
     { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml via serde_yaml/hayagriva/typst-library; unmaintained, no safe upgrade, YAML path unreachable from our templates" },
+    # --- CH9 (2026-10-16): zip 4.6.1 advisories, ignore scoped to zip (Diego standing OK, recommended). ---
+    # zip 4.6.1 [vuln] RUSTSEC-2026-0367 (extraction preserves SUID/SGID/sticky bits),
+    # RUSTSEC-2026-0368 (ZipArchive::extract creates symlinks whose target escapes the destination),
+    # RUSTSEC-2026-0369 (ZipStreamReader::extract applies Unix permissions through symlinks).
+    # All three need an attacker-controlled archive to be extracted by the process.
+    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (bundle extraction), Windows target only.
+    # Unreachable: the updater is unused until S10.5 (no update checks in the MVP, NFR-1 opt-in), and
+    # zip only runs when a downloaded bundle is extracted; `cargo tree -i zip` resolves nothing on
+    # macOS/Linux because the dependency is cfg(target_os = "windows").
+    # No fixed release: the advisories ask for zip >= 9.0.0, but every tauri-plugin-updater release
+    # (2.13.1, 2.14.0, 3.0.0-alpha.3) requires zip ^4, and zip 9.0.0..9.0.2 are yanked (9.0.3/9.0.4
+    # exist but nothing allows them).
+    # Scoping: cargo-deny 0.20.2 takes only `id` and `reason` here (a `crate` key is rejected:
+    # "expected: [id, reason]"), so the ignore is written by id. It is still zip-only in effect:
+    # each of these ids is `package = "zip"` in the RustSec DB (verified in the fetched advisory-db,
+    # crates/zip/RUSTSEC-2026-036{7,8,9}.md), and an advisory id belongs to exactly one package, so
+    # no other crate can be masked by it.
+    # Revisit at S10.5: either tauri-plugin-updater allows zip >= 9, or S10.5 confirms the update
+    # bundle's signature is verified BEFORE extraction (minisign), which is the guard the
+    # yanked-crate ignore below also rests on.
+    { id = "RUSTSEC-2026-0367", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; SUID/SGID preservation needs an extracted attacker bundle" },
+    { id = "RUSTSEC-2026-0368", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; symlink escape needs an extracted attacker bundle" },
+    { id = "RUSTSEC-2026-0369", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; permission-through-symlink needs an extracted attacker bundle" },
     # zip 4.6.1 — yanked crate, scoped ignore (Diego 2026-10-15). Crate spec, not an advisory id:
     # the `yanked` check stays `deny` for every other crate.
     # Every zip 4.x release (4.0.0 .. 4.6.1) is yanked, so `cargo update -p zip` cannot resolve at all
