@@ -348,20 +348,30 @@ pub const MAX_FACT_IDS: usize = 32;
 
 /// Store the answers one `answer_questions` run drafted (S7.8, FR-80).
 ///
-/// Every answer lands as an unapproved, untrusted row (AC3) — the run's words
-/// for a salary or eligibility question are dropped in favour of the
-/// Preferences default, and nothing is written at all when the payload, the
-/// application or the facts it names cannot be used.
+/// `application_id` is the application the **core** started this run for; the
+/// payload's own `app_id` is a checked echo of it, so a run that names another
+/// application is refused whole — a run may not write into someone else's
+/// application, however its arguments are written. Nothing is written at all
+/// when the payload, the application or the facts it names cannot be used, and
+/// every answer that lands lands as an unapproved, untrusted row (AC3) under
+/// the core's application id.
 pub fn save_answers(
     repo: &dyn ApplyRepo,
+    application_id: &str,
     args: &serde_json::Value,
     defaults: &Defaults,
     facts: &[String],
     created_at: &str,
 ) -> Result<Drafted, AnswersError> {
     let raw = parse_payload(args)?;
-    if repo.application_get(&raw.application_id)?.is_none() {
-        return Err(AnswersError::UnknownApplication(raw.application_id));
+    if raw.application_id != application_id {
+        return Err(malformed(format!(
+            "`app_id` names `{}`, but this run answers for `{application_id}`",
+            raw.application_id
+        )));
+    }
+    if repo.application_get(application_id)?.is_none() {
+        return Err(AnswersError::UnknownApplication(application_id.to_string()));
     }
 
     let mut answers = Vec::with_capacity(raw.answers.len());
@@ -371,7 +381,7 @@ pub fn save_answers(
         let id = new_answer_id();
         repo.answer_bank_insert(&NewBankAnswer {
             id: id.clone(),
-            application_id: raw.application_id.clone(),
+            application_id: application_id.to_string(),
             question: drafted.question.clone(),
             question_key: question_key(&drafted.question),
             answer: drafted.answer.clone(),
@@ -752,6 +762,7 @@ mod tests {
         let bank = repo("app_1");
         let drafted = save_answers(
             &bank,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -806,6 +817,7 @@ mod tests {
         let plain = repo("app_2");
         save_answers(
             &plain,
+            "app_2",
             &json!({
                 "app_id": "app_2",
                 "answers": [{
@@ -874,6 +886,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -929,6 +942,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -957,6 +971,7 @@ mod tests {
         let repo = repo("app_1");
         let refused = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -972,6 +987,7 @@ mod tests {
 
         let invented = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{
@@ -991,6 +1007,7 @@ mod tests {
         // And a grounded answer is stored, one row per question, as a draft.
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{
@@ -1049,7 +1066,7 @@ mod tests {
         ];
         for (index, args) in cases.iter().enumerate() {
             let repo = repo("app_1");
-            let error = save_answers(&repo, args, &defaults(), &facts(), "t")
+            let error = save_answers(&repo, "app_1", args, &defaults(), &facts(), "t")
                 .expect_err(&format!("case {index} must be refused: {args}"));
             assert!(
                 error
@@ -1065,6 +1082,7 @@ mod tests {
         let repo = repo("app_1");
         let missing = save_answers(
             &repo,
+            "app_1",
             &json!({"app_id": "app_1", "answers": [{"question": "Notice?"}]}),
             &defaults(),
             &facts(),
@@ -1082,6 +1100,7 @@ mod tests {
         let long_question = "q".repeat(MAX_QUESTION_TEXT + 1);
         let error = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{"question": long_question, "answer": "x", "fact_ids": ["fact_1"]}],
@@ -1096,6 +1115,7 @@ mod tests {
         let long_answer = "a".repeat(MAX_ANSWER_TEXT + 1);
         let error = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{"question": "Notice?", "answer": long_answer, "fact_ids": ["fact_1"]}],
@@ -1113,6 +1133,7 @@ mod tests {
         assert!(
             save_answers(
                 &repo,
+                "app_1",
                 &json!({
                     "app_id": "app_1",
                     "answers": [{"question": "Notice?", "answer": accented, "fact_ids": ["fact_1"]}],
@@ -1136,6 +1157,7 @@ mod tests {
             .collect();
         let error = save_answers(
             &repo,
+            "app_1",
             &json!({"app_id": "app_1", "answers": many}),
             &defaults(),
             &facts(),
@@ -1152,6 +1174,7 @@ mod tests {
         let repo = FakeApplyRepo::default();
         let error = save_answers(
             &repo,
+            "app_gone",
             &json!({
                 "app_id": "app_gone",
                 "answers": [{
@@ -1179,6 +1202,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{
@@ -1228,6 +1252,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{
@@ -1283,6 +1308,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -1334,6 +1360,7 @@ mod tests {
         let repo = repo("app_1");
         let drafted = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [
@@ -1380,6 +1407,58 @@ mod tests {
         );
     }
 
+    /// The application is the **core's** to name, not the payload's: a run
+    /// started for one application cannot write answers into another, whatever
+    /// its arguments say (the orquestador's app_id-binding rule).
+    #[test]
+    fn a_payload_naming_another_application_is_refused() {
+        let bank = repo("app_1");
+        let error = save_answers(
+            &bank,
+            "app_1",
+            &json!({
+                "app_id": "app_2",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+            &defaults(),
+            &facts(),
+            "t",
+        )
+        .expect_err("a run may not answer for another application");
+        assert!(matches!(error, AnswersError::Payload(_)), "{error}");
+        assert!(why(&error).contains("app_2"), "{error}");
+        assert!(
+            bank.answers().is_empty(),
+            "nothing is written for either application"
+        );
+
+        // And an application nobody holds is still refused.
+        let error = save_answers(
+            &bank,
+            "app_gone",
+            &json!({
+                "app_id": "app_gone",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+            &defaults(),
+            &facts(),
+            "t",
+        )
+        .expect_err("no application, no answer");
+        assert!(
+            matches!(&error, AnswersError::UnknownApplication(app) if app == "app_gone"),
+            "{error}"
+        );
+    }
+
     /// A store failure reaches the caller instead of looking like a stored
     /// answer.
     #[test]
@@ -1388,6 +1467,7 @@ mod tests {
         repo.fail = true;
         let error = save_answers(
             &repo,
+            "app_1",
             &json!({
                 "app_id": "app_1",
                 "answers": [{

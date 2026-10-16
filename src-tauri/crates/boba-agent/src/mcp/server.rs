@@ -48,14 +48,24 @@ impl Default for Limits {
 /// The data a run's tools read or write. The composition root implements this
 /// on top of the repos; it never sees the token or the subset policy.
 pub trait ToolHandler: Send + Sync {
-    /// Serve one tool call. `task` is the run's task id and `tool` a name the
-    /// catalog already allows for that task.
+    /// Serve one tool call. `task` is the run's task id, `application_id` the
+    /// application the run's own input names (`None` for a task that is not
+    /// about one), and `tool` a name the catalog already allows for that task.
     ///
     /// Contract: return core-owned data only. Third-party text (postings, mail
     /// bodies, company pages) belongs to a tool the catalog marks `untrusted`,
     /// which the server wraps in the envelope itself (AD-7); a handler that
-    /// leaks untrusted text through an unmarked tool would bypass that.
-    fn call(&self, task: &str, tool: &str, args: &Value) -> Result<Value, String>;
+    /// leaks untrusted text through an unmarked tool would bypass that. A write
+    /// belongs to `application_id` and to no other: the server already refuses
+    /// a mismatched `app_id` ([`bound_to_run`]), and a handler that stores one
+    /// anyway has two places to be wrong.
+    fn call(
+        &self,
+        task: &str,
+        application_id: Option<&str>,
+        tool: &str,
+        args: &Value,
+    ) -> Result<Value, String>;
 }
 
 /// One run's live MCP endpoint. Dropping it revokes the run and stops the
@@ -67,6 +77,9 @@ pub struct McpEndpoint {
 
 struct RunState {
     task: String,
+    /// The application the run's own input names, when it names one: the only
+    /// application this run may write to ([`bound_to_run`]).
+    application_id: Option<String>,
     token: String,
     /// The run's own input text: what `get_task_input` returns. It is the run's
     /// data, not the app's, so the endpoint serves it without reaching the
@@ -111,6 +124,7 @@ impl McpEndpoint {
         listener.set_nonblocking(wire::ListenerNonblockingMode::Accept)?;
         let state = Arc::new(RunState {
             task: task.to_string(),
+            application_id: application_of(input),
             token: token.to_string(),
             input: input.to_string(),
             revoked: AtomicBool::new(false),
@@ -344,6 +358,13 @@ fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
     // and its write. Without that, a write would reach the handler in the
     // window after the core had already refused the run's output.
     if spec.kind.is_write() {
+        // Authorization before the schema (the orquestador's app_id-binding
+        // rule): a run may only write to the application its own input names,
+        // so a run drafting for one application cannot answer for another. The
+        // refusal is the run's to fix and spends no output retry.
+        if let Err(refusal) = bound_to_run(state, &args) {
+            return wire::error(id, wire::CODE_TOOL_DENIED, &refusal);
+        }
         let mut attempts = state
             .outputs
             .lock()
@@ -369,7 +390,10 @@ fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
 /// Hand one allowed call to the handler and shape its answer, wrapping untrusted
 /// results in the envelope (AD-7).
 fn serve(state: &RunState, spec: &tool::ToolSpec, id: Value, name: &str, args: &Value) -> Value {
-    match state.handler.call(&state.task, name, args) {
+    match state
+        .handler
+        .call(&state.task, state.application_id.as_deref(), name, args)
+    {
         Ok(value) => {
             let payload = if spec.untrusted {
                 wire::envelope(value)
@@ -397,6 +421,42 @@ fn tools_json(task: &str) -> Vec<Value> {
         .into_iter()
         .map(tool::list_entry)
         .collect()
+}
+
+/// The application a run's own input names, when it names one.
+///
+/// The input is the core's own payload (`{"app_id": "app_…", …}`), so the
+/// application in it is the one the run may speak for, and the one the handler
+/// is told about. An input the core did not compose as JSON, or one without an
+/// `app_id`, binds nothing.
+fn application_of(input: &str) -> Option<String> {
+    serde_json::from_str::<Value>(input).ok().and_then(|input| {
+        input
+            .get("app_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    })
+}
+
+/// Whether a write's `app_id` is the application this run was started for.
+///
+/// With the application read from the run's own input, a run drafting, reviewing
+/// or answering for one application can be neither confused nor talked into
+/// writing into another, however its arguments are written. Fail closed — a
+/// write that names an application its input does not bind, or a run whose input
+/// is not the core's payload at all, is refused.
+///
+/// A write tool whose arguments carry no `app_id` (`propose_posting_features`,
+/// `save_score_narration`) is not about one application, and is left alone.
+fn bound_to_run(state: &RunState, args: &Value) -> Result<(), String> {
+    let Some(asked) = args.get("app_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    match state.application_id.as_deref() {
+        Some(own) if own == asked => Ok(()),
+        Some(_) => Err("this run was started for another application".to_string()),
+        None => Err("this run's input names no application to write to".to_string()),
+    }
 }
 
 fn reply(core: &mut BufReader<wire::Stream>, answer: Value) -> io::Result<()> {
@@ -428,7 +488,13 @@ mod tests {
     }
 
     impl ToolHandler for Recorder {
-        fn call(&self, task: &str, tool: &str, args: &Value) -> Result<Value, String> {
+        fn call(
+            &self,
+            task: &str,
+            _application_id: Option<&str>,
+            tool: &str,
+            args: &Value,
+        ) -> Result<Value, String> {
             self.seen
                 .lock()
                 .unwrap()
@@ -529,6 +595,116 @@ mod tests {
         )
         .expect("start the endpoint");
         (root, endpoint, recorder)
+    }
+
+    /// An endpoint for a run whose input is the core's own JSON, as an
+    /// application-scoped task is started with.
+    fn start_endpoint_answering(
+        token: &str,
+        task: &str,
+        input: &str,
+    ) -> (TempRoot, McpEndpoint, Arc<Recorder>) {
+        let root = TempRoot::new();
+        let recorder = Arc::new(Recorder::default());
+        let endpoint = McpEndpoint::start(
+            &root.endpoint("01RUN"),
+            task,
+            token,
+            input,
+            None,
+            Arc::clone(&recorder) as Arc<dyn ToolHandler>,
+            Limits::default(),
+        )
+        .expect("start the endpoint");
+        (root, endpoint, recorder)
+    }
+
+    /// A run may only write to the application its own input names: a run
+    /// started for one application cannot answer for another, however its
+    /// arguments are written (the orquestador's app_id-binding rule).
+    #[test]
+    fn a_run_cannot_write_answers_into_another_application() {
+        let (root, _endpoint, recorder) = start_endpoint_answering(
+            "t",
+            tool::ANSWER_QUESTIONS,
+            r#"{"app_id":"app_1","questions":[]}"#,
+        );
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        let elsewhere = client.call_tool(
+            "save_answers",
+            json!({
+                "app_id": "app_2",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+        );
+        assert_eq!(
+            elsewhere["error"]["code"],
+            wire::CODE_TOOL_DENIED,
+            "{elsewhere}"
+        );
+        assert!(
+            recorder.calls().is_empty(),
+            "the handler never saw the call: {:?}",
+            recorder.calls()
+        );
+
+        // The run's own application is served as usual.
+        let own = client.call_tool(
+            "save_answers",
+            json!({
+                "app_id": "app_1",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+        );
+        assert!(own["result"].is_object(), "{own}");
+        assert_eq!(recorder.calls().len(), 1);
+    }
+
+    /// Fail closed: a write that names an application is only served when the
+    /// run's own input names the same one. A run whose input names none — or is
+    /// not the core's JSON at all — cannot write to an application.
+    #[test]
+    fn a_write_no_run_input_can_bind_is_refused() {
+        // The input is a plain prompt, not the core's payload: nothing binds.
+        let (root, _endpoint, recorder) = start_endpoint("t", tool::ANSWER_QUESTIONS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+        let unbound = client.call_tool(
+            "save_answers",
+            json!({
+                "app_id": "app_1",
+                "answers": [{
+                    "question": "What is your notice period?",
+                    "answer": "Four weeks.",
+                    "fact_ids": ["fact_1"]
+                }],
+            }),
+        );
+        assert_eq!(
+            unbound["error"]["code"],
+            wire::CODE_TOOL_DENIED,
+            "{unbound}"
+        );
+        assert!(recorder.calls().is_empty());
+
+        // A write tool whose arguments carry no application is untouched by the
+        // rule: the postings work is not about one.
+        let (root, _endpoint, recorder) = start_endpoint("t", tool::EXTRACT_POSTINGS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+        let features = client.call_tool(
+            "propose_posting_features",
+            json!({"id": "pst_1", "features": {}}),
+        );
+        assert!(features["result"].is_object(), "{features}");
+        assert_eq!(recorder.calls().len(), 1);
     }
 
     #[test]
@@ -873,7 +1049,13 @@ mod tests {
     }
 
     impl ToolHandler for BlockingHandler {
-        fn call(&self, _task: &str, tool: &str, _args: &Value) -> Result<Value, String> {
+        fn call(
+            &self,
+            _task: &str,
+            _application_id: Option<&str>,
+            tool: &str,
+            _args: &Value,
+        ) -> Result<Value, String> {
             *self.entered.lock().unwrap() = true;
             self.entered_cv.notify_all();
             let mut release = self.release.lock().unwrap();

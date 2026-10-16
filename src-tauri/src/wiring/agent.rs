@@ -359,7 +359,13 @@ pub struct RepoTools {
 }
 
 impl ToolHandler for RepoTools {
-    fn call(&self, _task: &str, tool_name: &str, args: &Value) -> Result<Value, String> {
+    fn call(
+        &self,
+        _task: &str,
+        application_id: Option<&str>,
+        tool_name: &str,
+        args: &Value,
+    ) -> Result<Value, String> {
         match tool::find(tool_name) {
             // Defence in depth: the endpoint already refuses unknown names.
             None => Err(format!("no tool `{tool_name}`")),
@@ -371,8 +377,11 @@ impl ToolHandler for RepoTools {
             // S7.4: the reviewer's critique is stored on the drafts it judged.
             Some(spec) if spec.name == "save_review" => save_review(&self.store, args),
             // S7.8: the screening answers a run drafted, stored as drafts for
-            // the user to approve.
-            Some(spec) if spec.name == "save_answers" => save_answers(&self.store, args),
+            // the user to approve — for the application the run was started
+            // for, whichever one its arguments name.
+            Some(spec) if spec.name == "save_answers" => {
+                save_answers(&self.store, application_id, args)
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -425,18 +434,29 @@ fn save_review(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
 /// `save_answers` (S7.8, FR-80): store the screening answers one run drafted,
 /// as drafts the user approves.
 ///
-/// The defaults a pay or eligibility question is answered with are the user's
-/// own — the Salary Floor from Preferences, the eligibility the Profile declares
-/// — and the facts an answer may stand on are the profile's **current** ones, so
-/// a run can neither invent a value for those questions nor ground an answer in
-/// a fact the profile does not have.
-fn save_answers(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
+/// `application_id` is the application the **run** was started for, and the
+/// answers are stored under it: a payload naming another application is refused
+/// here as well as at the endpoint, so neither half of that boundary has to
+/// trust the other. The defaults a pay or eligibility question is answered with
+/// are the user's own — the Salary Floor from Preferences, the eligibility the
+/// Profile declares — and the facts an answer may stand on are the profile's
+/// **current** ones, so a run can neither invent a value for those questions nor
+/// ground an answer in a fact the profile does not have.
+fn save_answers(
+    store: &Arc<Store>,
+    application_id: Option<&str>,
+    args: &Value,
+) -> Result<Value, String> {
+    let Some(application_id) = application_id else {
+        return Err("this run was started for no application".to_string());
+    };
     let facts = store.facts_current().map_err(|error| error.to_string())?;
     let fact_ids: Vec<String> = facts.iter().map(|fact| fact.id.clone()).collect();
     let defaults = boba_app::answers::Defaults::from_user_settings(&facts, salary_floor(store)?);
 
     let drafted = boba_app::answers::save_answers(
         store.as_ref(),
+        application_id,
         args,
         &defaults,
         &fact_ids,
@@ -653,7 +673,7 @@ mod tests {
             .iter()
             .filter(|spec| spec.name != "save_review" && spec.name != "save_answers")
         {
-            let answer = tools.call("extract_postings", spec.name, &json!({}));
+            let answer = tools.call("extract_postings", None, spec.name, &json!({}));
             // Never "unknown tool": every catalog entry has a real answer.
             let message = answer.expect_err("no tool has data yet");
             assert!(
@@ -679,7 +699,9 @@ mod tests {
         drafts(&store, "app_1");
 
         let answer = repo_tools_over(Arc::clone(&store))
-            .call("review_application", "save_review", &json!({
+            .call("review_application",
+                Some("app_1"),
+                "save_review", &json!({
                 "app_id": "app_1",
                 "findings": [{"severity": "high", "target": "cv", "message": "unsupported claim"}],
             }))
@@ -706,6 +728,7 @@ mod tests {
         let unusable = tools
             .call(
                 "review_application",
+                Some("app_1"),
                 "save_review",
                 &json!({
                     "app_id": "app_1",
@@ -718,6 +741,7 @@ mod tests {
         let nothing_to_review = tools
             .call(
                 "review_application",
+                Some("app_1"),
                 "save_review",
                 &json!({
                     "app_id": "app_unknown",
@@ -883,6 +907,7 @@ mod tests {
         let answer = repo_tools_over(Arc::clone(&store))
             .call(
                 "answer_questions",
+                Some("app_1"),
                 "save_answers",
                 &json!({
                     "app_id": "app_1",
@@ -952,6 +977,7 @@ mod tests {
         repo_tools_over(Arc::clone(&store))
             .call(
                 "answer_questions",
+                Some("app_1"),
                 "save_answers",
                 &json!({
                     "app_id": "app_1",
@@ -982,8 +1008,8 @@ mod tests {
         let tools = repo_tools_over(Arc::clone(&store));
 
         let ungrounded = tools
-            .call(
-                "answer_questions",
+            .call("answer_questions",
+                Some("app_1"),
                 "save_answers",
                 &json!({
                     "app_id": "app_1",
@@ -996,6 +1022,7 @@ mod tests {
         let invented = tools
             .call(
                 "answer_questions",
+                Some("app_1"),
                 "save_answers",
                 &json!({
                     "app_id": "app_1",
@@ -1009,9 +1036,31 @@ mod tests {
             .expect_err("an unknown fact is refused");
         assert!(invented.contains("fact_9"), "{invented}");
 
+        // A payload naming another application is refused at the handler too,
+        // not only at the endpoint: the run answers for the application it was
+        // started for, and for no other.
+        let elsewhere = tools
+            .call(
+                "answer_questions",
+                Some("app_1"),
+                "save_answers",
+                &json!({
+                    "app_id": "app_2",
+                    "answers": [{
+                        "question": "What is your notice period?",
+                        "answer": "Four weeks.",
+                        "fact_ids": ["fact_1"]
+                    }],
+                }),
+            )
+            .expect_err("a run may not answer for another application");
+        assert!(elsewhere.contains("app_2"), "{elsewhere}");
+
+        // And a run bound to an application nobody holds is refused as such.
         let unknown = tools
             .call(
                 "answer_questions",
+                Some("app_gone"),
                 "save_answers",
                 &json!({
                     "app_id": "app_gone",
@@ -1024,6 +1073,24 @@ mod tests {
             )
             .expect_err("no application, no answer");
         assert!(unknown.contains("unknown application"), "{unknown}");
+
+        // A run the core started for no application at all cannot answer.
+        let unbound = tools
+            .call(
+                "answer_questions",
+                None,
+                "save_answers",
+                &json!({
+                    "app_id": "app_1",
+                    "answers": [{
+                        "question": "What is your notice period?",
+                        "answer": "Four weeks.",
+                        "fact_ids": ["fact_1"]
+                    }],
+                }),
+            )
+            .expect_err("no run application, no answer");
+        assert!(unbound.contains("no application"), "{unbound}");
 
         assert!(
             stored_answers(&store).is_empty(),
@@ -1068,7 +1135,9 @@ mod tests {
                 "{name} must not be in the catalog"
             );
             assert!(
-                tools.call("extract_postings", name, &json!({})).is_err(),
+                tools
+                    .call("extract_postings", None, name, &json!({}))
+                    .is_err(),
                 "{name} must be refused"
             );
         }
@@ -1079,7 +1148,7 @@ mod tests {
     #[test]
     fn no_handler_answer_pre_wraps_untrusted_content() {
         for spec in tool::TOOLS {
-            let answer = repo_tools("wrap").call("extract_postings", spec.name, &json!({}));
+            let answer = repo_tools("wrap").call("extract_postings", None, spec.name, &json!({}));
             if let Ok(value) = answer {
                 assert!(
                     value.get("untrusted_content").is_none(),
