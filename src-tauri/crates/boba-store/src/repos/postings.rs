@@ -14,6 +14,10 @@ use serde_json::Value;
 use boba_app::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use boba_domain::dedup::{DedupProbe, description_simhash, job_key_of, probe_matches};
 use boba_domain::posting::{ApplyHints, Money, Offer, PayPeriod, Provenance, WorkMode};
+use boba_domain::posting_features::{
+    Claim, FeatureKind, FeatureSource, PendingPosting, PostingFeatures, confidence_parse,
+    confidence_text, evidence_columns, evidence_from_columns,
+};
 
 use crate::db::{Store, StoreError};
 
@@ -231,6 +235,185 @@ fn map_err(error: StoreError) -> IngestionRepoError {
     IngestionRepoError::Store(error.to_string())
 }
 
+// --- features (S6.2, FR-55/FR-56 inputs, FR-61, AD-5) -------------------------
+
+const FEATURES_SELECT: &str = "SELECT kind, value, source, confidence, evidence_kind, \
+     evidence_text, evidence_start, evidence_end FROM posting_features \
+     WHERE posting_id = ?1 AND profile_version = ?2";
+
+/// The features of one (posting, profile version), `None` when the version has
+/// never been read (the `posting_features_run` marker is what tells the two
+/// apart — an extracted-but-empty set is a real answer).
+pub fn features(
+    conn: &Connection,
+    posting_id: &str,
+    profile_version: u32,
+) -> Result<Option<PostingFeatures>, StoreError> {
+    let marked: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM posting_features_run WHERE posting_id = ?1 AND profile_version = ?2",
+            params![posting_id, profile_version],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if marked.is_none() {
+        return Ok(None);
+    }
+
+    let mut stmt = conn.prepare(FEATURES_SELECT)?;
+    let rows = stmt.query_map(params![posting_id, profile_version], |r| {
+        let kind: String = r.get(0)?;
+        let source: String = r.get(2)?;
+        let confidence: String = r.get(3)?;
+        let evidence_kind: String = r.get(4)?;
+        let evidence_text: String = r.get(5)?;
+        let evidence_start: Option<i64> = r.get(6)?;
+        let evidence_end: Option<i64> = r.get(7)?;
+        Ok((
+            kind,
+            source,
+            confidence,
+            evidence_kind,
+            evidence_text,
+            evidence_start,
+            evidence_end,
+            r.get::<_, String>(1)?,
+        ))
+    })?;
+
+    let mut set = PostingFeatures::new(posting_id.to_string(), profile_version);
+    for row in rows {
+        let (kind, source, confidence, evidence_kind, evidence_text, start, end, value) = row?;
+        let claim = Claim {
+            kind: parse(FeatureKind::parse(&kind), kind)?,
+            value,
+            source: parse(FeatureSource::parse(&source), source)?,
+            confidence: parse(confidence_parse(&confidence), confidence)?,
+            evidence: parse(
+                evidence_from_columns(
+                    &evidence_kind,
+                    evidence_text,
+                    start.map(|value| value as usize),
+                    end.map(|value| value as usize),
+                ),
+                evidence_kind,
+            )?,
+        };
+        set.claims.push(claim);
+    }
+    // The rows come back in the store's text order; the set's own order is what
+    // a re-run produces, so a read-back equals a fresh extraction (FR-61).
+    set.sort();
+    Ok(Some(set))
+}
+
+/// Upsert one feature set: the claims, the cache marker and — for the
+/// deterministic pass — the posting's `requirements_json`, in one transaction.
+///
+/// `agent_done` is never cleared here: the deterministic pass runs first, and a
+/// later pass must not undo it.
+fn save_features(
+    conn: &Connection,
+    features: &PostingFeatures,
+    extracted_at: &str,
+    agent_done: i64,
+) -> Result<(), StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO posting_features_run (posting_id, profile_version, agent_done, extracted_at) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(posting_id, profile_version) DO UPDATE SET \
+             extracted_at = excluded.extracted_at, \
+             agent_done = max(posting_features_run.agent_done, excluded.agent_done)",
+        params![
+            features.posting_id,
+            features.profile_version,
+            agent_done,
+            extracted_at
+        ],
+    )?;
+    for claim in &features.claims {
+        let (evidence_kind, evidence_text, start, end) = evidence_columns(&claim.evidence);
+        tx.execute(
+            "INSERT INTO posting_features (posting_id, profile_version, kind, value, source, \
+             confidence, evidence_kind, evidence_text, evidence_start, evidence_end, \
+             untrusted_origin) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1) \
+             ON CONFLICT(posting_id, profile_version, kind, value, source) DO UPDATE SET \
+                 confidence = excluded.confidence, \
+                 evidence_kind = excluded.evidence_kind, \
+                 evidence_text = excluded.evidence_text, \
+                 evidence_start = excluded.evidence_start, \
+                 evidence_end = excluded.evidence_end",
+            params![
+                features.posting_id,
+                features.profile_version,
+                claim.kind.as_str(),
+                claim.value,
+                claim.source.as_str(),
+                confidence_text(claim.confidence),
+                evidence_kind,
+                evidence_text,
+                start.map(|value| value as i64),
+                end.map(|value| value as i64),
+            ],
+        )?;
+    }
+    if agent_done == 0 {
+        // S4.2's `requirements_json` is this slice's to fill (0008): the skills
+        // the posting asks for, as written.
+        tx.execute(
+            "UPDATE posting SET requirements_json = ?2 WHERE id = ?1",
+            params![features.posting_id, json_array(&features.skill_values())],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Whether an agent pass has been served for one (posting, profile version).
+pub fn features_agent_done(
+    conn: &Connection,
+    posting_id: &str,
+    profile_version: u32,
+) -> Result<bool, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT agent_done FROM posting_features_run \
+             WHERE posting_id = ?1 AND profile_version = ?2",
+            params![posting_id, profile_version],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .is_some_and(|done| done == 1))
+}
+
+/// Postings still waiting for an agent pass at this Profile version, newest
+/// first: no marker row, or one that says no run has been served.
+pub fn features_pending(
+    conn: &Connection,
+    profile_version: u32,
+    limit: usize,
+) -> Result<Vec<PendingPosting>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.title, p.company, p.lang, p.description_text FROM posting p \
+         LEFT JOIN posting_features_run r \
+             ON r.posting_id = p.id AND r.profile_version = ?1 \
+         WHERE coalesce(r.agent_done, 0) = 0 \
+         ORDER BY p.first_seen DESC, p.id LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![profile_version, limit as i64], |r| {
+        Ok(PendingPosting {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            company: r.get(2)?,
+            lang: r.get(3)?,
+            text: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 impl IngestionRepo for Store {
     fn insert_offer(
         &self,
@@ -272,12 +455,64 @@ impl IngestionRepo for Store {
         self.execute(move |conn| merge_provenance(conn, &posting_id, &provenance, &now))
             .map_err(map_err)
     }
+
+    fn features(
+        &self,
+        posting_id: &str,
+        profile_version: u32,
+    ) -> Result<Option<PostingFeatures>, IngestionRepoError> {
+        let posting_id = posting_id.to_string();
+        self.read(move |conn| features(conn, &posting_id, profile_version))
+            .map_err(map_err)
+    }
+
+    fn features_agent_done(
+        &self,
+        posting_id: &str,
+        profile_version: u32,
+    ) -> Result<bool, IngestionRepoError> {
+        let posting_id = posting_id.to_string();
+        self.read(move |conn| features_agent_done(conn, &posting_id, profile_version))
+            .map_err(map_err)
+    }
+
+    fn save_deterministic_features(
+        &self,
+        features: &PostingFeatures,
+        extracted_at: &str,
+    ) -> Result<(), IngestionRepoError> {
+        let features = features.clone();
+        let extracted_at = extracted_at.to_string();
+        self.execute(move |conn| save_features(conn, &features, &extracted_at, 0))
+            .map_err(map_err)
+    }
+
+    fn save_agent_features(
+        &self,
+        features: &PostingFeatures,
+        extracted_at: &str,
+    ) -> Result<(), IngestionRepoError> {
+        let features = features.clone();
+        let extracted_at = extracted_at.to_string();
+        self.execute(move |conn| save_features(conn, &features, &extracted_at, 1))
+            .map_err(map_err)
+    }
+
+    fn features_pending(
+        &self,
+        profile_version: u32,
+        limit: usize,
+    ) -> Result<Vec<PendingPosting>, IngestionRepoError> {
+        self.read(move |conn| features_pending(conn, profile_version, limit))
+            .map_err(map_err)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::migrate;
+    use boba_domain::scoring::gates::{Confidence, Evidence, QuotedSpan};
 
     fn connection() -> Connection {
         let mut conn = Connection::open_in_memory().expect("in-memory sqlite");
@@ -564,5 +799,269 @@ mod tests {
             get_offer(&conn, "pst_1").unwrap().is_none(),
             "nothing half-written"
         );
+    }
+
+    // --- features (S6.2) ---
+
+    fn stored(id: &str) -> (Connection, Offer) {
+        let conn = connection();
+        let stored = offer(id);
+        insert_offer(&conn, &stored, &provenance(id, "remotive", "abc-1")).unwrap();
+        (conn, stored)
+    }
+
+    fn quoted(kind: FeatureKind, value: &str, span: &str, start: usize) -> Claim {
+        Claim {
+            kind,
+            value: value.into(),
+            source: FeatureSource::Det,
+            confidence: Confidence::High,
+            evidence: Evidence::Quoted(QuotedSpan {
+                text: span.into(),
+                start,
+                end: start + span.len(),
+            }),
+        }
+    }
+
+    fn feature_set(id: &str, profile_version: u32, claims: Vec<Claim>) -> PostingFeatures {
+        let mut set = PostingFeatures::new(id, profile_version);
+        set.extend(claims);
+        set
+    }
+
+    #[test]
+    fn migration_creates_the_feature_tables() {
+        let conn = connection();
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN \
+                 ('posting_features', 'posting_features_run')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn features_round_trip_and_fill_the_postings_requirements() {
+        let (conn, _) = stored("pst_1");
+        let set = feature_set(
+            "pst_1",
+            4,
+            vec![
+                quoted(FeatureKind::Skill, "Rust", "Rust services", 4),
+                quoted(FeatureKind::Skill, "SQL", "SQL and Rust", 0),
+                Claim {
+                    kind: FeatureKind::Compensation,
+                    value: "USD 5000000 year".into(),
+                    source: FeatureSource::Det,
+                    confidence: Confidence::High,
+                    evidence: Evidence::Field("money".into()),
+                },
+            ],
+        );
+        save_features(&conn, &set, "2026-10-16T00:00:00Z", 0).unwrap();
+
+        let read_back = features(&conn, "pst_1", 4).unwrap().expect("cached");
+        assert_eq!(
+            read_back, set,
+            "a read-back equals what was written (FR-61)"
+        );
+
+        let requirements: String = conn
+            .query_row(
+                "SELECT requirements_json FROM posting WHERE id = 'pst_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(requirements, r#"["Rust","SQL"]"#);
+    }
+
+    #[test]
+    fn an_empty_deterministic_set_is_cached_and_still_awaits_the_agent() {
+        let (conn, _) = stored("pst_1");
+        save_features(&conn, &PostingFeatures::new("pst_1", 1), "t", 0).unwrap();
+
+        assert_eq!(
+            features(&conn, "pst_1", 1).unwrap(),
+            Some(PostingFeatures::new("pst_1", 1)),
+            "an empty set is a real answer, not a cache miss"
+        );
+        assert_eq!(
+            features_pending(&conn, 1, 10).unwrap().len(),
+            1,
+            "a posting the lexicon found nothing in still deserves the agent's look"
+        );
+    }
+
+    #[test]
+    fn the_cache_is_per_profile_version() {
+        let (conn, _) = stored("pst_1");
+        let set = feature_set(
+            "pst_1",
+            1,
+            vec![quoted(FeatureKind::Skill, "Rust", "Rust", 0)],
+        );
+        save_features(&conn, &set, "t", 0).unwrap();
+
+        assert!(features(&conn, "pst_1", 2).unwrap().is_none());
+        assert_eq!(features_pending(&conn, 2, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn re_running_an_extraction_upserts_instead_of_duplicating() {
+        let (conn, _) = stored("pst_1");
+        let set = feature_set(
+            "pst_1",
+            1,
+            vec![quoted(FeatureKind::Skill, "Rust", "Rust", 0)],
+        );
+        save_features(&conn, &set, "2026-10-16T00:00:00Z", 0).unwrap();
+        save_features(&conn, &set, "2026-10-17T00:00:00Z", 0).unwrap();
+
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM posting_features", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "one claim per identity");
+        assert_eq!(features(&conn, "pst_1", 1).unwrap(), Some(set));
+    }
+
+    #[test]
+    fn an_agent_pass_adds_its_claims_and_marks_the_run_done() {
+        let (conn, _) = stored("pst_1");
+        save_features(
+            &conn,
+            &feature_set(
+                "pst_1",
+                1,
+                vec![quoted(FeatureKind::Skill, "Rust", "Rust", 0)],
+            ),
+            "t",
+            0,
+        )
+        .unwrap();
+        assert_eq!(features_pending(&conn, 1, 10).unwrap().len(), 1);
+
+        let mut merged = feature_set(
+            "pst_1",
+            1,
+            vec![
+                quoted(FeatureKind::Skill, "Rust", "Rust", 0),
+                Claim {
+                    kind: FeatureKind::Note,
+                    value: "remote within the EU".into(),
+                    source: FeatureSource::Llm,
+                    confidence: Confidence::Medium,
+                    evidence: Evidence::Field("title".into()),
+                },
+            ],
+        );
+        // The model's claim is a quote of the posting, stored as untrusted text.
+        merged.claims[1].evidence = Evidence::Quoted(QuotedSpan {
+            text: "APIs".into(),
+            start: 0,
+            end: 4,
+        });
+        save_features(&conn, &merged, "t", 1).unwrap();
+
+        let read_back = features(&conn, "pst_1", 1).unwrap().expect("cached");
+        assert_eq!(read_back.claims.len(), 2, "{read_back:?}");
+        assert!(read_back.has_llm());
+        assert!(
+            features_pending(&conn, 1, 10).unwrap().is_empty(),
+            "a served pass is not pending again (FR-61: no second run)"
+        );
+
+        let untrusted: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM posting_features WHERE untrusted_origin = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(untrusted, 2, "ADR-010: every feature row is untrusted text");
+    }
+
+    #[test]
+    fn the_agent_pass_marker_reads_back_at_every_stage() {
+        let (conn, _) = stored("pst_1");
+        assert!(!features_agent_done(&conn, "pst_1", 1).unwrap());
+        save_features(&conn, &PostingFeatures::new("pst_1", 1), "t", 0).unwrap();
+        assert!(!features_agent_done(&conn, "pst_1", 1).unwrap());
+        save_features(&conn, &PostingFeatures::new("pst_1", 1), "t", 1).unwrap();
+        assert!(features_agent_done(&conn, "pst_1", 1).unwrap());
+        assert!(
+            !features_agent_done(&conn, "pst_1", 2).unwrap(),
+            "the marker is per Profile version"
+        );
+    }
+
+    #[test]
+    fn the_deterministic_pass_never_undoes_a_served_agent_pass() {
+        let (conn, _) = stored("pst_1");
+        save_features(&conn, &PostingFeatures::new("pst_1", 1), "t", 1).unwrap();
+        save_features(
+            &conn,
+            &feature_set(
+                "pst_1",
+                1,
+                vec![quoted(FeatureKind::Skill, "Rust", "Rust", 0)],
+            ),
+            "t",
+            0,
+        )
+        .unwrap();
+        assert!(features_pending(&conn, 1, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pending_postings_come_back_newest_first_and_respect_the_limit() {
+        let conn = connection();
+        for (id, seen) in [
+            ("pst_1", "2026-10-01T00:00:00Z"),
+            ("pst_2", "2026-10-02T00:00:00Z"),
+        ] {
+            let mut one = offer(id);
+            one.first_seen = seen.into();
+            one.description_text = format!("body of {id}");
+            insert_offer(&conn, &one, &provenance(id, "remotive", id)).unwrap();
+        }
+
+        let pending = features_pending(&conn, 1, 1).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "pst_2");
+        assert_eq!(pending[0].text, "body of pst_2");
+        assert_eq!(pending[0].lang, "en");
+
+        let all = features_pending(&conn, 1, 10).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn a_value_outside_the_contract_cannot_be_stored_at_all() {
+        let (conn, _) = stored("pst_1");
+        let set = feature_set(
+            "pst_1",
+            1,
+            vec![quoted(FeatureKind::Skill, "Rust", "Rust", 0)],
+        );
+        save_features(&conn, &set, "t", 0).unwrap();
+
+        for statement in [
+            "UPDATE posting_features SET confidence = 'certain'",
+            "UPDATE posting_features SET kind = 'salary'",
+            "UPDATE posting_features SET source = 'agent'",
+            "UPDATE posting_features SET untrusted_origin = 2",
+            "UPDATE posting_features SET evidence_start = NULL",
+        ] {
+            assert!(
+                conn.execute(statement, []).is_err(),
+                "the store must refuse `{statement}`"
+            );
+        }
+        assert_eq!(features(&conn, "pst_1", 1).unwrap(), Some(set));
     }
 }

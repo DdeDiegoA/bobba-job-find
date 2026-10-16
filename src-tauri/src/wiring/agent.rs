@@ -32,7 +32,9 @@ use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
+use boba_app::posting_features;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
 use boba_store::repos::cli_install;
@@ -358,6 +360,42 @@ pub struct RepoTools {
     store: Arc<Store>,
 }
 
+impl RepoTools {
+    /// `get_pending_postings` (S6.2): the postings still awaiting an agent pass
+    /// at the current Profile version. The endpoint puts them in the untrusted
+    /// envelope (AD-7).
+    fn pending(&self, args: &Value) -> Result<Value, String> {
+        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
+        let version = self.store.profile_version().map_err(|e| e.to_string())?;
+        let postings = self
+            .store
+            .features_pending(version, limit)
+            .map_err(|e| e.to_string())?;
+        Ok(json!({ "postings": postings }))
+    }
+
+    /// `propose_posting_features` (S6.2, AD-5): the tool boundary. The payload
+    /// is checked here — the contract's shape, and every quote against the
+    /// posting's own text — so an invalid call goes back to the agent and costs
+    /// it a retry, instead of being dropped silently at the end of the run.
+    /// **Storing** happens in `boba_app::posting_features`, which reads this very
+    /// call off the run's event stream: what a proposal is stored against (the
+    /// Profile version, and the merge with the deterministic claims) is not this
+    /// layer's to know.
+    fn validate_proposal(&self, args: &Value) -> Result<Value, String> {
+        let id = posting_features::proposal_id(args)
+            .ok_or_else(|| "`propose_posting_features` needs the posting's `id`".to_string())?;
+        let offer = self
+            .store
+            .get_offer(id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no posting `{id}`"))?;
+        let (accepted, dropped) =
+            posting_features::validate_proposal(&offer, args).map_err(|e| e.to_string())?;
+        Ok(json!({ "accepted": accepted, "dropped": dropped }))
+    }
+}
+
 impl ToolHandler for RepoTools {
     fn call(
         &self,
@@ -384,6 +422,11 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == "save_answers" => {
                 save_answers(&self.store, application_id, args)
             }
+            // S6.2: the two tools an `extract_postings` run reads and writes.
+            Some(spec) if spec.name == "get_pending_postings" => self.pending(args),
+            Some(spec) if spec.name == posting_features::PROPOSE_TOOL => {
+                self.validate_proposal(args)
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -394,8 +437,9 @@ impl ToolHandler for RepoTools {
 }
 
 /// The slice that brings each tool's data, for the tools still waiting for one.
-/// A tool answered in [`RepoTools::call`] — `get_task_input`, `save_review` — is
-/// not listed, and the tests keep both sets in step.
+/// A tool answered in [`RepoTools::call`] — `get_task_input`, `save_review`,
+/// `get_pending_postings`, `propose_posting_features` — is not listed, and the
+/// tests keep both sets in step.
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
         "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
@@ -403,8 +447,7 @@ fn pending_slice(tool_name: &str) -> &'static str {
         | "get_preferences"
         | "propose_profile_facts"
         | "propose_translations" => "S3.4 (profile facts)",
-        "get_pending_postings" | "get_posting" | "get_company_research" => "S4.2 (postings)",
-        "propose_posting_features" => "S6.2 (posting features)",
+        "get_posting" | "get_company_research" => "S4.2 (postings)",
         "get_score_card" => "S6.3 (scoring)",
         "save_score_narration" => "S6.5 (narration)",
         "save_document_draft" => "S7.2 (documents)",
@@ -587,6 +630,15 @@ mod tests {
         dir
     }
 
+    /// Whether a catalog tool is answered by this handler instead of refused
+    /// with the slice that still owes it.
+    fn served(name: &str) -> bool {
+        matches!(
+            name,
+            "get_task_input" | "save_review" | "save_answers" | "get_pending_postings"
+        ) || name == posting_features::PROPOSE_TOOL
+    }
+
     /// A handler over a real (encrypted, temp) store: the same construction the
     /// composition root does, without the keychain.
     fn repo_tools(tag: &str) -> RepoTools {
@@ -680,13 +732,10 @@ mod tests {
     fn every_catalog_tool_is_answered_explicitly() {
         let tools = repo_tools("store");
 
-        // save_review (S7.4) and save_answers (S7.8) are implemented and are
-        // exercised by their own tests below; every other catalog tool is still
-        // an explicit refusal.
-        for spec in tool::TOOLS
-            .iter()
-            .filter(|spec| spec.name != "save_review" && spec.name != "save_answers")
-        {
+        // save_review (S7.4), save_answers (S7.8) and the two feature tools
+        // (S6.2) are implemented, and each has its own tests below; every other
+        // catalog tool is still an explicit refusal.
+        for spec in tool::TOOLS.iter().filter(|spec| !served(spec.name)) {
             let answer = tools.call("extract_postings", None, spec.name, &json!({}));
             // Never "unknown tool": every catalog entry has a real answer.
             let message = answer.expect_err("no tool has data yet");
@@ -1154,16 +1203,12 @@ mod tests {
     }
 
     /// Every catalog tool must route somewhere: reaching the fallback is a bug.
-    /// The tools answered here have no pending slice — `save_review` (S7.4) and
-    /// `save_answers` (S7.8) are implemented; `get_task_input` is the endpoint's
-    /// (S2.4).
+    /// The tools answered here have no pending slice — `get_task_input` is the
+    /// endpoint's (S2.4), `save_review` is S7.4's, `save_answers` is S7.8's, and
+    /// the feature tools are S6.2's.
     #[test]
     fn no_catalog_tool_falls_through_to_the_unowned_answer() {
-        for spec in tool::TOOLS.iter().filter(|spec| {
-            spec.name != "get_task_input"
-                && spec.name != "save_review"
-                && spec.name != "save_answers"
-        }) {
+        for spec in tool::TOOLS.iter().filter(|spec| !served(spec.name)) {
             assert_ne!(
                 pending_slice(spec.name),
                 UNOWNED,
@@ -1196,6 +1241,56 @@ mod tests {
                 "{name} must be refused"
             );
         }
+    }
+
+    /// The name this slice listens for must be the catalog's (AD-5): the tool
+    /// names live in `boba-mcp-proto`, and `boba-app` cannot depend on it.
+    #[test]
+    fn the_feature_harvest_listens_for_the_catalog_tool() {
+        let spec = tool::find(posting_features::PROPOSE_TOOL).expect("in the catalog");
+        assert_eq!(spec.name, posting_features::PROPOSE_TOOL);
+        assert_eq!(spec.tasks, &[tool::EXTRACT_POSTINGS]);
+        assert!(spec.kind.is_write(), "a proposal, not a read");
+    }
+
+    /// A run reads its queue and is checked at the tool boundary (AD-5). The
+    /// deep checks — the contract's shape, and every quote against the posting's
+    /// own text — are `boba_app::posting_features`'; what is wiring's to get
+    /// right is the routing, and that a proposal about no stored posting is
+    /// refused rather than stored.
+    #[test]
+    fn the_feature_tools_are_served_and_a_proposal_is_checked() {
+        let tools = repo_tools("features");
+
+        let queue = tools
+            .call(
+                "extract_postings",
+                None,
+                "get_pending_postings",
+                &json!({"limit": 5}),
+            )
+            .expect("the queue is served");
+        assert_eq!(queue, json!({"postings": []}));
+
+        let unknown = tools
+            .call(
+                "extract_postings",
+                None,
+                posting_features::PROPOSE_TOOL,
+                &json!({"id": "pst_ghost", "features": {}}),
+            )
+            .expect_err("a proposal about no posting is refused");
+        assert!(unknown.contains("pst_ghost"), "{unknown}");
+
+        let no_id = tools
+            .call(
+                "extract_postings",
+                None,
+                posting_features::PROPOSE_TOOL,
+                &json!({"features": {}}),
+            )
+            .expect_err("a proposal without an id is refused");
+        assert!(no_id.contains("`id`"), "{no_id}");
     }
 
     /// The endpoint wraps third-party text (AD-7); a handler that pre-wrapped it
