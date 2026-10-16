@@ -108,9 +108,7 @@ pub fn support(
         tool_lockdown(cli, version, capabilities),
     ) {
         (_, Lockdown::Verified(_)) => TaskSupport::Supported,
-        (false, Lockdown::Unverified(_)) => {
-            TaskSupport::SupportedWithBadge(Unverified::NoVerifiedConfig)
-        }
+        (false, Lockdown::Unverified(reason)) => TaskSupport::SupportedWithBadge(reason),
         (true, Lockdown::Unverified(reason)) => TaskSupport::Unsupported {
             reason,
             fallback: fallback_for(task),
@@ -164,17 +162,18 @@ pub fn pinned_args(cli: CliKind) -> Option<&'static [&'static str]> {
 }
 
 /// ADR-010's check for a CLI verified by its init event: the tool list it
-/// reports contains only this app's MCP tools (`mcp__boba__*`).
+/// reports contains only this app's MCP tools (`mcp__boba__*`, Claude Code's
+/// naming for a tool of the server in `boba-mcp-proto`).
 ///
 /// Fail-closed by construction: an empty list, a renamed tool or a single native
-/// tool fails the check, so the run is refused instead of running with tools the
-/// `untrusted_content` envelope does not protect.
+/// tool fails the check, so a run is refused rather than started with tools the
+/// `untrusted_content` envelope does not protect. If a CLI ever renames its MCP
+/// tools, runs are refused (loudly) instead of silently unprotected.
 pub fn init_event_is_locked_down(tools: &[String]) -> bool {
     !tools.is_empty() && tools.iter().all(|tool| is_boba_tool(tool))
 }
 
-/// Whether the CLI reported one of this app's MCP tools (Claude Code names an
-/// MCP tool `mcp__<server>__<tool>`; our server is `boba-mcp-proto`'s).
+/// Whether the CLI reported one of this app's MCP tools.
 fn is_boba_tool(tool: &str) -> bool {
     tool.starts_with(&format!("mcp__{}__", boba_mcp_proto::tool::SERVER_NAME))
 }
@@ -384,6 +383,23 @@ mod tests {
                 TaskSupport::Supported
             );
         }
+    }
+
+    /// The badge carries the same reason the gate would refuse the task with, so
+    /// the UI can explain this CLI's own gap (ADR-010 §2).
+    #[test]
+    fn the_badge_keeps_why_the_cli_is_not_verified() {
+        assert_eq!(
+            support(
+                AgentTaskKind::ProfileImport,
+                CliKind::ClaudeCode,
+                "2.2.0",
+                &claude_caps()
+            ),
+            TaskSupport::SupportedWithBadge(Unverified::VersionOutsideVerifiedRange {
+                verified: (2, 1)
+            })
+        );
     }
 
     #[test]
