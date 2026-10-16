@@ -13,12 +13,25 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use boba_domain::source::{RateLimits, SourceError};
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use reqwest::header::{
-    CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, RETRY_AFTER,
+    CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION, RETRY_AFTER,
 };
 use texting_robots::Robot;
 
 /// Honest identity: `BobaJobFind/<ver> (+repo URL)` (AD-10).
 pub const REPO_URL: &str = "https://github.com/diegoarenas/boba-job-find";
+
+/// Redirects a robots.txt fetch may follow before it is treated as broken
+/// (RFC 9309 allows five). A broken chain fails closed (AD-10).
+const MAX_ROBOTS_HOPS: u32 = 5;
+
+/// What a robots.txt fetch produced.
+enum RobotsFetch {
+    Body(Vec<u8>),
+    /// Missing or unreachable: nothing to enforce.
+    Unavailable,
+    /// Broken or endless redirect chain: the origin must fail closed.
+    Broken,
+}
 
 /// The honest User-Agent string every request carries.
 pub fn user_agent() -> String {
@@ -52,6 +65,9 @@ pub struct HttpResponse {
     pub content_type: Option<String>,
     pub body: Vec<u8>,
     pub from_cache: bool,
+    /// `Location` on a 3xx; redirects are never followed (AD-10), so the target
+    /// is handed to the adapter instead of being fetched behind its back.
+    pub location: Option<String>,
 }
 
 impl HttpResponse {
@@ -101,6 +117,15 @@ struct CachedRobots {
     fetched: Instant,
 }
 
+/// One token bucket per origin (AD-10), paced at the strictest interval seen.
+struct OriginBucket {
+    interval: Duration,
+    limiter: Arc<DefaultDirectRateLimiter>,
+    /// Start of the last request on this origin; a rebuilt (idle) limiter is
+    /// paced from here so tightening the interval cannot leak a free slot.
+    last_start: Instant,
+}
+
 struct Budget {
     day: u64,
     count: u64,
@@ -110,7 +135,7 @@ struct Budget {
 pub struct HttpClient {
     client: reqwest::Client,
     config: HttpClientConfig,
-    limiters: Mutex<HashMap<String, Arc<DefaultDirectRateLimiter>>>,
+    limiters: Mutex<HashMap<String, OriginBucket>>,
     robots: Mutex<HashMap<String, CachedRobots>>,
     budget: Mutex<HashMap<String, Budget>>,
     cache: Mutex<HashMap<String, ConditionalEntry>>,
@@ -121,6 +146,10 @@ impl HttpClient {
         let client = reqwest::Client::builder()
             .user_agent(config.user_agent.clone())
             .timeout(config.timeout)
+            // Never follow a redirect: a cross-origin hop would slip past both
+            // the robots.txt check and the origin bucket (AD-10). The 3xx and
+            // its `Location` are surfaced to the adapter instead.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| SourceError::Http {
                 url: "<client build>".into(),
@@ -169,24 +198,42 @@ impl HttpClient {
         self.send_with_retry(url).await
     }
 
-    /// Wait for the per-origin token bucket, at the stricter of the global
-    /// default and the manifest limit.
+    /// Wait for the origin's token bucket, at the strictest interval seen for
+    /// that origin, never below the global default (AD-10: one bucket per host).
     async fn acquire_slot(&self, url: &str, limits: &RateLimits) {
-        let interval_ms = limits
-            .min_interval_ms
-            .max(self.config.min_interval.as_millis() as u64);
-        let key = format!("{}|{interval_ms}", origin(url));
-        let limiter = {
+        let interval = Duration::from_millis(limits.min_interval_ms)
+            .max(self.config.min_interval)
+            .max(Duration::from_millis(1));
+        let key = origin(url);
+        let (limiter, carry_over) = {
             let mut map = self.limiters.lock().unwrap();
-            map.entry(key)
-                .or_insert_with(|| {
-                    Arc::new(RateLimiter::direct(quota_for(Duration::from_millis(
-                        interval_ms.max(1),
-                    ))))
-                })
-                .clone()
+            let entry = map.entry(key.clone()).or_insert_with(|| OriginBucket {
+                interval,
+                limiter: Arc::new(RateLimiter::direct(quota_for(interval))),
+                last_start: Instant::now(),
+            });
+            let mut carry_over = Duration::ZERO;
+            if interval > entry.interval {
+                entry.interval = interval;
+                entry.limiter = Arc::new(RateLimiter::direct(quota_for(interval)));
+                carry_over = interval.saturating_sub(entry.last_start.elapsed());
+                // Tightening replaces the limiter, so a caller already waiting on
+                // the replaced one can still slip through once.
+                // shortcut: one in-flight request may beat a tightened interval;
+                // upgrade to a queued limiter if that ever matters.
+            }
+            (entry.limiter.clone(), carry_over)
         };
         limiter.until_ready().await;
+        if !carry_over.is_zero() {
+            tokio::time::sleep(carry_over).await;
+        }
+        self.limiters
+            .lock()
+            .unwrap()
+            .get_mut(&key)
+            .expect("bucket stays inserted")
+            .last_start = Instant::now();
     }
 
     fn check_budget(&self, key: &str, cap: u32) -> Result<(), SourceError> {
@@ -221,20 +268,15 @@ impl HttpClient {
             }
         }
         let robot = match self.robots_url(url) {
-            Some(robots_url) => {
-                // Fetch robots.txt directly (no robots check, no budget) so this
-                // stays out of the `fetch` recursion cycle.
-                self.acquire_slot(&robots_url, &RateLimits::default()).await;
-                match self.send_with_retry(&robots_url).await {
-                    Ok(resp) if resp.status == 200 => {
-                        Robot::new(&self.config.user_agent, &resp.body)
-                            .ok()
-                            .map(Arc::new)
-                    }
-                    // An absent or unreachable robots.txt means "allow all".
-                    _ => None,
-                }
-            }
+            Some(robots_url) => match self.fetch_robots(&robots_url).await {
+                RobotsFetch::Body(body) => Robot::new(&self.config.user_agent, &body)
+                    .ok()
+                    .map(Arc::new),
+                // An absent or unreachable robots.txt means "allow all".
+                RobotsFetch::Unavailable => None,
+                // A broken redirect chain must never fall back to allow-all.
+                RobotsFetch::Broken => Some(disallow_all(&self.config.user_agent)),
+            },
             None => None,
         };
         {
@@ -248,6 +290,37 @@ impl HttpClient {
             );
         }
         check_robot(robot.as_deref(), url)
+    }
+
+    /// Fetch robots.txt, following its redirects by hand: the client never
+    /// follows any (AD-10), and a 3xx used to reach the real rules (http→https,
+    /// apex→www). Every hop is paced for its own origin.
+    async fn fetch_robots(&self, url: &str) -> RobotsFetch {
+        // Host default only: a manifest's interval belongs to the adapter's own
+        // request. This also stays out of the `fetch` recursion cycle.
+        let host_default = RateLimits {
+            min_interval_ms: 0,
+            daily_cap: None,
+        };
+        let mut current = url.to_string();
+        for _ in 0..=MAX_ROBOTS_HOPS {
+            self.acquire_slot(&current, &host_default).await;
+            match self.send_with_retry(&current).await {
+                Ok(response) if response.status == 200 => return RobotsFetch::Body(response.body),
+                Ok(response) if (300..400).contains(&response.status) => {
+                    match response
+                        .location
+                        .as_deref()
+                        .and_then(|location| redirect_target(&current, location))
+                    {
+                        Some(next) => current = next,
+                        None => return RobotsFetch::Broken,
+                    }
+                }
+                _ => return RobotsFetch::Unavailable,
+            }
+        }
+        RobotsFetch::Broken
     }
 
     fn robots_url(&self, url: &str) -> Option<String> {
@@ -312,6 +385,7 @@ impl HttpClient {
     ) -> Result<HttpResponse, SourceError> {
         let status = response.status().as_u16();
         let content_type = header_str(&response, CONTENT_TYPE);
+        let location = header_str(&response, LOCATION);
 
         if status == 304 {
             let cached = self.cache.lock().unwrap().get(url).cloned();
@@ -321,12 +395,14 @@ impl HttpClient {
                     content_type: entry.content_type,
                     body: entry.body,
                     from_cache: true,
+                    location: None,
                 }),
                 None => Ok(HttpResponse {
                     status,
                     content_type,
                     body: Vec::new(),
                     from_cache: true,
+                    location,
                 }),
             };
         }
@@ -373,6 +449,7 @@ impl HttpClient {
             content_type,
             body,
             from_cache: false,
+            location,
         })
     }
 
@@ -416,6 +493,20 @@ fn check_robot(robot: Option<&Robot>, url: &str) -> Result<(), SourceError> {
         }),
         _ => Ok(()),
     }
+}
+
+/// The rules used when a robots.txt redirect chain is broken (AD-10).
+fn disallow_all(user_agent: &str) -> Arc<Robot> {
+    Arc::new(
+        Robot::new(user_agent, b"User-Agent: *\nDisallow: /\n")
+            .expect("a static disallow-all robots file parses"),
+    )
+}
+
+/// Resolve a `Location` (absolute or relative) to the next http(s) URL.
+fn redirect_target(current: &str, location: &str) -> Option<String> {
+    let next = reqwest::Url::parse(current).ok()?.join(location).ok()?;
+    matches!(next.scheme(), "http" | "https").then(|| next.to_string())
 }
 
 fn header_str(response: &reqwest::Response, name: reqwest::header::HeaderName) -> Option<String> {
@@ -470,6 +561,19 @@ mod tests {
             url,
             kind,
             limits: RateLimits::default(),
+            budget_key: None,
+        }
+    }
+
+    /// A JSON request with an explicit host interval.
+    fn limited(url: &str, min_interval_ms: u64) -> FetchRequest<'_> {
+        FetchRequest {
+            url,
+            kind: FetchKind::Json,
+            limits: RateLimits {
+                min_interval_ms,
+                daily_cap: None,
+            },
             budget_key: None,
         }
     }
@@ -639,6 +743,185 @@ mod tests {
         .await
         .expect("second origin not blocked by the first")
         .expect("second ok");
+    }
+
+    /// Two sources on one host share one bucket: the stricter interval wins (AD-10).
+    #[tokio::test]
+    async fn same_host_sources_share_one_bucket_at_the_strictest_interval() {
+        let server = MockServer::start().await;
+        for p in ["/lax", "/strict"] {
+            Mock::given(method("GET"))
+                .and(path(p))
+                .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+                .mount(&server)
+                .await;
+        }
+        let lax = format!("{}/lax", server.uri());
+        let strict = format!("{}/strict", server.uri());
+
+        let http = client(Duration::from_millis(1));
+        // The lax source seeds the bucket; the strict source must tighten it.
+        http.get(limited(&lax, 1)).await.expect("lax source");
+        let started = Instant::now();
+        http.get(limited(&strict, 300))
+            .await
+            .expect("strict source");
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "the stricter interval must pace the shared host bucket, waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The strictest interval seen sticks, even when a laxer source follows (AD-10).
+    #[tokio::test]
+    async fn a_laxer_source_keeps_the_strictest_host_interval() {
+        let server = MockServer::start().await;
+        for p in ["/strict", "/lax"] {
+            Mock::given(method("GET"))
+                .and(path(p))
+                .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+                .mount(&server)
+                .await;
+        }
+        let strict = format!("{}/strict", server.uri());
+        let lax = format!("{}/lax", server.uri());
+
+        let http = client(Duration::from_millis(1));
+        http.get(limited(&strict, 300))
+            .await
+            .expect("strict source");
+        let started = Instant::now();
+        http.get(limited(&lax, 1)).await.expect("lax source");
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "the host keeps the strictest interval seen, waited {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// A cross-origin redirect is surfaced, never followed (AD-10): the target
+    /// host is not contacted at all, so its robots.txt can never be bypassed.
+    #[tokio::test]
+    async fn cross_origin_redirect_to_a_robots_disallowed_path_is_not_followed() {
+        let target = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("User-Agent: *\nDisallow: /blocked"),
+            )
+            .expect(0)
+            .mount(&target)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/blocked"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let origin = MockServer::start().await;
+        let location = format!("{}/blocked", target.uri());
+        Mock::given(method("GET"))
+            .and(path("/go"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", location.as_str()))
+            .mount(&origin)
+            .await;
+
+        let response = client(Duration::from_millis(1))
+            .get(request(&format!("{}/go", origin.uri()), FetchKind::Json))
+            .await
+            .expect("the redirect is surfaced as a response");
+        assert_eq!(response.status, 302);
+        assert_eq!(response.location.as_deref(), Some(location.as_str()));
+        assert!(!response.text().contains("must never be fetched"));
+    }
+
+    /// A redirected robots.txt is followed by hand (RFC 9309), so its rules
+    /// still gate the origin that served the redirect.
+    #[tokio::test]
+    async fn redirected_robots_is_followed_and_still_blocks() {
+        let target = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string("User-Agent: *\nDisallow: /blocked"),
+            )
+            .mount(&target)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/blocked"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let origin = MockServer::start().await;
+        let robots_target = format!("{}/robots.txt", target.uri());
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(
+                ResponseTemplate::new(301).insert_header("Location", robots_target.as_str()),
+            )
+            .mount(&origin)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/blocked"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(
+                &format!("{}/blocked", origin.uri()),
+                FetchKind::Html,
+            ))
+            .await
+            .expect_err("the redirected robots.txt still disallows /blocked");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
+    }
+
+    /// A robots.txt redirect without a usable `Location` fails closed (AD-10).
+    #[tokio::test]
+    async fn robots_redirect_without_a_location_fails_closed() {
+        let origin = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(ResponseTemplate::new(301))
+            .mount(&origin)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/page"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("must never be fetched"))
+            .expect(0)
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(&format!("{}/page", origin.uri()), FetchKind::Html))
+            .await
+            .expect_err("a broken robots redirect must not allow all");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
+    }
+
+    /// A robots.txt redirect loop stops after five hops and fails closed.
+    #[tokio::test]
+    async fn robots_redirect_loop_fails_closed() {
+        let origin = MockServer::start().await;
+        let itself = format!("{}/robots.txt", origin.uri());
+        Mock::given(method("GET"))
+            .and(path("/robots.txt"))
+            .respond_with(ResponseTemplate::new(302).insert_header("Location", itself.as_str()))
+            .expect(6) // the original fetch plus the five allowed hops
+            .mount(&origin)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .get(request(&format!("{}/page", origin.uri()), FetchKind::Html))
+            .await
+            .expect_err("a redirect loop must not allow all");
+        assert!(matches!(error, SourceError::RobotsDisallowed { .. }));
     }
 
     #[tokio::test]
