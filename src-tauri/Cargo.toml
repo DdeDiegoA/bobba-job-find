@@ -30,6 +30,8 @@ specta = { workspace = true, features = ["derive", "serde_json"] }
 specta-typescript = { workspace = true }
 # Hexagonal core (use cases + the AppError model).
 boba-app = { path = "crates/boba-app" }
+# Composition root (ADR-012): the store adapter wiring opens and mounts.
+boba-store = { path = "crates/boba-store" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -41,3 +43,7 @@ tracing = { workspace = true }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-process = { workspace = true }
+
+# Unit tests build a mock Tauri app and the store without the OS keychain.
+[dev-dependencies]
+tauri = { workspace = true, features = ["test"] }

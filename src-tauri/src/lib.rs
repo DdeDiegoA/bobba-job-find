@@ -14,6 +14,7 @@ mod notifications;
 mod scheduler;
 mod shortcuts;
 mod tray;
+pub mod wiring;
 
 /// Build and run the desktop application.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,6 +44,9 @@ pub fn run() {
             // Mount typed events and register cancellable-task state (AD-3).
             ipc.mount_events(app);
             app.manage(events::TaskRegistry::default());
+
+            // Composition root (ADR-012): open the store and mount its ports.
+            wiring::mount(app.handle());
 
             #[cfg(desktop)]
             {

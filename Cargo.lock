@@ -602,6 +602,7 @@ name = "boba-job-find"
 version = "0.1.0"
 dependencies = [
  "boba-app",
+ "boba-store",
  "serde",
  "serde_json",
  "specta",
