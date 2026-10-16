@@ -6,6 +6,7 @@
 //! source item refreshes that row (its url, raw payload and fetch time) rather
 //! than adding a copy; a source's row is never deleted (AD-19).
 
+use boba_domain::dedup::DedupProbe;
 use boba_domain::posting::{Offer, Provenance};
 
 /// Errors from the ingestion repository.
@@ -30,4 +31,21 @@ pub trait IngestionRepo: Send + Sync {
 
     /// Every source payload that contributed to one posting, oldest first.
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError>;
+
+    /// The postings an Offer could already be (S4.3, AD-19): those carrying its
+    /// `dedup_key`, those whose canonical apply URL is its canonical apply URL,
+    /// and those from the same company — the pool the description simhash is
+    /// compared within. It is the caller's job to decide whether any of them is
+    /// the same job (`boba_domain::dedup::duplicate_of`).
+    fn dedup_candidates(&self, probe: &DedupProbe) -> Result<Vec<Offer>, IngestionRepoError>;
+
+    /// Attach one more source's observation to a posting dedup merged it into,
+    /// and refresh `last_seen` (S4.3, AD-19). Every other field of the posting
+    /// stays as it was; nothing is deleted.
+    fn merge_provenance(
+        &self,
+        posting_id: &str,
+        provenance: &Provenance,
+        now: &str,
+    ) -> Result<(), IngestionRepoError>;
 }
