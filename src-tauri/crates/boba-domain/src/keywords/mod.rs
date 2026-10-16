@@ -30,8 +30,7 @@ const NOISE: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "etc", "for", "from", "had",
     "has", "have", "in", "into", "is", "it", "its", "of", "on", "or", "our", "plus", "that", "the",
     "their", "them", "they", "this", "to", "us", "was", "we", "were", "will", "with", "would",
-    "you", "your", "yours",
-    // Spanish
+    "you", "your", "yours", // Spanish
     "al", "como", "con", "de", "del", "el", "en", "es", "esta", "este", "la", "las", "lo", "los",
     "mas", "nuestra", "nuestro", "o", "para", "pero", "por", "que", "se", "son", "su", "sus", "tu",
     "tus", "un", "una", "unas", "unos", "y",
@@ -90,7 +89,10 @@ impl RequirementCoverage {
 /// `Ingeniería` and `ingenieria` are the same keyword, and so are `Bogotá` and
 /// `Bogota`; a fact and a requirement never miss each other over an accent.
 pub fn fold(text: &str) -> String {
-    text.chars().map(fold_char).flat_map(char::to_lowercase).collect()
+    text.chars()
+        .map(fold_char)
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// The words of a text, folded, each once in the order it appears.
@@ -163,7 +165,11 @@ pub fn coverage(
 ///
 /// A gap is never in here (FR-75): this is the only list a caller may require of
 /// a document, so an unbacked keyword cannot reach a draft through it.
-pub fn backed_keywords(requirements: &[String], profile: &[ProfileFact], lang: Lang) -> Vec<String> {
+pub fn backed_keywords(
+    requirements: &[String],
+    profile: &[ProfileFact],
+    lang: Lang,
+) -> Vec<String> {
     let mut keywords: Vec<String> = coverage(requirements, profile, lang)
         .into_iter()
         .flat_map(|coverage| coverage.covered)

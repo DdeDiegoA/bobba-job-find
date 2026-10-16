@@ -229,9 +229,7 @@ impl VerificationReport {
     /// fabrication checks all pass. Only a `verified` document may be attached to
     /// a submission.
     pub fn is_verified(&self, kind: DocumentKind, page_budget: u32) -> bool {
-        self.layout_passes(kind, page_budget)
-            && self.text_layer.passed()
-            && self.fabrication_ready
+        self.layout_passes(kind, page_budget) && self.text_layer.passed() && self.fabrication_ready
     }
 }
 
@@ -636,7 +634,10 @@ mod tests {
             },
             text_layer(),
         );
-        assert!(!over_budget.is_verified(DocumentKind::Cv, 2), "layout failed");
+        assert!(
+            !over_budget.is_verified(DocumentKind::Cv, 2),
+            "layout failed"
+        );
 
         let unreadable = report(
             two_pages(),

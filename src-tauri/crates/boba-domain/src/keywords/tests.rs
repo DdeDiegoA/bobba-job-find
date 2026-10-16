@@ -53,7 +53,10 @@ fn a_requirements_keywords_drop_the_noise_words_and_the_bare_numbers() {
         ["years", "experience", "rust", "postgresql"]
     );
     // `+`, `#` and `.` keep C++, C#, Node.js and .NET in one keyword.
-    assert_eq!(requirement_keywords("C++, C# and Node.js"), ["c++", "c#", "node.js"]);
+    assert_eq!(
+        requirement_keywords("C++, C# and Node.js"),
+        ["c++", "c#", "node.js"]
+    );
     assert_eq!(requirement_keywords(""), Vec::<String>::new());
 }
 
@@ -100,10 +103,7 @@ fn a_requirement_no_fact_backs_is_a_gap() {
     assert_eq!(coverage.gaps, ["kubernetes", "terraform"]);
     assert_eq!(
         coverage.verdicts().collect::<Vec<(&str, Coverage)>>(),
-        [
-            ("kubernetes", Coverage::Gap),
-            ("terraform", Coverage::Gap)
-        ]
+        [("kubernetes", Coverage::Gap), ("terraform", Coverage::Gap)]
     );
 }
 
@@ -131,8 +131,14 @@ fn a_partly_backed_requirement_lists_only_what_is_missing() {
 fn only_backed_keywords_are_ever_required_of_a_document() {
     let offers = requirements(&["Rust and Postgres", "Terraform", "Kubernetes", "Rust"]);
 
-    assert_eq!(backed_keywords(&offers, &profile(), Lang::En), ["postgres", "rust"]);
-    assert_eq!(gaps(&offers, &profile(), Lang::En), ["kubernetes", "terraform"]);
+    assert_eq!(
+        backed_keywords(&offers, &profile(), Lang::En),
+        ["postgres", "rust"]
+    );
+    assert_eq!(
+        gaps(&offers, &profile(), Lang::En),
+        ["kubernetes", "terraform"]
+    );
 
     let required = backed_keywords(&offers, &profile(), Lang::En);
     for gap in gaps(&offers, &profile(), Lang::En) {
@@ -155,7 +161,10 @@ fn the_panel_counts_every_keyword_of_every_requirement() {
     let total: usize = coverage.iter().map(RequirementCoverage::keywords).sum();
 
     assert_eq!((covered, gaps, total), (2, 2, 4));
-    assert_eq!(backed_keywords(&offers, &profile(), Lang::En).len(), covered);
+    assert_eq!(
+        backed_keywords(&offers, &profile(), Lang::En).len(),
+        covered
+    );
     assert_eq!(coverage.iter().filter(|c| c.is_covered()).count(), 1);
 }
 
@@ -214,7 +223,11 @@ fn coverage_follows_the_offers_order_and_never_doubles_a_keyword() {
             .collect::<Vec<&str>>(),
         ["Kubernetes", "Rust and Rust"]
     );
-    assert_eq!(coverage[1].covered, ["rust"], "a repeated keyword counts once");
+    assert_eq!(
+        coverage[1].covered,
+        ["rust"],
+        "a repeated keyword counts once"
+    );
     assert_eq!(coverage[1].keywords(), 1);
 }
 
@@ -226,11 +239,7 @@ fn an_empty_profile_covers_nothing() {
     assert_eq!(coverage, vec![only_coverage("Rust", vec![], vec!["rust"])]);
 }
 
-fn only_coverage(
-    requirement: &str,
-    covered: Vec<&str>,
-    gaps: Vec<&str>,
-) -> RequirementCoverage {
+fn only_coverage(requirement: &str, covered: Vec<&str>, gaps: Vec<&str>) -> RequirementCoverage {
     RequirementCoverage {
         requirement: requirement.to_string(),
         covered: covered.into_iter().map(str::to_string).collect(),

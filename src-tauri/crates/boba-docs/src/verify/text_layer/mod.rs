@@ -19,14 +19,10 @@
 //! Matching reuses `boba_domain::keywords::{fold, words}`, the same folding the
 //! coverage pass used, so "backed" and "present in the layer" cannot drift apart.
 
-use boba_app::ports::verify::{VerifyError, VerifyPort};
+use boba_app::ports::verify::VerifyError;
 
-use boba_domain::documents::{
-    Contact, DocumentKind, DocumentModel, Link, RenderedPdf, TextLayerReport,
-};
+use boba_domain::documents::{Contact, DocumentKind, DocumentModel, Link, TextLayerReport};
 use boba_domain::keywords::{fold, words};
-
-use crate::TypstRenderer;
 
 /// The `(cid:` marker a font without a usable encoding leaves behind (FR-77).
 const CID: &str = "(cid:";
@@ -138,10 +134,10 @@ pub fn missing_contact(layer: &str, document: &DocumentModel) -> Vec<String> {
 
     let mut missing = Vec::new();
     let mut field = |field: &str, value: Option<&str>| {
-        if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
-            if !layer.contains(&fold(&normalize(value))) {
-                missing.push(field.to_string());
-            }
+        if let Some(value) = value.filter(|value| !value.trim().is_empty())
+            && !layer.contains(&fold(&normalize(value)))
+        {
+            missing.push(field.to_string());
         }
     };
     field("name", Some(contact.full_name.as_str()));
@@ -152,10 +148,11 @@ pub fn missing_contact(layer: &str, document: &DocumentModel) -> Vec<String> {
     field("phone", contact.phone.as_deref());
     field("location", contact.location.as_deref());
     if kind == DocumentKind::Cv && !contact.links.is_empty() {
-        let links_missing = contact.links.iter().any(|Link { url, .. }| {
-            !layer.contains(&fold(&normalize(url)))
-                && !layer.contains(&fold(&normalize(url.trim_start_matches("https://"))))
-        });
+        // The templates print `label: url`, so the URL is what must be readable.
+        let links_missing = contact
+            .links
+            .iter()
+            .any(|Link { url, .. }| !layer.contains(&fold(&normalize(url))));
         if links_missing {
             missing.push("links".to_string());
         }
@@ -176,7 +173,7 @@ pub fn missing_keywords(layer: &str, required: &[String]) -> Vec<String> {
         if keyword.is_empty() {
             continue;
         }
-        if !present.iter().any(|word| *word == keyword) && !missing.contains(&keyword) {
+        if !present.contains(&keyword) && !missing.contains(&keyword) {
             missing.push(keyword);
         }
     }
@@ -225,9 +222,13 @@ fn normalize(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use boba_app::ports::render::RenderPort;
+    use boba_app::ports::verify::VerifyPort;
     use boba_domain::documents::{
-        Claim, CoverLetterDocument, CvDocument, Lang, Link, SCHEMA_VERSION, Section, TemplateId,
+        Claim, CoverLetterDocument, CvDocument, Lang, Link, RenderedPdf, SCHEMA_VERSION, Section,
+        TemplateId,
     };
+
+    use crate::TypstRenderer;
 
     use super::*;
 
@@ -332,7 +333,11 @@ mod tests {
 
         assert!(report.passed(), "{report:?}");
         assert!(report.text_layer.contains("ada@example.com"));
-        assert!(report.text_layer.contains("Me postulo al puesto de Backend."));
+        assert!(
+            report
+                .text_layer
+                .contains("Me postulo al puesto de Backend.")
+        );
     }
 
     // AC1: the check runs through `VerifyPort`, so the core asks the adapter.
@@ -391,10 +396,14 @@ mod tests {
         assert!(!report.passed(), "a missing keyword fails the ATS check");
 
         assert!(
-            missing_keywords("Ingeniería de datos con PostgreSQL", &["ingenieria".into()]).is_empty(),
+            missing_keywords("Ingeniería de datos con PostgreSQL", &["ingenieria".into()])
+                .is_empty(),
             "case and accents never decide it"
         );
-        assert_eq!(missing_keywords("ada@example.com", &["rust".into()]), ["rust"]);
+        assert_eq!(
+            missing_keywords("ada@example.com", &["rust".into()]),
+            ["rust"]
+        );
         assert_eq!(
             missing_keywords(
                 "Rust and Postgres",
@@ -440,7 +449,10 @@ mod tests {
         );
 
         // A layer that came back with the line before its heading.
-        let order = vec!["Experience".to_string(), "Shipped the pipeline in Rust".to_string()];
+        let order = vec![
+            "Experience".to_string(),
+            "Shipped the pipeline in Rust".to_string(),
+        ];
         assert!(reading_order("Experience\nShipped the pipeline in Rust", &order).is_empty());
         assert_eq!(
             reading_order("Shipped the pipeline in Rust\nExperience", &order),
@@ -468,6 +480,65 @@ mod tests {
         };
 
         assert!(message.starts_with("text layer:"), "{message}");
+    }
+
+    // AC3 (AD-14): with the real renderer, the real layout pass and the real
+    // validator, a document is `verified` only when all three checks pass.
+    #[test]
+    fn a_document_is_verified_only_when_all_three_checks_pass() {
+        use boba_app::ports::verify::verify_document;
+        use boba_domain::documents::DocumentKind;
+        use boba_domain::validator::validate;
+
+        let document = DocumentModel::Cv(cv());
+        let template = TemplateId::new("cv-classic");
+        let rendered = rendered(&document);
+        let known = |id: &str| matches!(id, "fact_1" | "fact_2");
+
+        let fabrication = validate(&document, &known).is_ready();
+        assert!(
+            fabrication,
+            "the fixture's claims name facts the Profile has"
+        );
+
+        let verified = verify_document(
+            &TypstRenderer,
+            &document,
+            &template,
+            &rendered,
+            &["rust".into(), "postgresql".into()],
+            fabrication,
+        )
+        .expect("all three checks answer");
+        assert!(verified.is_verified(DocumentKind::Cv, 2), "{verified:?}");
+
+        // A keyword the Profile does not back is a gap, and a gap is never
+        // required of a document — so requiring one is what fails the ATS check.
+        let required_gap = verify_document(
+            &TypstRenderer,
+            &document,
+            &template,
+            &rendered,
+            &["kubernetes".into()],
+            fabrication,
+        )
+        .expect("the checks still answer");
+        assert!(!required_gap.is_verified(DocumentKind::Cv, 2), "ATS failed");
+
+        // A claim nothing in the Profile backs.
+        let fabricated = verify_document(
+            &TypstRenderer,
+            &document,
+            &template,
+            &rendered,
+            &[],
+            validate(&document, &|_| false).is_ready(),
+        )
+        .expect("the checks still answer");
+        assert!(
+            !fabricated.is_verified(DocumentKind::Cv, 2),
+            "the fabrication check failed"
+        );
     }
 
     fn rendered_layer(document: &DocumentModel) -> String {

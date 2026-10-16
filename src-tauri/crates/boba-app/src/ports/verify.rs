@@ -228,7 +228,10 @@ mod tests {
         assert_eq!(report.layout.pages, 2);
         assert!(report.text_layer.passed());
         assert!(report.is_verified(DocumentKind::Cv, 2));
-        assert_eq!(*verify.keywords.lock().expect("read back"), ["rust", "postgres"]);
+        assert_eq!(
+            *verify.keywords.lock().expect("read back"),
+            ["rust", "postgres"]
+        );
     }
 
     // AC3: any one of the three failing leaves the document unverified.
@@ -257,16 +260,12 @@ mod tests {
         assert!(!report.text_layer.passed());
         assert!(!report.is_verified(DocumentKind::Cv, 2));
 
-        let over = verify_document(
-            &verify,
-            &document(),
-            &template(),
-            &rendered(),
-            &[],
-            false,
-        )
-        .expect("both checks answer");
-        assert!(!over.is_verified(DocumentKind::Cv, 2), "layout budget and fabrication still gate");
+        let over = verify_document(&verify, &document(), &template(), &rendered(), &[], false)
+            .expect("both checks answer");
+        assert!(
+            !over.is_verified(DocumentKind::Cv, 2),
+            "layout budget and fabrication still gate"
+        );
     }
 
     // SM-8: a render whose text layer cannot be read is an error, never a pass.

@@ -269,10 +269,10 @@ fn measure(
 mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    use super::*;
     use boba_domain::documents::{
         Contact, Lang, RenderedPdf, SCHEMA_VERSION, Section, TextLayerReport,
     };
-    use super::*;
 
     fn claim(text: &str, facts: &[&str]) -> Claim {
         Claim {
