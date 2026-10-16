@@ -1,1 +1,12 @@
-{}
+{
+  "title": "Claim traceability",
+  "hint": "Hover or focus a sentence to see the Profile facts behind it.",
+  "status": {
+    "ready": "Every sentence is backed by your Profile.",
+    "blocked": "{count, plural, one {# sentence needs attention} other {# sentences need attention}} — Ready and Send stay blocked until you fix it or confirm it into your Profile."
+  },
+  "unlinked": "No Profile source",
+  "fix": "Fix",
+  "sources": "From your Profile",
+  "unknown": "Not in your Profile: {ids}"
+}
