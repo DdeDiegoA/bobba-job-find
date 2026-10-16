@@ -13,3 +13,8 @@ serde_json = { workspace = true }
 schemars = { workspace = true }
 # Local IPC endpoint (owner-only socket / pipe) shared by the shim and the core.
 interprocess = { workspace = true }
+
+# The Windows pipe carries an explicit owner-only DACL (AD-6); the descriptor is
+# built from an SDDL string, which the Windows API takes as UTF-16.
+[target.'cfg(windows)'.dependencies]
+widestring = { workspace = true }

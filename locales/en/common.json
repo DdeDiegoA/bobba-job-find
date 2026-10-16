@@ -7,6 +7,7 @@
   "errors.agent.timeout": "The AI task took too long and was stopped.",
   "errors.agent.limit_exceeded": "The AI task reached its limit and was stopped before finishing.",
   "errors.agent.cancelled": "The AI task was cancelled.",
+  "errors.agent.unsupported": "This task needs an AI tool with a verified tool lockdown, because it reads content from the web. Pick a Full CLI to enable it; other work continues.",
   "errors.agent.crashed": "The AI tool stopped unexpectedly. Other work continues.",
   "errors.store.locked": "Boba can't reach your data yet. Unlock it to continue.",
   "errors.profile.store": "Your profile could not be read or saved.",

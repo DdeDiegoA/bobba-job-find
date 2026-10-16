@@ -108,6 +108,11 @@ jobs:
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The MCP endpoint's owner-only DACL (S2.3b) is Windows code: its
+      # `#[cfg(windows)]` test compiles on every platform but only runs here.
+      - name: MCP proto tests (Windows pipe DACL)
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p boba-mcp-proto
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: |
