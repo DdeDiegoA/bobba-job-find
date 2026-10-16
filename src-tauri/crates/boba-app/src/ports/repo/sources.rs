@@ -1,9 +1,5 @@
 //! `SourcesRepo` — owns `source`, `source_run`, `source_optin` (AD-9, AD-16).
 //! Adapter: `boba-store`.
-//!
-//! Bounds are intentionally absent for now: `boba_store::db::Store` is `!Sync`
-//! (its writer holds an `mpsc::Sender`), so a `Send + Sync` supertrait would not
-//! compile. Add the bound in the slice that shares the repo across async tasks.
 
 use boba_domain::source::{OptInRecord, RunStatus, SourceRecord, SourceRunRecord};
 
@@ -17,7 +13,7 @@ pub enum SourcesRepoError {
 }
 
 /// The sources owner's write and read surface (AD-16).
-pub trait SourcesRepo {
+pub trait SourcesRepo: Send + Sync {
     /// Insert or refresh one configured source.
     fn upsert_source(&self, record: &SourceRecord) -> Result<(), SourcesRepoError>;
 

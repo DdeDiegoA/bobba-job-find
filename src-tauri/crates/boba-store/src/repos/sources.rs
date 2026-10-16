@@ -2,8 +2,9 @@
 //! `source_optin` (AD-9, AD-16).
 //!
 //! The store keeps the typed `boba_domain::source` records; the enum columns are
-//! stored as their `as_str` text and parsed back on read. `SourcesRepo` is
-//! implemented for [`Store`] so use cases depend on the port, not this module.
+//! stored as their `as_str` text and parsed back on read. `SourcesRepo` (whose
+//! supertraits are `Send + Sync`) is implemented for [`Store`], which is itself
+//! `Send + Sync`, so use cases depend on the port, not this module.
 
 use rusqlite::{Connection, OptionalExtension, params};
 
