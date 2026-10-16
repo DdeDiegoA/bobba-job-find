@@ -28,6 +28,8 @@ use boba_mail::oauth::{
 use boba_mail::smtp::{self, ImapSmtpSecret, SmtpError, SmtpSettings};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use crate::wiring;
@@ -533,14 +535,53 @@ pub async fn email_connect_imap_smtp(
     let accounts = wiring::port::<dyn EmailRepo>(&app)?;
     let secrets = wiring::port::<dyn SecretPort>(&app)?;
     Ok(
-        connect_imap_smtp(accounts.as_ref(), secrets.as_ref(), input)
+        connect_imap_smtp_with(&LiveProbe, accounts.as_ref(), secrets.as_ref(), input)
             .await
             .map(ConnectionView::from)?,
     )
 }
 
+/// The connection test one IMAP/SMTP account must pass before it is saved (AC2).
+///
+/// It is a value so the save can be exercised without a provider's TLS
+/// endpoints; the real one is [`LiveProbe`].
+trait MailProbe: Send + Sync {
+    /// Both endpoints, IMAP first; `Err` is why the account is not saved.
+    fn probe<'a>(
+        &'a self,
+        imap: &'a ImapSettings,
+        smtp: &'a SmtpSettings,
+        credential: &'a Auth,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>>;
+}
+
+/// The probes as the app runs them (the real sockets, read-only).
+struct LiveProbe;
+
+impl MailProbe for LiveProbe {
+    fn probe<'a>(
+        &'a self,
+        imap: &'a ImapSettings,
+        smtp: &'a SmtpSettings,
+        credential: &'a Auth,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>> {
+        Box::pin(async move {
+            // AC2: the IMAP test never writes — it opens `INBOX` with `EXAMINE`,
+            // so nothing on the server changes — and the submission test only
+            // authenticates. Both run before anything is saved.
+            imap::test_connection(imap, credential)
+                .await
+                .map_err(ProbeOutcome::from)?;
+            smtp::test_connection(smtp, credential)
+                .await
+                .map_err(ProbeOutcome::from)
+        })
+    }
+}
+
 /// The connect itself, over the two ports (so it is testable without an app).
-async fn connect_imap_smtp(
+async fn connect_imap_smtp_with(
+    probe: &dyn MailProbe,
     accounts: &dyn EmailRepo,
     secrets: &dyn SecretPort,
     input: ConnectImapSmtpInput,
@@ -548,14 +589,10 @@ async fn connect_imap_smtp(
     let address = mailbox_address(&input.address)?;
     let (imap, smtp, credential) = input.parts()?;
 
-    // AC2: the tests come first, and the IMAP one never writes: it opens the
-    // mailbox with `EXAMINE`, so nothing on the server changes.
-    imap::test_connection(&imap, &credential)
+    probe
+        .probe(&imap, &smtp, &credential)
         .await
-        .map_err(|error| EmailFailure::Probe(error.into()))?;
-    smtp::test_connection(&smtp, &credential)
-        .await
-        .map_err(|error| EmailFailure::Probe(error.into()))?;
+        .map_err(EmailFailure::Probe)?;
 
     // Nothing is stored before this line: a failed probe leaves no connection.
     let account = connection_row(
@@ -912,17 +949,35 @@ mod tests {
     /// A keychain that records what was written, so "nothing was saved" is
     /// checked rather than assumed.
     #[derive(Default)]
-    struct RecordingSecrets(Mutex<Vec<String>>);
+    struct RecordingSecrets(Mutex<Vec<(String, String)>>);
 
     impl RecordingSecrets {
+        /// The references the connection wrote to.
         fn writes(&self) -> Vec<String> {
-            self.0.lock().expect("lock").clone()
+            self.0
+                .lock()
+                .expect("lock")
+                .iter()
+                .map(|(reference, _)| reference.clone())
+                .collect()
+        }
+
+        /// The last value written, so the entry itself can be read back.
+        fn last_value(&self) -> Option<String> {
+            self.0
+                .lock()
+                .expect("lock")
+                .last()
+                .map(|(_, value)| value.clone())
         }
     }
 
     impl SecretPort for RecordingSecrets {
-        fn put(&self, reference: &str, _value: &str) -> Result<(), SecretError> {
-            self.0.lock().expect("lock").push(reference.to_string());
+        fn put(&self, reference: &str, value: &str) -> Result<(), SecretError> {
+            self.0
+                .lock()
+                .expect("lock")
+                .push((reference.to_string(), value.to_string()));
             Ok(())
         }
 
@@ -950,6 +1005,21 @@ mod tests {
         }
     }
 
+    /// A connection test whose answer the test chooses.
+    struct StubProbe(Option<ProbeOutcome>);
+
+    impl MailProbe for StubProbe {
+        fn probe<'a>(
+            &'a self,
+            _imap: &'a ImapSettings,
+            _smtp: &'a SmtpSettings,
+            _credential: &'a Auth,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ProbeOutcome>> + Send + 'a>> {
+            let answer = self.0;
+            Box::pin(async move { answer.map_or(Ok(()), Err) })
+        }
+    }
+
     /// AC2: the connection test runs first, so a mailbox that does not answer
     /// leaves no connection and no keychain entry behind.
     #[tokio::test]
@@ -958,9 +1028,10 @@ mod tests {
         let secrets = RecordingSecrets::default();
 
         // Port 1 is closed: the IMAP probe cannot even connect.
-        let failure = connect_imap_smtp(store.as_ref(), &secrets, imap_smtp_form(1))
-            .await
-            .expect_err("the probe must fail");
+        let failure =
+            connect_imap_smtp_with(&LiveProbe, store.as_ref(), &secrets, imap_smtp_form(1))
+                .await
+                .expect_err("the probe must fail");
 
         let error = AppError::from(failure);
         assert_eq!(error.code, ErrorCode::Unavailable);
@@ -973,6 +1044,73 @@ mod tests {
             secrets.writes().is_empty(),
             "a failed test must not write a keychain entry"
         );
+    }
+
+    /// A refused credential is the other way the test fails, and it too writes
+    /// nothing (AC2).
+    #[tokio::test]
+    async fn a_refused_credential_is_reported_and_saves_nothing() {
+        let store = open_store("refused");
+        let secrets = RecordingSecrets::default();
+
+        let failure = connect_imap_smtp_with(
+            &StubProbe(Some(ProbeOutcome::Credentials)),
+            store.as_ref(),
+            &secrets,
+            imap_smtp_form(993),
+        )
+        .await
+        .expect_err("a refused credential must fail");
+
+        let error = AppError::from(failure);
+        assert_eq!(error.code, ErrorCode::Unauthorized);
+        assert_eq!(error.message_key, "errors.email.probe_credentials");
+        assert!(store.list_accounts().expect("read").is_empty());
+        assert!(secrets.writes().is_empty());
+    }
+
+    /// AC2: when both tests pass, the connection is saved — the endpoints and the
+    /// credential in the keychain, the account in the store (never the reverse).
+    #[tokio::test]
+    async fn a_passing_probe_saves_the_account_and_its_keychain_entry() {
+        let store = open_store("saved");
+        let secrets = RecordingSecrets::default();
+
+        let mut form = imap_smtp_form(993);
+        form.imap_host = "imap.example.com".to_string();
+        form.smtp_host = "smtp.example.com".to_string();
+        form.smtp_port = 587;
+        form.smtp_security = MailSecurity::StartTls;
+        form.credential_kind = MailCredentialKind::XOAuth2;
+        form.credential = "the-token".to_string();
+
+        let account = connect_imap_smtp_with(&StubProbe(None), store.as_ref(), &secrets, form)
+            .await
+            .expect("both tests passed");
+
+        assert_eq!(account.provider, MailProvider::ImapSmtp);
+        assert_eq!(account.address, "me@example.com");
+        assert_eq!(account.mode, EmailMode::ReadSend);
+        assert!(
+            account.scopes.is_empty(),
+            "an IMAP/SMTP account holds no OAuth grant"
+        );
+
+        let stored = store
+            .get_account(&account.id)
+            .expect("read")
+            .expect("saved");
+        assert_eq!(stored.id, account.id);
+
+        // The keychain entry is what the sender and the sync owner will read:
+        // both endpoints, and the credential that was probed.
+        assert_eq!(secrets.writes(), vec![account.secret_ref.clone()]);
+        let entry = ImapSmtpSecret::from_json(&secrets.last_value().expect("value")).expect("json");
+        assert_eq!(entry.imap.host, "imap.example.com");
+        assert_eq!(entry.imap.port, 993);
+        assert_eq!(entry.smtp.host, "smtp.example.com");
+        assert_eq!(entry.smtp.port, 587);
+        assert_eq!(Auth::XOAuth2("the-token".to_string()), entry.credential);
     }
 
     /// The IMAP/SMTP form maps onto the adapter's settings, and refuses an
