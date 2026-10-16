@@ -34,6 +34,17 @@ fn to_app(error: TrackerError) -> AppError {
     AppError::new(code, error.message_key())
 }
 
+/// A move that came through the screen is the user's own (AC4). An approved
+/// Status Proposal or an apply outcome is written by the core that produced it,
+/// never by the webview: a forged `source` would put a claim in the history that
+/// nothing backs. The use case itself keeps the other sources for those callers.
+fn user_source(input: TransitionInput) -> AppResult<TransitionInput> {
+    if input.source == "user" {
+        return Ok(input);
+    }
+    Err(AppError::invalid_input("errors.tracker.source_not_allowed"))
+}
+
 fn required_id(id: String) -> AppResult<String> {
     if id.trim().is_empty() {
         return Err(AppError::invalid_input("errors.tracker.missing_id"));
@@ -67,7 +78,9 @@ pub fn tracker_transition_status(
     app: tauri::AppHandle,
     input: TransitionInput,
 ) -> AppResult<ApplicationDetail> {
-    service(&app)?.transition(input).map_err(to_app)
+    service(&app)?
+        .transition(user_source(input)?)
+        .map_err(to_app)
 }
 
 #[cfg(test)]
@@ -104,6 +117,25 @@ mod tests {
         )));
         assert_eq!(mapped.code, ErrorCode::Internal);
         assert_eq!(mapped.message_key, "errors.tracker.store");
+    }
+
+    /// AC4: a move made from the screen is the user's, never an approved Status
+    /// Proposal or an apply outcome it could record itself as.
+    #[test]
+    fn the_ui_cannot_record_itself_as_a_proposal_or_an_apply_outcome() {
+        let input = |source: &str| TransitionInput {
+            application_id: "app_01".to_string(),
+            from_status: "saved".to_string(),
+            to_status: "applied".to_string(),
+            source: source.to_string(),
+            reason: None,
+        };
+        assert!(user_source(input("user")).is_ok());
+        for source in ["status_proposal", "apply_outcome", "import"] {
+            let error = user_source(input(source)).unwrap_err();
+            assert_eq!(error.code, ErrorCode::InvalidInput);
+            assert_eq!(error.message_key, "errors.tracker.source_not_allowed");
+        }
     }
 
     #[test]

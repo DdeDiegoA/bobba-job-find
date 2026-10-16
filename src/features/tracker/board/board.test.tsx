@@ -220,6 +220,20 @@ describe("Tracker moves (AC2/AC4)", () => {
     );
   });
 
+  it("re-reads the board when a move lost the race, so the copy is true", async () => {
+    vi.mocked(commands.trackerTransitionStatus).mockImplementation(() =>
+      Promise.reject({ code: "conflict", message_key: "errors.tracker.stale" }),
+    );
+    renderBoard();
+    const cardEl = await screen.findByLabelText("Open Backend Engineer");
+    expect(vi.mocked(commands.trackerBoard).mock.calls.length).toBe(1);
+
+    fireEvent.keyDown(cardEl, { key: "ArrowRight", metaKey: true });
+
+    expect(await screen.findByText(/moved in another window/)).toBeTruthy();
+    await waitFor(() => expect(vi.mocked(commands.trackerBoard).mock.calls.length).toBe(2));
+  });
+
   it("does not move a card past the end of the board", async () => {
     renderBoard();
     const cardEl = await screen.findByLabelText("Open Backend Engineer");

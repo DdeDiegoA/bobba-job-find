@@ -25,15 +25,25 @@ export function useApplicationDetail(applicationId: string | null) {
   });
 }
 
-/** Move one card; the board is re-read because the move may have lost a race. */
+/**
+ * Move one card. The board and the card are re-read on every outcome, not only
+ * on success: a move that lost a race (`errors.tracker.stale`) left this screen
+ * showing a status the core no longer has, and that error says so (AC4).
+ */
 export function useTransitionStatus() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: TransitionInput) => commands.trackerTransitionStatus(input).then(unwrap),
     onSuccess: (detail: ApplicationDetail) => {
       queryClient.setQueryData(detailKey(detail.id), detail);
+    },
+    onSettled: (
+      _detail: ApplicationDetail | undefined,
+      _error: unknown,
+      input: TransitionInput,
+    ) => {
       void queryClient.invalidateQueries({ queryKey: boardKey });
-      void queryClient.invalidateQueries({ queryKey: detailKey(detail.id) });
+      void queryClient.invalidateQueries({ queryKey: detailKey(input.application_id) });
     },
   });
 }

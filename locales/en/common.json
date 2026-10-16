@@ -40,5 +40,6 @@
   "errors.tracker.stale": "This card moved in another window. The board was refreshed.",
   "errors.tracker.same_status": "The card is already in that Stage.",
   "errors.tracker.unknown_status": "That Stage is not one Boba knows.",
-  "errors.tracker.missing_id": "No application was named."
+  "errors.tracker.missing_id": "No application was named.",
+  "errors.tracker.source_not_allowed": "The app records that change itself; the board can only move a card as you."
 }

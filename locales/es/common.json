@@ -40,5 +40,6 @@
   "errors.tracker.stale": "Esta tarjeta cambió en otra ventana. El tablero se actualizó.",
   "errors.tracker.same_status": "La tarjeta ya está en esa Etapa.",
   "errors.tracker.unknown_status": "Esa Etapa no es una que Boba conozca.",
-  "errors.tracker.missing_id": "No se indicó ninguna postulación."
+  "errors.tracker.missing_id": "No se indicó ninguna postulación.",
+  "errors.tracker.source_not_allowed": "Ese cambio lo registra la app; el tablero solo puede mover una tarjeta como tú."
 }
