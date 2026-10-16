@@ -84,6 +84,22 @@ impl CliKind {
         }
     }
 
+    /// The flags that start **one non-interactive run** with `prompt`, in the
+    /// order the CLI documents them, without the MCP-config flag (the caller
+    /// adds that). `None` when this CLI's argv is not wired yet.
+    ///
+    /// Every flag is checked against the CLI's recorded `--help` fixture in the
+    /// test below. Both CLIs list the prompt as a positional/option value after
+    /// their print flag, and neither documents an end-of-options `--`, so a
+    /// prompt that could be read as an option is the caller's to refuse.
+    pub fn non_interactive_argv(self, prompt: &str) -> Option<Vec<String>> {
+        match self {
+            CliKind::ClaudeCode => Some(vec!["--print".to_string(), prompt.to_string()]),
+            CliKind::GeminiCli => Some(vec!["--prompt".to_string(), prompt.to_string()]),
+            CliKind::Codex | CliKind::OpenCode | CliKind::Aider => None,
+        }
+    }
+
     /// Install link shown for a "Not installed" CLI (FR-2).
     pub const fn install_url(self) -> &'static str {
         match self {
@@ -247,6 +263,30 @@ mod tests {
         }
         for kind in [CliKind::Codex, CliKind::OpenCode, CliKind::Aider] {
             assert_eq!(kind.mcp_config_flag(), None, "{}", kind.display_name());
+        }
+    }
+
+    #[test]
+    fn the_non_interactive_argv_is_the_one_the_cli_documents() {
+        // Evidence, not invention: a run must be non-interactive or it hangs
+        // until the wall-clock limit, and each flag must be in the recorded help.
+        let claude = include_str!("fixtures/claude_code_help.txt");
+        let argv = CliKind::ClaudeCode
+            .non_interactive_argv("do the thing")
+            .expect("claude argv");
+        assert_eq!(argv, vec!["--print", "do the thing"]);
+        assert!(claude.contains("--print"));
+        assert!(claude.contains("[prompt]"), "the prompt is positional");
+
+        let gemini = include_str!("fixtures/gemini_help.txt");
+        let argv = CliKind::GeminiCli
+            .non_interactive_argv("do the thing")
+            .expect("gemini argv");
+        assert_eq!(argv, vec!["--prompt", "do the thing"]);
+        assert!(gemini.contains("--prompt"));
+
+        for kind in [CliKind::Codex, CliKind::OpenCode, CliKind::Aider] {
+            assert_eq!(kind.non_interactive_argv("x"), None, "{}", kind.id());
         }
     }
 
