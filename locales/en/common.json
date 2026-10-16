@@ -34,5 +34,11 @@
   "errors.email.keychain": "Boba could not reach your keychain, so nothing was changed.",
   "errors.email.store": "Your connections could not be read or saved.",
   "errors.email.unknown_connection": "That connection no longer exists.",
-  "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”."
+  "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”.",
+  "errors.tracker.store": "Could not read your applications.",
+  "errors.tracker.unknown_application": "That application no longer exists.",
+  "errors.tracker.stale": "This card moved in another window. The board was refreshed.",
+  "errors.tracker.same_status": "The card is already in that Stage.",
+  "errors.tracker.unknown_status": "That Stage is not one Boba knows.",
+  "errors.tracker.missing_id": "No application was named."
 }
