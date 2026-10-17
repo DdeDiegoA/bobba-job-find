@@ -578,6 +578,11 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == "save_document_draft" => {
                 save_document_draft(&self.store, application_id, args)
             }
+            // S6.5: the coach's explanation, checked against the card before it
+            // is kept (FR-59), and always untrusted text (ADR-010).
+            Some(spec) if spec.name == "save_score_narration" => {
+                save_score_narration(&self.store, args)
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -680,13 +685,45 @@ fn pending_slice(tool_name: &str) -> &'static str {
         "get_company_research" => {
             "no slice yet (company research is not built, and the tailor skill reads it only when it exists)"
         }
-        "save_score_narration" => "S6.5 (narration)",
         "get_email_batch" => "S8.1 (mail)",
         "propose_status_change" => "S8.4 (status proposals)",
         // Never panic on a request path: an unmapped catalog tool is a bug, and
         // the test below fails when one appears.
         _ => UNOWNED,
     }
+}
+
+/// `save_score_narration` (S6.5, FR-59): the coach's two-to-four sentence
+/// explanation of one ScoreCard. The core decides whether to keep it — a text
+/// that names a number or a skill the card does not hold is refused whole, so
+/// the run writes it again rather than the user being told something invented —
+/// and it is stored bound to the card it explains, as untrusted text (ADR-010).
+fn save_score_narration(store: &Arc<Store>, args: &Value) -> Result<Value, String> {
+    let posting_id = args
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "`save_score_narration` needs the posting's `id`".to_string())?;
+    let lang = args
+        .get("lang")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "`save_score_narration` needs the narration's `lang`".to_string())?;
+    let text = args
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "`save_score_narration` needs the narration's `text`".to_string())?;
+    let saved = boba_app::narration::Narration::new(store.clone())
+        .save(
+            posting_id,
+            lang,
+            text,
+            &boba_app::system::SystemClock.now_rfc3339(),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(json!({
+        "id": posting_id,
+        "lang": saved.lang,
+        "untrusted_origin": saved.untrusted_origin,
+    }))
 }
 
 /// `save_review` (S7.4, FR-22/FR-72): store the fresh-context reviewer's
@@ -875,6 +912,7 @@ mod tests {
                 | "get_posting"
                 | "get_score_card"
                 | "save_document_draft"
+                | "save_score_narration"
         ) || name == posting_features::PROPOSE_TOOL
     }
 
@@ -2224,5 +2262,142 @@ mod tests {
                 kind.display_name()
             );
         }
+    }
+
+    /// One posting with one card, enough for a narration to be checked against
+    /// (S6.5). Raw seeding through the repositories, so the rows are the same
+    /// ones a real run reads.
+    fn scored_posting(store: &Arc<Store>) -> String {
+        use boba_app::ports::repo::ingestion::IngestionRepo;
+        use boba_app::ports::repo::scoring::ScoringRepo;
+        use boba_domain::posting::{ApplyHints, Offer, Provenance, WorkMode};
+        use boba_domain::scoring::factors::{Factor, FactorScore, FactorWeights};
+        use boba_domain::scoring::gates::{Confidence as GateConfidence, GateReport};
+        use boba_domain::scoring::rank::{CardVersions, MODEL_VERSION, ScoreCardRow};
+
+        store
+            .execute(|conn| {
+                conn.execute(
+                    "INSERT INTO source (id, name, access_class, legal_tier, apply_capability, \
+                     min_interval_ms, enabled, added_at, updated_at) \
+                     VALUES ('greenhouse', 'Greenhouse', 'public_json', 'safe', 'link_out', 2000, 1, 't', 't')",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("seed the source");
+
+        let offer = Offer {
+            id: "pst_narration".to_string(),
+            source_id: "greenhouse".to_string(),
+            external_id: "gh-1".to_string(),
+            title: "Senior Data Engineer".to_string(),
+            company: "Boba Labs".to_string(),
+            locations: vec!["Remote".to_string()],
+            work_mode: WorkMode::Remote,
+            money: None,
+            posted_at: None,
+            deadline: None,
+            first_seen: "2026-10-16T00:00:00Z".to_string(),
+            last_seen: "2026-10-16T00:00:00Z".to_string(),
+            lang: "en".to_string(),
+            description_html: "<p>dbt and Airflow. Kubernetes.</p>".to_string(),
+            description_text: "dbt and Airflow. Kubernetes.".to_string(),
+            requirements: Vec::new(),
+            apply: ApplyHints {
+                url: "https://boards.example.com/boba/gh-1".to_string(),
+                email: None,
+            },
+        };
+        let provenance = Provenance {
+            posting_id: offer.id.clone(),
+            source_id: offer.source_id.clone(),
+            external_id: offer.external_id.clone(),
+            url: offer.apply.url.clone(),
+            raw: "{}".to_string(),
+            fetched_at: offer.first_seen.clone(),
+        };
+        IngestionRepo::insert_offer(store.as_ref(), &offer, &provenance).expect("the posting");
+
+        let factors: Vec<FactorScore> = Factor::ALL
+            .into_iter()
+            .map(|factor| {
+                let mut score = FactorScore::scored(
+                    factor,
+                    80.0,
+                    FactorWeights::DEFAULT.of(factor),
+                    GateConfidence::High,
+                    Vec::new(),
+                );
+                if factor == Factor::Skills {
+                    score.matched = vec!["dbt".to_string(), "Airflow".to_string()];
+                    score.missing = vec!["Kubernetes".to_string()];
+                }
+                score
+            })
+            .collect();
+        let card =
+            boba_domain::scoring::rank::card(MODEL_VERSION, factors, &FactorWeights::DEFAULT)
+                .expect("a card");
+        let row = ScoreCardRow::new(
+            "sc_narration",
+            offer.id.clone(),
+            CardVersions {
+                profile_version: 1,
+                prefs_version: 1,
+                model_version: MODEL_VERSION,
+            },
+            card,
+            GateReport {
+                results: Vec::new(),
+            },
+            "2026-10-16T00:00:00Z",
+        );
+        ScoringRepo::insert_card(store.as_ref(), &row).expect("the card");
+        offer.id
+    }
+
+    #[test]
+    fn save_score_narration_refuses_an_invented_number_and_stores_a_grounded_text() {
+        let store = store("narration");
+        let posting = scored_posting(&store);
+        let tools = repo_tools_over(store.clone());
+
+        let refused = tools
+            .call(
+                "narrate_scores",
+                None,
+                "save_score_narration",
+                &json!({
+                    "id": posting,
+                    "lang": "en",
+                    "text": "You match 97 of 99 points here. dbt stands out.",
+                }),
+            )
+            .expect_err("an invented number is refused");
+        assert!(refused.contains("97"), "{refused}");
+
+        let saved = tools
+            .call(
+                "narrate_scores",
+                None,
+                "save_score_narration",
+                &json!({
+                    "id": posting,
+                    "lang": "en",
+                    "text": "You match most of the profile, with dbt and Airflow standing out. \
+                             Kubernetes is the one skill missing.",
+                }),
+            )
+            .expect("a grounded narration is stored");
+        assert_eq!(saved["untrusted_origin"], json!(true));
+
+        use boba_app::ports::repo::scoring::ScoringRepo;
+        let stored = ScoringRepo::latest_narration(store.as_ref(), &posting, "en")
+            .expect("read")
+            .expect("a narration");
+        assert!(stored.untrusted_origin);
+        assert_eq!(stored.score_card_id, "sc_narration");
     }
 }

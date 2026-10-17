@@ -9,6 +9,7 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use boba_domain::scoring::narration::ScoreNarration;
 use boba_domain::scoring::rank::{CardVersions, ScoreCardRow};
 
 use crate::ports::clock::ClockPort;
@@ -27,6 +28,7 @@ fn key(posting_id: &str, versions: CardVersions) -> String {
 #[derive(Default)]
 pub struct FakeScoringRepo {
     cards: Mutex<Vec<ScoreCardRow>>,
+    narrations: Mutex<Vec<ScoreNarration>>,
     /// Set by [`FakeScoringRepo::break_storage`] to make every call fail.
     broken: AtomicBool,
 }
@@ -94,6 +96,35 @@ impl ScoringRepo for FakeScoringRepo {
             .filter(|stored| stored.posting_id == posting_id)
             .cloned()
             .collect())
+    }
+
+    fn latest_narration(
+        &self,
+        posting_id: &str,
+        lang: &str,
+    ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
+        self.check()?;
+        Ok(self
+            .narrations
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .filter(|stored| stored.posting_id == posting_id && stored.lang == lang)
+            .max_by(|left, right| {
+                left.created_at
+                    .cmp(&right.created_at)
+                    .then(left.id.cmp(&right.id))
+            })
+            .cloned())
+    }
+
+    fn insert_narration(&self, row: &ScoreNarration) -> Result<(), ScoringRepoError> {
+        self.check()?;
+        self.narrations
+            .lock()
+            .expect("not poisoned")
+            .push(row.clone());
+        Ok(())
     }
 }
 

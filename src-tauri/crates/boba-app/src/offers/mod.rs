@@ -27,13 +27,17 @@
 
 use std::sync::Arc;
 
-use boba_domain::posting::{Offer, PayPeriod};
+use boba_domain::apply::channel;
+use boba_domain::posting::{Offer, PayPeriod, Provenance};
+use boba_domain::scoring::factors::Axis;
 use boba_domain::scoring::gates::{
     Confidence as GateConfidence, Evidence, GateKind, GateReason, GateReport,
     Verdict as GateVerdict,
 };
 use boba_domain::scoring::rank::ScoreCardRow;
 
+use crate::apply::manual::ChannelView;
+use crate::narration::{Narration, NarrationError, NarrationView};
 use crate::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use crate::ports::repo::scoring::{ScoringRepo, ScoringRepoError};
 
@@ -121,6 +125,12 @@ pub enum OffersError {
     /// A ScoreCard could not be read.
     #[error("could not read the Scores")]
     Scores(#[from] ScoringRepoError),
+    /// The narration bound to that card could not be read.
+    #[error("could not read the narration")]
+    Narration(#[from] NarrationError),
+    /// No Offer has this id (a stale link, or one already deleted).
+    #[error("no Offer has that id")]
+    NotFound,
 }
 
 impl OffersError {
@@ -129,6 +139,8 @@ impl OffersError {
         match self {
             Self::Postings(_) => "errors.offers.inbox",
             Self::Scores(_) => "errors.scoring.store",
+            Self::Narration(error) => error.message_key(),
+            Self::NotFound => "errors.offers.not_found",
         }
     }
 }
@@ -157,6 +169,256 @@ impl OffersInbox {
                 Ok(card_view(&offer, card.as_ref(), sources))
             })
             .collect()
+    }
+
+    /// One Offer in full (FR-65, EXPERIENCE §9.4): the sanitised posting, the
+    /// Gates with their quotes, the factor breakdown, the Sources and the other
+    /// places dedup merged into it, the Apply Channels and — when the agent has
+    /// written one — the Explanation in the UI language `lang`.
+    ///
+    /// A missing narration is `None`, never a template (FR-59 is the agent's
+    /// words, and inventing them would defeat the point of checking them).
+    pub fn detail(&self, posting_id: &str, lang: &str) -> Result<OfferDetailView, OffersError> {
+        let offer = self
+            .postings
+            .get_offer(posting_id)?
+            .ok_or(OffersError::NotFound)?;
+        let sources = self.postings.offer_sources(posting_id)?;
+        let provenance = self.postings.provenance(posting_id)?;
+        let card = self.scoring.latest_card(posting_id)?;
+        let narration = Narration::new(self.scoring.clone()).latest(posting_id, lang)?;
+        Ok(detail_view(
+            &offer,
+            card.as_ref(),
+            sources,
+            provenance,
+            narration,
+        ))
+    }
+}
+
+/// One Gate as the detail shows it (FR-65, EXPERIENCE §9.4): the verdict in
+/// words and icons, and the posting's own quote when the Gate read one.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct GateView {
+    /// `eligibility` … `deadline`.
+    pub gate: String,
+    /// `pass` | `flag` | `veto`.
+    pub verdict: String,
+    /// The reason id, e.g. `requirement_not_met`, `below_floor`.
+    pub reason: String,
+    /// `low` | `medium` | `high`.
+    pub confidence: String,
+    /// The posting's own words, rendered as text (AD-7).
+    pub quote: Option<String>,
+    /// The structured field the Gate read, when it read one instead of words.
+    pub field: Option<String>,
+}
+
+/// One piece of evidence (FR-53): a quoted span or a structured field name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct EvidenceView {
+    /// `quote` | `field`.
+    pub kind: String,
+    /// The quote's text, or the field's name.
+    pub text: String,
+}
+
+/// One factor of the breakdown (FR-55/FR-56, EXPERIENCE §9.4): its score, its
+/// share, what it found for and against, and where it read it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+pub struct FactorView {
+    /// The factor id (`skills` … `alignment`).
+    pub factor: String,
+    /// `fit` | `quality` — which group the axis scrolls to (AC3).
+    pub axis: String,
+    pub score: Option<f32>,
+    pub weight: f32,
+    pub effective_weight: f32,
+    pub matched: Vec<String>,
+    pub missing: Vec<String>,
+    pub evidence: Vec<EvidenceView>,
+    /// `low` | `medium` | `high`.
+    pub confidence: String,
+}
+
+/// Another place the same Offer was seen: one provenance row dedup merged into
+/// the posting (AD-19). It is shown, never deleted.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+pub struct DuplicateView {
+    pub source: String,
+    pub external_id: String,
+    pub url: String,
+    pub fetched_at: String,
+}
+
+/// One Offer in full (FR-65). Everything here is the core's; the screen decides
+/// only how to draw it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, specta::Type)]
+pub struct OfferDetailView {
+    pub posting_id: String,
+    pub title: String,
+    pub company: String,
+    pub locations: Vec<String>,
+    pub work_mode: String,
+    /// BCP-47 content language of the posting.
+    pub lang: String,
+    pub amount_minor: Option<f64>,
+    pub currency: Option<String>,
+    pub pay_period: Option<String>,
+    pub first_seen: String,
+    pub posted_at: Option<String>,
+    pub deadline: Option<String>,
+    /// Sanitised HTML (AD-7) — the only form the detail may render, and it is
+    /// rendered without loading anything remote.
+    pub description_html: String,
+    pub requirements: Vec<String>,
+    /// The posting's own URL (https-only since S4.5/S4.6).
+    pub apply_url: String,
+    pub apply_email: Option<String>,
+    pub sources: Vec<String>,
+    /// The other places this Offer was seen (AD-19: dedup merges, never drops).
+    pub duplicates: Vec<DuplicateView>,
+    /// The Apply Channels the posting allows (FR-81), in the apply bar's order.
+    pub channels: Vec<ChannelView>,
+    pub fit: Option<f32>,
+    pub quality: Option<f32>,
+    pub rank: Option<f32>,
+    pub verdict: Option<String>,
+    pub confidence: Option<String>,
+    pub lead: bool,
+    /// The five Gates in report order (FR-53), empty when the Offer has no card.
+    pub gates: Vec<GateView>,
+    /// The eleven factors, Fit then Quality (FR-55/FR-56).
+    pub factors: Vec<FactorView>,
+    /// FR-59's Explanation in the requested UI language, `None` when the agent
+    /// has not written one.
+    pub narration: Option<NarrationView>,
+}
+
+/// One Offer in full, from the pieces the use case read (FR-65).
+pub fn detail_view(
+    offer: &Offer,
+    card: Option<&ScoreCardRow>,
+    sources: Vec<String>,
+    provenance: Vec<Provenance>,
+    narration: Option<NarrationView>,
+) -> OfferDetailView {
+    let money = offer.money.as_ref();
+    let own = card.map(|row| &row.card);
+    let gates = card
+        .map(|row| row.gates.results.iter().map(gate_view).collect())
+        .unwrap_or_default();
+    let factors = own
+        .map(|card| card.factors.iter().map(factor_view).collect())
+        .unwrap_or_default();
+    OfferDetailView {
+        posting_id: offer.id.clone(),
+        title: offer.title.clone(),
+        company: offer.company.clone(),
+        locations: offer.locations.clone(),
+        work_mode: offer.work_mode.as_str().to_string(),
+        lang: offer.lang.clone(),
+        amount_minor: money.map(|money| money.amount_minor as f64),
+        currency: money.map(|money| money.currency.clone()),
+        pay_period: money.map(|money| pay_period(money.period).to_string()),
+        first_seen: offer.first_seen.clone(),
+        posted_at: offer.posted_at.clone(),
+        deadline: offer.deadline.clone(),
+        description_html: offer.description_html.clone(),
+        requirements: offer.requirements.clone(),
+        apply_url: offer.apply.url.clone(),
+        apply_email: offer.apply.email.clone(),
+        sources,
+        duplicates: duplicates(offer, provenance),
+        channels: channel::detect(offer)
+            .into_iter()
+            .map(ChannelView::from)
+            .collect(),
+        fit: own.and_then(|card| card.fit),
+        quality: own.and_then(|card| card.quality),
+        rank: own.map(|card| card.rank),
+        verdict: own.map(|card| card.verdict.as_str().to_string()),
+        confidence: own.map(|card| confidence(card.confidence).to_string()),
+        lead: own.is_some_and(|card| card.is_lead()),
+        gates,
+        factors,
+        narration,
+    }
+}
+
+/// The provenance rows that came from somewhere other than the Offer's own
+/// source: the copies dedup merged into this posting (AD-19).
+fn duplicates(offer: &Offer, provenance: Vec<Provenance>) -> Vec<DuplicateView> {
+    provenance
+        .into_iter()
+        .filter(|row| !(row.source_id == offer.source_id && row.external_id == offer.external_id))
+        .map(|row| DuplicateView {
+            source: row.source_id,
+            external_id: row.external_id,
+            url: row.url,
+            fetched_at: row.fetched_at,
+        })
+        .collect()
+}
+
+fn gate_view(result: &boba_domain::scoring::gates::GateResult) -> GateView {
+    let (quote, field) = match &result.evidence {
+        Some(Evidence::Quoted(span)) => (Some(span.text.clone()), None),
+        Some(Evidence::Field(name)) => (None, Some(name.clone())),
+        None => (None, None),
+    };
+    GateView {
+        gate: result.gate.as_str().to_string(),
+        verdict: match result.verdict {
+            GateVerdict::Pass => "pass",
+            GateVerdict::Flag => "flag",
+            GateVerdict::Veto => "veto",
+        }
+        .to_string(),
+        reason: reason_id(result.reason).to_string(),
+        confidence: gate_confidence(result.confidence).to_string(),
+        quote,
+        field,
+    }
+}
+
+fn gate_confidence(confidence: GateConfidence) -> &'static str {
+    match confidence {
+        GateConfidence::Low => "low",
+        GateConfidence::Medium => "medium",
+        GateConfidence::High => "high",
+    }
+}
+
+fn factor_view(score: &boba_domain::scoring::factors::FactorScore) -> FactorView {
+    FactorView {
+        factor: score.factor.as_str().to_string(),
+        axis: match score.factor.axis() {
+            Axis::Fit => "fit",
+            Axis::Quality => "quality",
+        }
+        .to_string(),
+        score: score.score,
+        weight: score.weight,
+        effective_weight: score.effective_weight,
+        matched: score.matched.clone(),
+        missing: score.missing.clone(),
+        evidence: score
+            .evidence
+            .iter()
+            .map(|evidence| match evidence {
+                Evidence::Quoted(span) => EvidenceView {
+                    kind: "quote".to_string(),
+                    text: span.text.clone(),
+                },
+                Evidence::Field(name) => EvidenceView {
+                    kind: "field".to_string(),
+                    text: name.clone(),
+                },
+            })
+            .collect(),
+        confidence: gate_confidence(score.confidence).to_string(),
     }
 }
 
@@ -306,6 +568,7 @@ mod tests {
 
     use boba_domain::posting::{ApplyHints, Money, WorkMode};
     use boba_domain::scoring::gates::{QuotedSpan, Verdict as Veto};
+    use boba_domain::scoring::narration::ScoreNarration;
     use boba_domain::scoring::rank::{CardVersions, ScoreCard, Verdict as Band};
 
     /// An in-memory `ScoringRepo`: this module only reads the newest card, so
@@ -314,6 +577,7 @@ mod tests {
     #[derive(Default)]
     struct FakeScoringRepo {
         rows: Mutex<Vec<ScoreCardRow>>,
+        narrations: Mutex<Vec<ScoreNarration>>,
     }
 
     impl FakeScoringRepo {
@@ -361,6 +625,26 @@ mod tests {
                 .filter(|row| row.posting_id == posting_id)
                 .cloned()
                 .collect())
+        }
+
+        fn latest_narration(
+            &self,
+            posting_id: &str,
+            lang: &str,
+        ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
+            Ok(self
+                .narrations
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| row.posting_id == posting_id && row.lang == lang)
+                .max_by(|left, right| left.created_at.cmp(&right.created_at))
+                .cloned())
+        }
+
+        fn insert_narration(&self, row: &ScoreNarration) -> Result<(), ScoringRepoError> {
+            self.narrations.lock().unwrap().push(row.clone());
+            Ok(())
         }
     }
 
@@ -696,5 +980,216 @@ mod tests {
         assert_eq!(second[0].posting_id, "pst_00");
         // No card yet: the page still renders, with no scores.
         assert_eq!(second[0].verdict, None);
+    }
+
+    // --- Offer detail (S6.5, FR-65) ------------------------------------------
+
+    /// A provenance row for one copy of the same Offer.
+    fn seen(source: &str, external_id: &str, url: &str) -> Provenance {
+        Provenance {
+            posting_id: "pst_01".to_string(),
+            source_id: source.to_string(),
+            external_id: external_id.to_string(),
+            url: url.to_string(),
+            raw: "{}".to_string(),
+            fetched_at: "2026-10-04T00:00:00Z".to_string(),
+        }
+    }
+
+    /// A card whose factors are the real eleven, so the breakdown is testable.
+    fn scored_card(gates: Vec<GateResult>) -> ScoreCardRow {
+        use boba_domain::scoring::factors::{Factor, FactorScore, FactorWeights};
+        use boba_domain::scoring::gates::Confidence;
+        use boba_domain::scoring::rank::{MODEL_VERSION, card as build_card};
+
+        let factors: Vec<FactorScore> = Factor::ALL
+            .into_iter()
+            .map(|factor| {
+                let mut score = FactorScore::scored(
+                    factor,
+                    80.0,
+                    FactorWeights::DEFAULT.of(factor),
+                    Confidence::High,
+                    vec![Evidence::Quoted(QuotedSpan {
+                        text: "at least five years of dbt".to_string(),
+                        start: 4,
+                        end: 30,
+                    })],
+                );
+                if factor == Factor::Skills {
+                    score.matched = vec!["dbt".to_string(), "Airflow".to_string()];
+                    score.missing = vec!["Kubernetes".to_string()];
+                }
+                score
+            })
+            .collect();
+        let card = build_card(MODEL_VERSION, factors, &FactorWeights::DEFAULT).expect("a card");
+        ScoreCardRow::new(
+            "sc_01",
+            "pst_01",
+            CardVersions {
+                profile_version: 3,
+                prefs_version: 2,
+                model_version: MODEL_VERSION,
+            },
+            card,
+            GateReport { results: gates },
+            "2026-10-16T09:00:00Z",
+        )
+    }
+
+    #[test]
+    fn the_detail_shows_gates_factors_sources_duplicates_and_channels() {
+        let gates = vec![
+            gate(GateKind::Location, Veto::Pass, GateReason::Satisfied, None),
+            gate(
+                GateKind::Language,
+                Veto::Flag,
+                GateReason::Unverified,
+                Some(Evidence::Quoted(QuotedSpan {
+                    text: "English B2 required".to_string(),
+                    start: 0,
+                    end: 18,
+                })),
+            ),
+        ];
+        let card = scored_card(gates);
+        let mut offer = offer();
+        offer.apply.email = Some("jobs@boba.example".to_string());
+        let view = detail_view(
+            &offer,
+            Some(&card),
+            vec!["greenhouse".to_string(), "rss".to_string()],
+            vec![
+                seen(
+                    "greenhouse",
+                    "gh-42",
+                    "https://boards.example.com/boba/gh-42",
+                ),
+                seen("rss", "rss-7", "https://feed.example.com/jobs/7"),
+            ],
+            Some(NarrationView {
+                text: "You match dbt. Kubernetes is missing.".to_string(),
+                lang: "en".to_string(),
+                untrusted_origin: true,
+            }),
+        );
+
+        // AC1: the posting and its original link.
+        assert_eq!(view.title, "Senior Data Engineer");
+        assert_eq!(view.description_html, "<p>dbt</p>");
+        assert_eq!(view.apply_url, "https://boards.example.com/boba/gh-42");
+        assert_eq!(view.apply_email.as_deref(), Some("jobs@boba.example"));
+
+        // AC1: Gates at the top, with their quotes.
+        assert_eq!(view.gates.len(), 2);
+        assert_eq!(view.gates[1].gate, "language");
+        assert_eq!(view.gates[1].verdict, "flag");
+        assert_eq!(view.gates[1].quote.as_deref(), Some("English B2 required"));
+
+        // AC1/AC3: the eleven factors, each with its axis and evidence.
+        assert_eq!(view.factors.len(), 11);
+        let skills = view
+            .factors
+            .iter()
+            .find(|f| f.factor == "f1_skills")
+            .expect("F1");
+        assert_eq!(skills.axis, "fit");
+        assert_eq!(skills.matched, vec!["dbt", "Airflow"]);
+        assert_eq!(skills.missing, vec!["Kubernetes"]);
+        assert_eq!(skills.evidence[0].kind, "quote");
+        assert!(
+            view.factors
+                .iter()
+                .any(|f| f.factor == "q1_compensation" && f.axis == "quality")
+        );
+
+        // AC1: Sources and the copies dedup merged, never the Offer's own row.
+        assert_eq!(view.sources, vec!["greenhouse", "rss"]);
+        assert_eq!(view.duplicates.len(), 1);
+        assert_eq!(view.duplicates[0].source, "rss");
+
+        // AC1: the detected Apply Channels, in order.
+        let kinds: Vec<&str> = view
+            .channels
+            .iter()
+            .map(|c| match c {
+                ChannelView::EmailApply { .. } => "email_apply",
+                ChannelView::AtsForm { .. } => "ats_form",
+                ChannelView::Manual { .. } => "manual",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["email_apply", "manual"]);
+
+        // AC2: the narration travels as plain text, marked untrusted.
+        let narration = view.narration.expect("a narration");
+        assert!(narration.untrusted_origin);
+        assert_eq!(narration.lang, "en");
+    }
+
+    #[test]
+    fn an_unscored_offer_has_no_gates_no_factors_and_no_narration() {
+        let view = detail_view(
+            &offer(),
+            None,
+            vec!["greenhouse".to_string()],
+            Vec::new(),
+            None,
+        );
+        assert!(view.gates.is_empty());
+        assert!(view.factors.is_empty());
+        assert_eq!(view.fit, None);
+        assert_eq!(view.rank, None);
+        assert!(view.narration.is_none());
+        // The posting itself is still there.
+        assert_eq!(view.description_html, "<p>dbt</p>");
+    }
+
+    #[test]
+    fn the_service_returns_not_found_for_an_id_no_offer_has() {
+        use crate::ingest::normalize::testing::FakeIngestionRepo;
+
+        let inbox = OffersInbox::new(
+            Arc::new(FakeIngestionRepo::default()),
+            Arc::new(FakeScoringRepo::default()),
+        );
+        let error = inbox.detail("pst_missing", "en").expect_err("not found");
+        assert_eq!(error.message_key(), "errors.offers.not_found");
+    }
+
+    #[test]
+    fn the_service_reads_the_narration_in_the_requested_language() {
+        use crate::ingest::normalize::testing::FakeIngestionRepo;
+
+        let postings = Arc::new(FakeIngestionRepo::default());
+        let offer = offer();
+        postings
+            .insert_offer(&offer, &seen("greenhouse", "gh-42", &offer.apply.url))
+            .expect("store the offer");
+        let scoring = Arc::new(FakeScoringRepo::default());
+        scoring.insert_card(&scored_card(Vec::new())).expect("card");
+        scoring
+            .insert_narration(&ScoreNarration {
+                id: "nrt_1".to_string(),
+                posting_id: "pst_01".to_string(),
+                score_card_id: "sc_01".to_string(),
+                lang: "es".to_string(),
+                text: "Encajas con dbt. Falta Kubernetes.".to_string(),
+                untrusted_origin: true,
+                created_at: "2026-10-16T10:00:00Z".to_string(),
+            })
+            .expect("narration");
+
+        let inbox = OffersInbox::new(postings, scoring);
+        let spanish = inbox.detail("pst_01", "es").expect("detail");
+        assert_eq!(
+            spanish.narration.expect("a narration").text,
+            "Encajas con dbt. Falta Kubernetes."
+        );
+        let english = inbox.detail("pst_01", "en").expect("detail");
+        assert!(
+            english.narration.is_none(),
+            "no English narration was written"
+        );
     }
 }

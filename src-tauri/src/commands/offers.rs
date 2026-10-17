@@ -1,4 +1,5 @@
-//! Offer commands (S6.4, FR-63/FR-64): what Today and the Inbox read.
+//! Offer commands (S6.4, FR-63/FR-64; S6.5, FR-65): what Today, the Inbox and
+//! the Offer detail read.
 //!
 //! One command, [`offers_inbox`], hands back the Inbox's cards — every Offer
 //! with its newest ScoreCard (S6.3), its Sources (AD-19), its badges and, when a
@@ -13,7 +14,7 @@
 //! store is a typed error, never a panic.
 
 use boba_app::error::{AppError, AppResult, ErrorCode};
-use boba_app::offers::{OfferCardView, OffersError, OffersInbox};
+use boba_app::offers::{OfferCardView, OfferDetailView, OffersError, OffersInbox};
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 
@@ -46,6 +47,20 @@ pub fn offers_inbox(app: tauri::AppHandle) -> AppResult<Vec<OfferCardView>> {
     service(&app)?.cards(OFFER_PAGE, 0).map_err(to_app)
 }
 
+/// One Offer in full (S6.5, FR-65): the sanitised posting, its Gates and their
+/// quotes, the factor breakdown, its Sources and the copies dedup merged, its
+/// Apply Channels and — when one was written — the Explanation in `lang`, the
+/// UI language the screen is drawing in.
+#[tauri::command]
+#[specta::specta]
+pub fn offer_detail(
+    app: tauri::AppHandle,
+    posting_id: String,
+    lang: String,
+) -> AppResult<OfferDetailView> {
+    service(&app)?.detail(&posting_id, &lang).map_err(to_app)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +79,9 @@ mod tests {
         let unmounted_scores = to_app(OffersError::Scores(ScoringRepoError::new("disk")));
         assert_eq!(unmounted_scores.code, ErrorCode::Internal);
         assert_eq!(unmounted_scores.message_key, "errors.scoring.store");
+
+        let missing = to_app(OffersError::NotFound);
+        assert_eq!(missing.code, ErrorCode::Internal);
+        assert_eq!(missing.message_key, "errors.offers.not_found");
     }
 }

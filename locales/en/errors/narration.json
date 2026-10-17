@@ -1,0 +1,6 @@
+{
+  "errors.narration.store": "Boba could not read or save the Explanation. Try again in a moment.",
+  "errors.narration.no_card": "There is no score to explain for this Offer yet.",
+  "errors.narration.ungrounded": "The Explanation named something the score does not contain, so it was not kept.",
+  "errors.narration.language": "The Explanation was requested for a language Boba does not speak."
+}

@@ -1,15 +1,17 @@
 //! `ScoringRepo` — owns `score_card`, `score_narration`, `market_benchmark`
 //! (AD-8, AD-16).
 //!
-//! This slice reads and writes `score_card` only. `score_narration` lands with
-//! S6.5 (the run that writes it) and `market_benchmark` with the importer that
-//! fills it; both are this repo's tables, so neither needs a new port.
+//! S6.3 reads and writes `score_card`; S6.5 adds `score_narration` (one text per
+//! card per UI language, written by the narration run) and `market_benchmark`
+//! lands with the importer that fills it. All three are this repo's tables, so
+//! none needs a new port.
 //!
 //! The one rule the port enforces is AC3's: **a card is immutable**. A row is
 //! written once, and a re-score inserts a *new* row for the new
 //! [`CardVersions`] instead of updating the old one, so the history of what the
 //! user was told stays readable (FR-13/FR-14).
 
+use boba_domain::scoring::narration::ScoreNarration;
 use boba_domain::scoring::rank::{CardVersions, ScoreCardRow};
 
 /// A storage failure the use case reports with its own message key (AD-3).
@@ -45,4 +47,19 @@ pub trait ScoringRepo: Send + Sync {
     /// Every card an Offer has, oldest first: what a re-score leaves behind
     /// (AC3), and what the Offer detail can show as history.
     fn cards_for(&self, posting_id: &str) -> Result<Vec<ScoreCardRow>, ScoringRepoError>;
+
+    // --- narration (S6.5, FR-59) ---------------------------------------------
+
+    /// The newest narration for one Offer in one UI language, `None` when the
+    /// agent has not written one yet. A re-run writes a new row and leaves the
+    /// previous text readable, the same way a re-score leaves its card.
+    fn latest_narration(
+        &self,
+        posting_id: &str,
+        lang: &str,
+    ) -> Result<Option<ScoreNarration>, ScoringRepoError>;
+
+    /// Store one narration. It is bound to the card it explains, so a narration
+    /// can never outlive or drift away from the numbers it was checked against.
+    fn insert_narration(&self, row: &ScoreNarration) -> Result<(), ScoringRepoError>;
 }

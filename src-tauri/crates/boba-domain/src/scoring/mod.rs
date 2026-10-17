@@ -4,5 +4,6 @@ pub mod f3;
 pub mod factors;
 pub mod fraud;
 pub mod gates;
+pub mod narration;
 pub mod rank;
 pub mod weights;

@@ -16,6 +16,7 @@ use rusqlite::Connection;
 use boba_app::ports::repo::scoring::{ScoringRepo, ScoringRepoError};
 use boba_domain::scoring::factors::{Factor, FactorScore};
 use boba_domain::scoring::gates::{Confidence, GateReport};
+use boba_domain::scoring::narration::ScoreNarration;
 use boba_domain::scoring::rank::{CardVersions, ScoreCard, ScoreCardRow, Verdict};
 
 use crate::db::{Store, StoreError};
@@ -91,6 +92,52 @@ pub fn cards_for(conn: &Connection, posting_id: &str) -> Result<Vec<ScoreCardRow
     let mut statement = conn.prepare(&sql)?;
     let rows = statement.query_map(rusqlite::params![posting_id], row)?;
     Ok(rows.collect::<rusqlite::Result<Vec<ScoreCardRow>>>()?)
+}
+
+/// The narration stored newest-first for one Offer in one language (S6.5).
+pub fn latest_narration(
+    conn: &Connection,
+    posting_id: &str,
+    lang: &str,
+) -> Result<Option<ScoreNarration>, StoreError> {
+    let mut statement = conn.prepare(
+        "SELECT id, posting_id, score_card_id, lang, text, untrusted_origin, created_at \
+         FROM score_narration WHERE posting_id = ?1 AND lang = ?2 \
+         ORDER BY created_at DESC, id DESC LIMIT 1",
+    )?;
+    let mut rows = statement.query_map(rusqlite::params![posting_id, lang], narration_row)?;
+    Ok(rows.next().transpose()?)
+}
+
+/// Store one narration (S6.5). It is bound to the card it explains.
+pub fn insert_narration(conn: &Connection, row: &ScoreNarration) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO score_narration (id, posting_id, score_card_id, lang, text, \
+         untrusted_origin, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        rusqlite::params![
+            row.id,
+            row.posting_id,
+            row.score_card_id,
+            row.lang,
+            row.text,
+            i64::from(row.untrusted_origin),
+            row.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+/// One `score_narration` row back into the typed narration.
+fn narration_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScoreNarration> {
+    Ok(ScoreNarration {
+        id: r.get(0)?,
+        posting_id: r.get(1)?,
+        score_card_id: r.get(2)?,
+        lang: r.get(3)?,
+        text: r.get(4)?,
+        untrusted_origin: r.get::<_, i64>(5)? != 0,
+        created_at: r.get(6)?,
+    })
 }
 
 /// One of the card's JSON columns, as the text the row keeps.
@@ -207,6 +254,23 @@ impl ScoringRepo for Store {
     fn cards_for(&self, posting_id: &str) -> Result<Vec<ScoreCardRow>, ScoringRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| cards_for(conn, &posting_id))
+            .map_err(map_err)
+    }
+
+    fn latest_narration(
+        &self,
+        posting_id: &str,
+        lang: &str,
+    ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
+        let posting_id = posting_id.to_string();
+        let lang = lang.to_string();
+        self.read(move |conn| latest_narration(conn, &posting_id, &lang))
+            .map_err(map_err)
+    }
+
+    fn insert_narration(&self, row: &ScoreNarration) -> Result<(), ScoringRepoError> {
+        let row = row.clone();
+        self.execute(move |conn| insert_narration(conn, &row))
             .map_err(map_err)
     }
 }
@@ -453,5 +517,110 @@ mod tests {
             model_version: 9,
         };
         assert!(card(&conn, POSTING, corrupt_versions).is_err());
+    }
+
+    /// A narration row for one card and language.
+    fn narration(id: &str, lang: &str, text: &str, created_at: &str) -> ScoreNarration {
+        ScoreNarration {
+            id: id.to_string(),
+            posting_id: POSTING.to_string(),
+            score_card_id: "sc_2".to_string(),
+            lang: lang.to_string(),
+            text: text.to_string(),
+            untrusted_origin: true,
+            created_at: created_at.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_migration_creates_the_narration_table_with_its_untrusted_origin() {
+        let conn = connection();
+        insert_card(&conn, &row(2, "2026-10-16T09:00:00Z")).expect("insert the card");
+        let names: Vec<String> = conn
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE name LIKE 'score_narration%' ORDER BY name",
+            )
+            .expect("prepare")
+            .query_map([], |row| row.get(0))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows");
+        assert_eq!(
+            names,
+            vec![
+                "score_narration".to_string(),
+                "score_narration_latest_idx".to_string(),
+            ]
+        );
+        // AC4: the column exists from the start, defaults to untrusted, and
+        // refuses anything but 0/1.
+        conn.execute(
+            "INSERT INTO score_narration (id, posting_id, score_card_id, lang, text, created_at) \
+             VALUES ('nrt_plain', ?1, 'sc_2', 'en', 'Two sentences. Of text.', 't')",
+            params![POSTING],
+        )
+        .expect("insert without the column");
+        let untrusted: i64 = conn
+            .query_row(
+                "SELECT untrusted_origin FROM score_narration WHERE id = 'nrt_plain'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read");
+        assert_eq!(untrusted, 1, "the default is untrusted");
+        assert!(
+            conn.execute(
+                "INSERT INTO score_narration (id, posting_id, score_card_id, lang, text, \
+                 untrusted_origin, created_at) VALUES ('nrt_bad', ?1, 'sc_2', 'en', 'x', 2, 't')",
+                params![POSTING],
+            )
+            .is_err(),
+            "only 0 and 1 are allowed"
+        );
+    }
+
+    #[test]
+    fn a_narration_round_trips_and_the_newest_wins_per_language() {
+        let conn = connection();
+        insert_card(&conn, &row(2, "2026-10-16T09:00:00Z")).expect("insert");
+        insert_narration(
+            &conn,
+            &narration("nrt_1", "en", "First. Text.", "2026-10-16T10:00:00Z"),
+        )
+        .expect("first");
+        insert_narration(
+            &conn,
+            &narration("nrt_2", "en", "Second. Text.", "2026-10-16T11:00:00Z"),
+        )
+        .expect("second");
+        insert_narration(
+            &conn,
+            &narration("nrt_3", "es", "Hola. Mundo.", "2026-10-16T12:00:00Z"),
+        )
+        .expect("spanish");
+
+        let latest = latest_narration(&conn, POSTING, "en")
+            .expect("read")
+            .expect("a narration");
+        assert_eq!(latest.id, "nrt_2");
+        assert_eq!(latest.text, "Second. Text.");
+        assert!(latest.untrusted_origin);
+        assert_eq!(latest.score_card_id, "sc_2");
+
+        let spanish = latest_narration(&conn, POSTING, "es")
+            .expect("read")
+            .expect("a narration");
+        assert_eq!(spanish.id, "nrt_3");
+        assert_eq!(latest_narration(&conn, POSTING, "fr").expect("read"), None);
+    }
+
+    #[test]
+    fn deleting_the_offer_takes_its_narrations_with_it() {
+        let conn = connection();
+        insert_card(&conn, &row(2, "2026-10-16T09:00:00Z")).expect("insert the card");
+        insert_narration(&conn, &narration("nrt_1", "en", "First. Text.", "t")).expect("insert");
+        conn.execute("DELETE FROM posting WHERE id = ?1", params![POSTING])
+            .expect("delete the offer");
+        assert_eq!(latest_narration(&conn, POSTING, "en").expect("read"), None);
     }
 }
