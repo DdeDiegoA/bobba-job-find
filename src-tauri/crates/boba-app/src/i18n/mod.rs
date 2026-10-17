@@ -62,6 +62,7 @@ const ERROR_FRAGMENTS: &[(&str, &str, &str)] = error_fragments![
     "posting_features",
     "preferences",
     "profile",
+    "scoring",
     "store",
     "task",
     "tracker",
