@@ -37,8 +37,6 @@ pub enum EventKind {
     Digest,
     /// An automatic send entering the Outbox hold (FR-85).
     Outbox,
-    /// Something waiting for the user's approval.
-    NeedsYou,
     /// A Source that keeps failing (FR-31).
     Errors,
 }
@@ -48,7 +46,6 @@ pub enum EventKind {
 pub struct NotifyEvents {
     pub digest: bool,
     pub outbox: bool,
-    pub needs_you: bool,
     pub errors: bool,
 }
 
@@ -59,7 +56,6 @@ impl Default for NotifyEvents {
         Self {
             digest: true,
             outbox: true,
-            needs_you: true,
             errors: true,
         }
     }
@@ -165,7 +161,6 @@ impl NotificationSettings {
         match kind {
             EventKind::Digest => self.events.digest,
             EventKind::Outbox => self.events.outbox,
-            EventKind::NeedsYou => self.events.needs_you,
             EventKind::Errors => self.events.errors,
         }
     }
@@ -178,12 +173,7 @@ mod tests {
     #[test]
     fn defaults_notify_every_event() {
         let settings = NotificationSettings::default();
-        for kind in [
-            EventKind::Digest,
-            EventKind::Outbox,
-            EventKind::NeedsYou,
-            EventKind::Errors,
-        ] {
+        for kind in [EventKind::Digest, EventKind::Outbox, EventKind::Errors] {
             assert!(settings.allows(kind), "{kind:?} is on by default");
         }
     }

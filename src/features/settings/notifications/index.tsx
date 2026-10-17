@@ -129,12 +129,6 @@ export default function SettingsNotifications() {
               onChange={(checked) => edit((next) => (next.events.outbox = checked))}
             />
             <Check
-              id="notify-needs-you"
-              label={t("events.needs_you")}
-              checked={values.events.needs_you}
-              onChange={(checked) => edit((next) => (next.events.needs_you = checked))}
-            />
-            <Check
               id="notify-errors"
               label={t("events.errors")}
               checked={values.events.errors}

@@ -15,7 +15,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
 const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
 
 const stored = (over: Partial<NotificationSettings> = {}): NotificationSettings => ({
-  events: { digest: true, outbox: true, needs_you: true, errors: true },
+  events: { digest: true, outbox: true, errors: true },
   top_matches_shown: 3,
   notify_when_empty: false,
   quiet_hours: { enabled: false, from: 22, to: 7, notify_during: false },
@@ -43,7 +43,7 @@ describe("Settings → Notifications (S5.3, FR-107)", () => {
     vi.mocked(commands.notificationsSnapshot).mockImplementation(() =>
       ok(
         stored({
-          events: { digest: true, outbox: false, needs_you: true, errors: false },
+          events: { digest: true, outbox: false, errors: false },
           top_matches_shown: 5,
           quiet_hours: { enabled: true, from: 22, to: 7, notify_during: true },
         }),
@@ -77,7 +77,7 @@ describe("Settings → Notifications (S5.3, FR-107)", () => {
 
     await waitFor(() =>
       expect(vi.mocked(commands.notificationsSave)).toHaveBeenCalledWith({
-        events: { digest: false, outbox: true, needs_you: true, errors: true },
+        events: { digest: false, outbox: true, errors: true },
         top_matches_shown: 2,
         notify_when_empty: false,
         quiet_hours: { enabled: true, from: 22, to: 7, notify_during: false },

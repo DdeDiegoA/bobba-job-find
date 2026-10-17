@@ -1651,7 +1651,6 @@ export type NotificationSettings = {
 export type NotifyEvents = {
   digest: boolean;
   outbox: boolean;
-  needs_you: boolean;
   errors: boolean;
 };
 
