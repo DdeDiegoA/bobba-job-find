@@ -60,12 +60,10 @@ fn band_distance(level: Seniority, min: Option<Seniority>, max: Option<Seniority
             .map_or(0, |index| index as i32)
     };
     let level = rank(level);
-    if min.is_some_and(|min| level < rank(min)) {
-        rank(min.expect("min is some")) - level
-    } else if max.is_some_and(|max| level > rank(max)) {
-        level - rank(max.expect("max is some"))
-    } else {
-        0
+    match (min, max) {
+        (Some(min), _) if level < rank(min) => rank(min) - level,
+        (_, Some(max)) if level > rank(max) => level - rank(max),
+        _ => 0,
     }
 }
 

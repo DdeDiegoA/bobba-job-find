@@ -230,6 +230,14 @@ Greenhouse board, company with a recent down-round and 3 Glassdoor layoff mentio
 
 The UI shows exactly this: fit is excellent, company health is the weakness — the user decides.
 
+> **Illustrative, not reproducible (S6.3, 2026-10-17).** The factor column above does not
+> average to the axes printed beside it: weighted by §6's own weights it gives Fit **82.1**
+> (not 81.3) and Quality **73.05** (not 63.9). The Rank figure of 75.2 follows from the axes
+> *as printed* (`0.65·81.3 + 0.35·63.9`), which is what S6.3's golden test pins; the same
+> test also pins what the shipped model computes from this example's inputs (Fit 67.44,
+> Quality 66.56, Rank 67.14), so the two are never confused. Treat this table as an
+> illustration of the *shape* of a ScoreCard, not as expected output.
+
 ---
 
 ## Sources
