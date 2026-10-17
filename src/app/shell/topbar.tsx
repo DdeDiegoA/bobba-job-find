@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 import KillSwitch from "@/app/header/kill-switch";
+import { openPalette } from "@/app/palette/store";
 import { Button } from "@/components/ui/button";
 import { RunProgress } from "@/features/today/run-report/run-progress";
 import { currentLocale } from "@/lib/i18n";
@@ -24,13 +25,16 @@ export function Topbar({ run, searchRef, onSearch }: TopbarProps) {
         {t(pageTitleKey(pathname))}
       </h1>
 
-      {/* ponytail: the palette (S6.7) takes over this trigger; today it just
-          receives focus so Cmd/Ctrl+K and `/` are already wired. */}
+      {/* S6.7 takes over this trigger: it focuses itself (so closing the palette
+          returns the focus here) and opens the command palette. */}
       <button
         ref={searchRef}
         type="button"
         data-slot="search"
-        onClick={onSearch}
+        onClick={() => {
+          onSearch();
+          openPalette();
+        }}
         aria-keyshortcuts="Meta+K Control+K"
         aria-label={t("shell:topbar.search")}
         className="flex h-9 items-center gap-2 rounded-xl border border-border bg-bg px-3 text-sm text-fg-muted hover:border-border-strong"

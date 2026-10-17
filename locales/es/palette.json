@@ -1,1 +1,24 @@
-{}
+{
+  "title": "Paleta de comandos",
+  "placeholder": "Busca páginas y ofertas…",
+  "results": "Resultados",
+  "pages": "Páginas",
+  "offers": "Ofertas",
+  "empty": "Sin resultados",
+  "hint": "Enter para abrir · Esc para cerrar",
+  "offer": {
+    "untitled": "Oferta sin título"
+  },
+  "triage": {
+    "hint": "Triaje: J/K mover · S guardar · D descartar · Enter abrir · {mod}+Z deshacer",
+    "saved": "Guardada «{title}»",
+    "dismissed": "Descartada «{title}»",
+    "undone": "Restaurada «{title}»",
+    "undo": "Deshacer",
+    "error": "No se pudo completar la acción"
+  },
+  "announce": {
+    "offer": "{title}. Veredicto: {verdict}. Encaje {fit}. Calidad {quality}.",
+    "unscored": "Aún sin puntuar"
+  }
+}

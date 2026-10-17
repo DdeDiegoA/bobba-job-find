@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { SuggestionBanner } from "./actions";
+import InboxKeyboard from "./keyboard";
 import InboxList from "./list";
 import InboxManualAdd from "./manual-add";
 
@@ -27,6 +28,9 @@ export default function InboxIndex() {
       {/* S6.6's leaf (FR-67): the Preferences change the third dismissal of a
           kind suggests. */}
       <SuggestionBanner />
+
+      {/* S6.7's leaf (FR-68): keyboard triage of the list below. */}
+      <InboxKeyboard />
 
       <InboxList />
 
