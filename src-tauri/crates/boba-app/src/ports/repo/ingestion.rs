@@ -11,6 +11,7 @@
 //! here, never re-extracted.
 
 use boba_domain::dedup::DedupProbe;
+use boba_domain::posting::lifecycle::{ClosedWarning, PostingLifecycle};
 use boba_domain::posting::{Offer, Provenance};
 use boba_domain::posting_features::{PendingPosting, PostingFeatures};
 
@@ -112,4 +113,33 @@ pub trait IngestionRepo: Send + Sync {
         profile_version: u32,
         limit: usize,
     ) -> Result<Vec<PendingPosting>, IngestionRepoError>;
+
+    // --- lifecycle (S4.4, FR-50/51/52) ---------------------------------------
+
+    /// One posting's lifecycle row, `None` for a posting stored before the row
+    /// existed (the migration backfills those, so in practice never).
+    fn lifecycle(&self, posting_id: &str) -> Result<Option<PostingLifecycle>, IngestionRepoError>;
+
+    /// Upsert one posting's lifecycle row (S4.4).
+    fn save_lifecycle(&self, lifecycle: &PostingLifecycle) -> Result<(), IngestionRepoError>;
+
+    /// Postings of `source_ids` last observed before `before`: the ones a run
+    /// that started at that instant did not see (S4.4, FR-52).
+    fn postings_missing_from_run(
+        &self,
+        source_ids: &[String],
+        before: &str,
+    ) -> Result<Vec<Offer>, IngestionRepoError>;
+
+    /// Postings of `source_ids` observed at or after `since` (S4.4, FR-52).
+    fn postings_seen_by_run(
+        &self,
+        source_ids: &[String],
+        since: &str,
+    ) -> Result<Vec<Offer>, IngestionRepoError>;
+
+    /// Every *Possibly closed* posting with the Applications saved against it,
+    /// so the tracker can warn (S4.4, FR-52). A read-only projection over the
+    /// apply owner's table; nothing here writes it (AD-16).
+    fn possibly_closed_with_applications(&self) -> Result<Vec<ClosedWarning>, IngestionRepoError>;
 }

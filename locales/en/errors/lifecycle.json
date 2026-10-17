@@ -1,0 +1,4 @@
+{
+  "errors.lifecycle.missing_posting": "Boba could not find that Offer. Refresh the inbox and try again.",
+  "errors.lifecycle.store": "Boba could not update this Offer's history. Try again."
+}
