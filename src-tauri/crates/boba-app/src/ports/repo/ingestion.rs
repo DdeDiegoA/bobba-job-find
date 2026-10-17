@@ -34,6 +34,20 @@ pub trait IngestionRepo: Send + Sync {
 
     fn get_offer(&self, id: &str) -> Result<Option<Offer>, IngestionRepoError>;
 
+    /// One page of every Offer, **newest first** (`first_seen` descending, `id`
+    /// ascending to break a tie) — what the Inbox and Today list (S6.4, FR-63).
+    ///
+    /// A page and not the table: the store returns what the caller asked for, so
+    /// a screen decides how much of the list it reads rather than the query
+    /// deciding by accident.
+    fn offers(&self, limit: usize, offset: usize) -> Result<Vec<Offer>, IngestionRepoError>;
+
+    /// The Sources an Offer was seen on, each once (AD-19). Dedup merges Offers
+    /// into one posting with one provenance row per source, so this is the
+    /// "Sources" line on an Offer card (FR-64) without reading each row's raw
+    /// payload.
+    fn offer_sources(&self, posting_id: &str) -> Result<Vec<String>, IngestionRepoError>;
+
     /// Every source payload that contributed to one posting, oldest first.
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError>;
 

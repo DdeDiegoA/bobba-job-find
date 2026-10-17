@@ -118,6 +118,9 @@ export const commands = {
   /**  Add an Offer from pasted text (AC2). */
   ingestManualText: (text: string) =>
     typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_text", { text })),
+  /**  One page of Offer cards, newest first (AC1/AC2). */
+  offersInbox: () =>
+    typedError<OfferCardView[], AppError_Serialize>(__TAURI_INVOKE("offers_inbox")),
   /**  Whether the store is open or the unlock screen must act (AC2). */
   unlockStatus: () =>
     typedError<UnlockStatus_Serialize, AppError_Serialize>(__TAURI_INVOKE("unlock_status")),
@@ -225,6 +228,19 @@ export type ApplicationDetail = {
   timeline: StatusEventView[];
   created_at: string;
   updated_at: string;
+};
+
+/**
+ *  One badge on an Offer card (FR-60, FR-64): a stable id the UI resolves to a
+ *  label in the active language. The Gate-driven badges are decided here because
+ *  only the core holds the Gate report (S6.1); the ghost and recruitment-fraud
+ *  badges S6.8 owns are appended to the same list when that slice lands.
+ */
+export type BadgeView = {
+  /**  Dotted id, e.g. `closing_soon`, `lead`, `below_floor`. */
+  id: string;
+  /**  The Gate it came from, when it came from one (`eligibility` … `deadline`). */
+  gate: string | null;
 };
 
 /**  One column (AC1). The four terminal columns collapse in the UI (FR-93). */
@@ -362,6 +378,22 @@ export type ErrorCode =
   /**  The capability is not supported on this build/host. */
   | "unsupported";
 
+/**
+ *  Why an Offer sits in Excluded (FR-54, EXPERIENCE §9.11): the Gate that vetoed
+ *  it, its reason, and the posting's own words when the Gate found any.
+ */
+export type ExclusionView = {
+  /**  The Gate that vetoed: `eligibility` … `deadline`. */
+  gate: string;
+  /**  The Gate's reason id, e.g. `requirement_not_met`, `below_floor`. */
+  reason: string;
+  /**
+   *  The quoted span, plain text: it is the posting's untrusted words (AD-7)
+   *  and is rendered as text, never as markup.
+   */
+  quote: string | null;
+};
+
 /**  What the editor sends when the user saves a fact (AC1/AC3). */
 export type FactRevisionInput = {
   /**  `None` creates a new item; `Some(item_id)` edits that item (AC3). */
@@ -461,6 +493,67 @@ export type ManualOffer = {
 
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";
+
+/**  One Offer as the Inbox lists it (FR-63/FR-64). */
+export type OfferCardView = {
+  posting_id: string;
+  title: string;
+  /**  Empty when no source named one — never invented. */
+  company: string;
+  locations: string[];
+  /**  `remote` | `hybrid` | `onsite` | `unknown`. */
+  work_mode: string;
+  /**  BCP-47 content language of the posting. */
+  lang: string;
+  /**
+   *  Pay in minor units with its code and period, so the UI formats it
+   *  (AD-17). A pay amount is nowhere near 2^53 minor units, so a JS number is
+   *  exact here and specta refuses an `i64`.
+   */
+  amount_minor: number | null;
+  currency: string | null;
+  /**  `year` | `month` | `hour`. */
+  pay_period: string | null;
+  /**
+   *  The Sources this Offer was seen on, each once (AD-19: dedup merges
+   *  Offers, it never deletes provenance).
+   */
+  sources: string[];
+  /**
+   *  UTC RFC 3339 (AD-17). The UI computes the age from these with the user's
+   *  own clock, which is the only one that makes "2d" honest.
+   */
+  first_seen: string;
+  posted_at: string | null;
+  deadline: string | null;
+  /**  The Fit axis (FR-55), `None` when the Offer has no card. */
+  fit: number | null;
+  /**  The Quality axis (FR-56), `None` when the Offer has no card. */
+  quality: number | null;
+  /**  The Rank (FR-57), `None` when the Offer has no card. */
+  rank: number | null;
+  /**
+   *  `strong` | `good` | `moderate` | `weak` | `poor`; `None` when the Offer
+   *  has no card.
+   */
+  verdict: string | null;
+  /**  `low` | `medium` | `high`; `None` when the Offer has no card. */
+  confidence: string | null;
+  /**
+   *  FR-57: a card the model could barely see is a **lead**, not a judgement.
+   *  The UI shows its Verdict dashed, as "Lead".
+   */
+  lead: boolean;
+  /**  FR-60/FR-64 badges, in Gate order. */
+  badges: BadgeView[];
+  /**  The Gate that vetoed this Offer (FR-54), `None` when none did. */
+  exclusion: ExclusionView | null;
+  /**
+   *  FR-52/§9.3: the Deadline Gate says the posting closes soon, so the card
+   *  belongs in the Closing soon section as well as in its band.
+   */
+  closing_soon: boolean;
+};
 
 /**  One document of the Package the application carries (AC3). */
 export type PackageItemView = {

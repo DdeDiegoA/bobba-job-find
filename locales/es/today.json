@@ -1,1 +1,16 @@
-{}
+{
+  "title": "Hoy",
+  "matches.title": "Coincidencias",
+  "matches.loading": "Cargando tus coincidencias…",
+  "matches.error.load": "Boba no pudo cargar tus coincidencias.",
+  "matches.retry": "Reintentar",
+  "matches.empty": "Aún no hay coincidencias",
+  "matches.empty.hint": "Lanza una búsqueda y las Ofertas más cercanas a ti llegarán aquí.",
+  "matches.open_inbox": "Abrir Bandeja",
+  "matches.top": "Lo más cercano a ti",
+  "matches.fit": "Encaje {fit}",
+  "matches.ranking_soon": "La puntuación empieza con tu próxima búsqueda.",
+  "band.strong": "Excelentes",
+  "band.good": "Buenas",
+  "band.moderate": "Moderadas"
+}
