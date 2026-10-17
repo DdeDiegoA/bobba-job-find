@@ -1,0 +1,12 @@
+{
+  "errors.status_proposals.store": "Could not read your replies.",
+  "errors.status_proposals.disclosure_required": "Review the reply-reading disclosure before Boba reads any email text.",
+  "errors.status_proposals.unknown_proposal": "That proposal no longer exists.",
+  "errors.status_proposals.not_pending": "That proposal was already decided.",
+  "errors.status_proposals.not_undoable": "That proposal never moved a card.",
+  "errors.status_proposals.stale": "The card moved after this change. Move it in the Tracker instead.",
+  "errors.status_proposals.needs_application": "Pick the application this reply is about first.",
+  "errors.status_proposals.already_there": "The card is already in that Stage.",
+  "errors.status_proposals.run": "The classification run failed. Your built-in rules still ran.",
+  "errors.status_proposals.unknown_mode": "That classification mode is not one Boba knows."
+}

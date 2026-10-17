@@ -20,6 +20,7 @@ pub mod profile_gaps;
 pub mod profile_import;
 pub mod session;
 pub mod sources;
+pub mod status_proposals;
 pub mod studio;
 pub mod tracker;
 pub mod triage;

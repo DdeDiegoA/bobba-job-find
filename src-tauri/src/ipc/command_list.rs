@@ -117,6 +117,14 @@ macro_rules! boba_commands {
             crate::notifications::commands::notifications_save,
             crate::autostart::autostart_status,
             crate::autostart::autostart_set,
+            crate::commands::status_proposals::status_proposals_disclosure,
+            crate::commands::status_proposals::status_proposals_save_settings,
+            crate::commands::status_proposals::status_proposals_classify,
+            crate::commands::status_proposals::status_proposals_pending,
+            crate::commands::status_proposals::status_proposals_approve,
+            crate::commands::status_proposals::status_proposals_approve_many,
+            crate::commands::status_proposals::status_proposals_dismiss,
+            crate::commands::status_proposals::status_proposals_undo,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

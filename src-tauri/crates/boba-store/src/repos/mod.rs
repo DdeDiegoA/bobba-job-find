@@ -15,4 +15,5 @@ pub mod profile;
 pub mod scoring;
 pub mod settings;
 pub mod sources;
+pub mod status_proposals;
 pub mod triage;

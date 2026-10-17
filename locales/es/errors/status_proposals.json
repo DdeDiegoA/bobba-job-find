@@ -1,0 +1,12 @@
+{
+  "errors.status_proposals.store": "No se pudieron leer tus respuestas.",
+  "errors.status_proposals.disclosure_required": "Revisa la divulgación antes de que Boba lea texto de correos.",
+  "errors.status_proposals.unknown_proposal": "Esa propuesta ya no existe.",
+  "errors.status_proposals.not_pending": "Esa propuesta ya se decidió.",
+  "errors.status_proposals.not_undoable": "Esa propuesta no movió ninguna tarjeta.",
+  "errors.status_proposals.stale": "La tarjeta se movió después de este cambio. Muévela desde el Seguimiento.",
+  "errors.status_proposals.needs_application": "Primero elige la postulación de la que trata esta respuesta.",
+  "errors.status_proposals.already_there": "La tarjeta ya está en esa Etapa.",
+  "errors.status_proposals.run": "Falló la clasificación. Tus reglas propias sí se ejecutaron.",
+  "errors.status_proposals.unknown_mode": "Ese modo de clasificación no existe en Boba."
+}
