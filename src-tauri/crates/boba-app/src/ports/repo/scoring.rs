@@ -50,12 +50,16 @@ pub trait ScoringRepo: Send + Sync {
 
     // --- narration (S6.5, FR-59) ---------------------------------------------
 
-    /// The newest narration for one Offer in one UI language, `None` when the
-    /// agent has not written one yet. A re-run writes a new row and leaves the
-    /// previous text readable, the same way a re-score leaves its card.
+    /// The newest narration for **one card** in one UI language, `None` when the
+    /// agent has not written one for that card yet.
+    ///
+    /// The card is part of the key on purpose (AD-8): a re-score writes a new
+    /// card, and the text written for the old one must not be shown beside
+    /// numbers it never saw.
     fn latest_narration(
         &self,
         posting_id: &str,
+        score_card_id: &str,
         lang: &str,
     ) -> Result<Option<ScoreNarration>, ScoringRepoError>;
 

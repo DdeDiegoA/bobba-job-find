@@ -121,17 +121,27 @@ pub fn check(text: &str, card: &ScoreCard) -> Result<(), NarrationViolation> {
 }
 
 /// How many sentences a text holds: segments that end in `.`, `!` or `?` and
-/// carry at least one letter or digit. A trailing fragment without punctuation
-/// counts too, so "One. Two" is two sentences.
+/// carry at least one letter or digit. A period inside a number (`82.5`) is not
+/// a sentence break, and a trailing fragment without punctuation counts too, so
+/// "One. Two" is two sentences.
 fn sentence_count(text: &str) -> usize {
     let mut count = 0;
     let mut has_word = false;
-    for character in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
         if character.is_alphanumeric() {
             has_word = true;
-        } else if matches!(character, '.' | '!' | '?') && has_word {
+        } else if matches!(character, '!' | '?') && has_word {
             count += 1;
             has_word = false;
+        } else if character == '.' && has_word {
+            // A period inside a number is part of it; only one that ends the
+            // token is a sentence break.
+            let inside_number = chars.peek().is_some_and(char::is_ascii_digit);
+            if !inside_number {
+                count += 1;
+                has_word = false;
+            }
         }
     }
     if has_word {
@@ -186,9 +196,12 @@ fn allowed_numbers(card: &ScoreCard) -> HashSet<String> {
     allowed
 }
 
-/// One rounded number into the allowed set, as the UI would show it.
+/// One number into the allowed set: the rounded form the UI shows, and the
+/// exact form when the card holds a decimal (`82.5`), so a narration may name
+/// either without inventing one.
 fn push_rounded(allowed: &mut HashSet<String>, value: f32) {
     allowed.insert(format!("{}", value.round() as i64));
+    allowed.insert(format!("{value}"));
 }
 
 /// The card's own skill vocabulary: every word of every `matched` and `missing`
@@ -214,16 +227,18 @@ fn evidence_text(evidence: &super::gates::Evidence) -> String {
 }
 
 /// The digit runs of a text, normalised: `65,000` and `65000` are the same
-/// number. A decimal point between digits is kept, so `82.5` stays `82.5`.
+/// number. A decimal point between digits is kept, so `82.5` stays `82.5`; a
+/// `.` or `,` that is not followed by a digit ends the number.
 fn numbers_in(text: &str) -> Vec<String> {
     let mut numbers = Vec::new();
     let mut current = String::new();
-    let mut last_was_digit = false;
-    for character in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
         if character.is_ascii_digit() {
             current.push(character);
-            last_was_digit = true;
-        } else if matches!(character, ',' | '.') && last_was_digit && next_is_digit(text, character)
+        } else if matches!(character, ',' | '.')
+            && !current.is_empty()
+            && chars.peek().is_some_and(char::is_ascii_digit)
         {
             // A separator inside a number; keep a decimal point only.
             if character == '.' {
@@ -234,30 +249,12 @@ fn numbers_in(text: &str) -> Vec<String> {
                 numbers.push(current.trim_end_matches('.').to_string());
                 current.clear();
             }
-            last_was_digit = false;
         }
     }
     if !current.is_empty() {
         numbers.push(current.trim_end_matches('.').to_string());
     }
     numbers
-}
-
-/// Whether the separator at this point of the string is followed by a digit.
-/// The scanning loop cannot look ahead cheaply, so this re-reads the tail; the
-/// strings are one sentence long, so the cost is irrelevant.
-fn next_is_digit(text: &str, separator: char) -> bool {
-    let mut seen = false;
-    for character in text.chars() {
-        if !seen {
-            if character == separator {
-                seen = true;
-            }
-            continue;
-        }
-        return character.is_ascii_digit();
-    }
-    false
 }
 
 /// The words of a phrase, keeping `c++`, `c#` and `node.js` whole enough to be
@@ -388,6 +385,26 @@ mod tests {
         let mut card = card();
         card.factors[0].missing = vec!["5 years of Kubernetes".to_string()];
         let text = "You match most of the profile. The posting asks for 5 years of Kubernetes.";
+        assert_eq!(check(text, &card), Ok(()));
+    }
+
+    #[test]
+    fn an_invented_decimal_is_refused() {
+        // BUG1 regression: the decimal's digits must not be read as two whole
+        // numbers, or "5.5" would pass on the strength of an allowed "5".
+        let text = "You match 80 of 80 points here. Your profile has 5.5 years.";
+        assert_eq!(
+            check(text, &card()),
+            Err(NarrationViolation::Number("5.5".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_grounded_decimal_is_accepted() {
+        let mut card = card();
+        card.factors[0].score = Some(82.5);
+        let text = "You fit the role at 82.5, with dbt and Airflow standing out. \
+                    Kubernetes is the gap.";
         assert_eq!(check(text, &card), Ok(()));
     }
 

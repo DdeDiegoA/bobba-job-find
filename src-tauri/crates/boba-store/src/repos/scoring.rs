@@ -94,18 +94,26 @@ pub fn cards_for(conn: &Connection, posting_id: &str) -> Result<Vec<ScoreCardRow
     Ok(rows.collect::<rusqlite::Result<Vec<ScoreCardRow>>>()?)
 }
 
-/// The narration stored newest-first for one Offer in one language (S6.5).
+/// The narration stored newest-first for one card in one language (S6.5).
+///
+/// `score_card_id` is part of the lookup, not a filter the caller may forget
+/// (AD-8): a narration is bound to the card it explains, and a re-scored Offer
+/// has no narration until one is written against the new card.
 pub fn latest_narration(
     conn: &Connection,
     posting_id: &str,
+    score_card_id: &str,
     lang: &str,
 ) -> Result<Option<ScoreNarration>, StoreError> {
     let mut statement = conn.prepare(
         "SELECT id, posting_id, score_card_id, lang, text, untrusted_origin, created_at \
-         FROM score_narration WHERE posting_id = ?1 AND lang = ?2 \
+         FROM score_narration WHERE posting_id = ?1 AND score_card_id = ?2 AND lang = ?3 \
          ORDER BY created_at DESC, id DESC LIMIT 1",
     )?;
-    let mut rows = statement.query_map(rusqlite::params![posting_id, lang], narration_row)?;
+    let mut rows = statement.query_map(
+        rusqlite::params![posting_id, score_card_id, lang],
+        narration_row,
+    )?;
     Ok(rows.next().transpose()?)
 }
 
@@ -260,11 +268,13 @@ impl ScoringRepo for Store {
     fn latest_narration(
         &self,
         posting_id: &str,
+        score_card_id: &str,
         lang: &str,
     ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
         let posting_id = posting_id.to_string();
+        let score_card_id = score_card_id.to_string();
         let lang = lang.to_string();
-        self.read(move |conn| latest_narration(conn, &posting_id, &lang))
+        self.read(move |conn| latest_narration(conn, &posting_id, &score_card_id, &lang))
             .map_err(map_err)
     }
 
@@ -599,7 +609,7 @@ mod tests {
         )
         .expect("spanish");
 
-        let latest = latest_narration(&conn, POSTING, "en")
+        let latest = latest_narration(&conn, POSTING, "sc_2", "en")
             .expect("read")
             .expect("a narration");
         assert_eq!(latest.id, "nrt_2");
@@ -607,11 +617,19 @@ mod tests {
         assert!(latest.untrusted_origin);
         assert_eq!(latest.score_card_id, "sc_2");
 
-        let spanish = latest_narration(&conn, POSTING, "es")
+        let spanish = latest_narration(&conn, POSTING, "sc_2", "es")
             .expect("read")
             .expect("a narration");
         assert_eq!(spanish.id, "nrt_3");
-        assert_eq!(latest_narration(&conn, POSTING, "fr").expect("read"), None);
+        assert_eq!(
+            latest_narration(&conn, POSTING, "sc_2", "fr").expect("read"),
+            None
+        );
+        // A narration never answers for a card it does not explain (AD-8).
+        assert_eq!(
+            latest_narration(&conn, POSTING, "sc_other", "en").expect("read"),
+            None
+        );
     }
 
     #[test]
@@ -621,6 +639,9 @@ mod tests {
         insert_narration(&conn, &narration("nrt_1", "en", "First. Text.", "t")).expect("insert");
         conn.execute("DELETE FROM posting WHERE id = ?1", params![POSTING])
             .expect("delete the offer");
-        assert_eq!(latest_narration(&conn, POSTING, "en").expect("read"), None);
+        assert_eq!(
+            latest_narration(&conn, POSTING, "sc_2", "en").expect("read"),
+            None
+        );
     }
 }

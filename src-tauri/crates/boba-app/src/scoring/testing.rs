@@ -101,6 +101,7 @@ impl ScoringRepo for FakeScoringRepo {
     fn latest_narration(
         &self,
         posting_id: &str,
+        score_card_id: &str,
         lang: &str,
     ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
         self.check()?;
@@ -109,7 +110,11 @@ impl ScoringRepo for FakeScoringRepo {
             .lock()
             .expect("not poisoned")
             .iter()
-            .filter(|stored| stored.posting_id == posting_id && stored.lang == lang)
+            .filter(|stored| {
+                stored.posting_id == posting_id
+                    && stored.score_card_id == score_card_id
+                    && stored.lang == lang
+            })
             .max_by(|left, right| {
                 left.created_at
                     .cmp(&right.created_at)

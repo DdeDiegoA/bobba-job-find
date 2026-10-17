@@ -2394,7 +2394,7 @@ mod tests {
         assert_eq!(saved["untrusted_origin"], json!(true));
 
         use boba_app::ports::repo::scoring::ScoringRepo;
-        let stored = ScoringRepo::latest_narration(store.as_ref(), &posting, "en")
+        let stored = ScoringRepo::latest_narration(store.as_ref(), &posting, "sc_narration", "en")
             .expect("read")
             .expect("a narration");
         assert!(stored.untrusted_origin);

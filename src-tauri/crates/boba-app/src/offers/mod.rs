@@ -630,6 +630,7 @@ mod tests {
         fn latest_narration(
             &self,
             posting_id: &str,
+            score_card_id: &str,
             lang: &str,
         ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
             Ok(self
@@ -637,7 +638,11 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|row| row.posting_id == posting_id && row.lang == lang)
+                .filter(|row| {
+                    row.posting_id == posting_id
+                        && row.score_card_id == score_card_id
+                        && row.lang == lang
+                })
                 .max_by(|left, right| left.created_at.cmp(&right.created_at))
                 .cloned())
         }
@@ -1190,6 +1195,73 @@ mod tests {
         assert!(
             english.narration.is_none(),
             "no English narration was written"
+        );
+    }
+
+    /// BUG2 regression (AD-8): a re-score writes a new card, and the narration
+    /// written for the old one must not be shown beside the new numbers.
+    #[test]
+    fn a_rescored_offer_hides_the_narration_written_for_the_old_card() {
+        use crate::ingest::normalize::testing::FakeIngestionRepo;
+        use crate::narration::Narration;
+
+        let postings = Arc::new(FakeIngestionRepo::default());
+        let offer = offer();
+        postings
+            .insert_offer(&offer, &seen("greenhouse", "gh-42", &offer.apply.url))
+            .expect("store the offer");
+        let scoring = Arc::new(FakeScoringRepo::default());
+        let first = scored_card(Vec::new());
+        scoring.insert_card(&first).expect("first card");
+        Narration::new(scoring.clone())
+            .save(
+                "pst_01",
+                "en",
+                "You match dbt and Airflow. Kubernetes is missing.",
+                "2026-10-16T10:00:00Z",
+            )
+            .expect("narration for the first card");
+
+        let inbox = OffersInbox::new(postings.clone(), scoring.clone());
+        assert!(
+            inbox
+                .detail("pst_01", "en")
+                .expect("detail")
+                .narration
+                .is_some(),
+            "the narration matches the card it was written for"
+        );
+
+        let mut second = first.clone();
+        second.id = "sc_02".to_string();
+        second.prefs_version = 9;
+        second.created_at = "2026-10-17T10:00:00Z".to_string();
+        scoring.insert_card(&second).expect("the re-score");
+
+        assert!(
+            inbox
+                .detail("pst_01", "en")
+                .expect("detail")
+                .narration
+                .is_none(),
+            "the old narration must not describe the new card"
+        );
+
+        Narration::new(scoring.clone())
+            .save(
+                "pst_01",
+                "en",
+                "You match dbt and Airflow. Kubernetes is missing.",
+                "2026-10-17T11:00:00Z",
+            )
+            .expect("narration for the new card");
+        assert!(
+            inbox
+                .detail("pst_01", "en")
+                .expect("detail")
+                .narration
+                .is_some(),
+            "a narration written against the new card shows again"
         );
     }
 }

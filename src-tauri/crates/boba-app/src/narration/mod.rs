@@ -77,15 +77,26 @@ impl Narration {
         Self { scoring }
     }
 
-    /// The newest narration for one Offer in one UI language, `None` when the
-    /// agent has not written one (the screen says so; it does not invent one).
+    /// The newest narration for one Offer's **latest card** in one UI
+    /// language, `None` when the agent has not written one for that card (the
+    /// screen says so; it does not invent one).
+    ///
+    /// A re-score writes a new card, so the text written for the old one is no
+    /// longer shown: it described numbers that are not on screen any more
+    /// (AD-8).
     pub fn latest(
         &self,
         posting_id: &str,
         lang: &str,
     ) -> Result<Option<NarrationView>, NarrationError> {
         let lang = language(lang)?;
-        Ok(self.scoring.latest_narration(posting_id, lang)?.map(view))
+        let Some(card) = self.scoring.latest_card(posting_id)? else {
+            return Ok(None);
+        };
+        Ok(self
+            .scoring
+            .latest_narration(posting_id, &card.id, lang)?
+            .map(view))
     }
 
     /// Check and store the narration a run proposed (FR-59, AD-5).
@@ -197,7 +208,7 @@ mod tests {
         assert_eq!(saved.text, text);
 
         let stored = repo
-            .latest_narration(POSTING, "en")
+            .latest_narration(POSTING, "sc_01", "en")
             .expect("read")
             .expect("a row");
         assert_eq!(stored.score_card_id, "sc_01");
@@ -215,7 +226,10 @@ mod tests {
             .save(POSTING, "en", text, "2026-10-16T01:00:00Z")
             .expect_err("refused");
         assert_eq!(error.message_key(), "errors.narration.ungrounded");
-        assert_eq!(repo.latest_narration(POSTING, "en").expect("read"), None);
+        assert_eq!(
+            repo.latest_narration(POSTING, "sc_01", "en").expect("read"),
+            None
+        );
     }
 
     #[test]
@@ -265,5 +279,32 @@ mod tests {
         let use_case = Narration::new(repo);
         let error = use_case.latest(POSTING, "fr").expect_err("refused");
         assert_eq!(error.message_key(), "errors.narration.language");
+    }
+
+    #[test]
+    fn latest_ignores_a_narration_written_for_an_older_card() {
+        let repo = Arc::new(FakeScoringRepo::default());
+        repo.insert_card(&scored_row()).expect("a card");
+        let use_case = Narration::new(repo.clone());
+        use_case
+            .save(
+                POSTING,
+                "en",
+                "You match dbt and Airflow. Kubernetes is missing.",
+                "2026-10-16T01:00:00Z",
+            )
+            .expect("a narration for the first card");
+
+        let mut newer = scored_row();
+        newer.id = "sc_02".to_string();
+        newer.prefs_version = 2;
+        newer.created_at = "2026-10-17T00:00:00Z".to_string();
+        repo.insert_card(&newer).expect("the re-score");
+
+        assert_eq!(
+            use_case.latest(POSTING, "en").expect("read"),
+            None,
+            "the old text must not describe the new card"
+        );
     }
 }
