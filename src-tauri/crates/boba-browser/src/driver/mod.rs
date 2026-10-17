@@ -287,9 +287,10 @@ impl<T: CdpTransport> SessionDriver<T> {
             Some(driver) => step(driver),
             None => Err(BrowserError::NotRunning),
         };
-        if result.is_err() {
-            // A dead transport must not be reused: drop it (and close it
-            // best-effort) so the next call starts a fresh browser (F1).
+        if matches!(result, Err(BrowserError::Disconnected(_))) {
+            // Only a lost connection ends the session (F4): a script error or
+            // a bad handle leaves the window the user is filling alive.
+            // Dropping it lets the next open start a fresh browser (F1).
             if let Some(driver) = slot.take() {
                 let _ = driver.close();
             }
@@ -433,10 +434,10 @@ impl ChromeTransport {
 pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Why a CDP call did not answer.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum WaitError {
     /// The browser answered with a failure.
-    Failed(String),
+    Failed(chromiumoxide::error::CdpError),
     /// The browser did not answer within the limit.
     TimedOut,
 }
@@ -445,14 +446,53 @@ pub enum WaitError {
 fn within<T>(
     runtime: &tokio::runtime::Runtime,
     limit: std::time::Duration,
-    work: impl std::future::Future<Output = Result<T, String>>,
+    work: impl std::future::Future<Output = Result<T, chromiumoxide::error::CdpError>>,
 ) -> Result<T, WaitError> {
     // The timeout future is built inside `block_on`: `tokio::time::sleep`
     // needs a runtime context to exist at all.
     match runtime.block_on(async move { tokio::time::timeout(limit, work).await }) {
         Ok(Ok(value)) => Ok(value),
-        Ok(Err(message)) => Err(WaitError::Failed(message)),
+        Ok(Err(error)) => Err(WaitError::Failed(error)),
         Err(_) => Err(WaitError::TimedOut),
+    }
+}
+
+/// Whether a CDP failure means the connection itself is gone (the window was
+/// closed, the socket died) rather than the page answering with an error.
+///
+/// Only the former may end the session: a script exception or a bad field
+/// must leave the window the user is filling alive (S9.4 review F4).
+fn fatal_cdp(error: &chromiumoxide::error::CdpError) -> bool {
+    use chromiumoxide::error::CdpError;
+    matches!(
+        error,
+        CdpError::Ws(_)
+            | CdpError::Io(_)
+            | CdpError::NoResponse
+            | CdpError::UnexpectedWsMessage(_)
+            | CdpError::ChannelSendError(_)
+            | CdpError::Timeout
+            | CdpError::LaunchExit(..)
+            | CdpError::LaunchTimeout(_)
+            | CdpError::LaunchIo(..)
+    )
+}
+
+/// Map a failed CDP call onto the port's error. `navigation` only changes how
+/// a page-level failure is labelled.
+fn call_error(error: WaitError, navigation: bool) -> BrowserError {
+    let fatal = match &error {
+        WaitError::TimedOut => true,
+        WaitError::Failed(error) => fatal_cdp(error),
+    };
+    let message = match error {
+        WaitError::TimedOut => "the browser did not answer in time".to_string(),
+        WaitError::Failed(error) => error.to_string(),
+    };
+    match (fatal, navigation) {
+        (true, _) => BrowserError::Disconnected(message),
+        (false, true) => BrowserError::Navigation(message),
+        (false, false) => BrowserError::Page(message),
     }
 }
 
@@ -460,22 +500,17 @@ impl CdpTransport for ChromeTransport {
     fn navigate(&self, url: &str) -> Result<(), BrowserError> {
         let page = &self.page;
         within(&self.runtime, CALL_TIMEOUT, async move {
-            page.goto(url)
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+            page.goto(url).await.map(|_| ())
         })
-        .map_err(|error| BrowserError::Navigation(wait_message(error)))
+        .map_err(|error| call_error(error, true))
     }
 
     fn evaluate(&self, script: &str) -> Result<String, BrowserError> {
         let page = &self.page;
         let result = within(&self.runtime, CALL_TIMEOUT, async move {
-            page.evaluate_expression(script)
-                .await
-                .map_err(|error| error.to_string())
+            page.evaluate_expression(script).await
         })
-        .map_err(|error| BrowserError::Page(wait_message(error)))?;
+        .map_err(|error| call_error(error, false))?;
         result
             .into_value::<String>()
             .map_err(|error| BrowserError::Page(error.to_string()))
@@ -486,9 +521,8 @@ impl CdpTransport for ChromeTransport {
         within(&self.runtime, CALL_TIMEOUT, async move {
             page.screenshot(chromiumoxide::page::ScreenshotParams::default())
                 .await
-                .map_err(|error| error.to_string())
         })
-        .map_err(|error| BrowserError::Page(wait_message(error)))
+        .map_err(|error| call_error(error, false))
     }
 
     fn set_files(&self, handle: &str, paths: &[PathBuf]) -> Result<(), BrowserError> {
@@ -501,31 +535,24 @@ impl CdpTransport for ChromeTransport {
         }
         let selector = format!("[data-boba-field=\"{handle}\"]");
         let page = &self.page;
+        let element = within(&self.runtime, CALL_TIMEOUT, async move {
+            page.find_element(selector).await
+        })
+        .map_err(|error| call_error(error, false))?;
+        let params = SetFileInputFilesParams::builder()
+            .files(
+                paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .backend_node_id(element.backend_node_id)
+            .build()
+            .map_err(BrowserError::Page)?;
         within(&self.runtime, CALL_TIMEOUT, async move {
-            page.find_element(selector)
-                .await
-                .map_err(|error| error.to_string())
+            page.execute(params).await.map(|_| ())
         })
-        .map_err(|error| BrowserError::Page(wait_message(error)))
-        .and_then(|element| {
-            let params = SetFileInputFilesParams::builder()
-                .files(
-                    paths
-                        .iter()
-                        .map(|path| path.to_string_lossy().to_string())
-                        .collect::<Vec<_>>(),
-                )
-                .backend_node_id(element.backend_node_id)
-                .build()
-                .map_err(BrowserError::Page)?;
-            within(&self.runtime, CALL_TIMEOUT, async move {
-                page.execute(params)
-                    .await
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            })
-            .map_err(|error| BrowserError::Page(wait_message(error)))
-        })
+        .map_err(|error| call_error(error, false))
     }
 
     fn close(&self) -> Result<(), BrowserError> {
@@ -534,21 +561,9 @@ impl CdpTransport for ChromeTransport {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         within(&self.runtime, CALL_TIMEOUT, async move {
-            browser
-                .close()
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
+            browser.close().await.map(|_| ())
         })
-        .map_err(|error| BrowserError::Page(wait_message(error)))
-    }
-}
-
-/// The message a failed or timed-out CDP call reports.
-fn wait_message(error: WaitError) -> String {
-    match error {
-        WaitError::Failed(message) => message,
-        WaitError::TimedOut => "the browser did not answer in time".to_string(),
+        .map_err(|error| call_error(error, false))
     }
 }
 
@@ -574,12 +589,14 @@ mod tests {
         closed: Mutex<bool>,
         /// Set when the browser behind this transport is gone (window closed).
         dead: std::sync::Arc<Mutex<bool>>,
+        /// Set when the page itself answers with an error (a script exception).
+        page_error: Mutex<bool>,
     }
 
     impl CdpTransport for FakeTransport {
         fn navigate(&self, url: &str) -> Result<(), BrowserError> {
             if *self.dead.lock().unwrap() {
-                return Err(BrowserError::NotRunning);
+                return Err(BrowserError::Disconnected("the window is gone".into()));
             }
             self.navigated.lock().unwrap().push(url.to_string());
             Ok(())
@@ -587,7 +604,10 @@ mod tests {
 
         fn evaluate(&self, script: &str) -> Result<String, BrowserError> {
             if *self.dead.lock().unwrap() {
-                return Err(BrowserError::Page("the browser window is gone".into()));
+                return Err(BrowserError::Disconnected("the window is gone".into()));
+            }
+            if *self.page_error.lock().unwrap() {
+                return Err(BrowserError::Page("boba: field not found".into()));
             }
             self.scripts.lock().unwrap().push(script.to_string());
             Ok(self.page.lock().unwrap().clone())
@@ -765,20 +785,25 @@ mod tests {
             .unwrap();
         let error = within(&runtime, std::time::Duration::from_millis(10), async {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            Ok::<(), String>(())
+            Ok::<(), chromiumoxide::error::CdpError>(())
         })
         .expect_err("a hung call must not hold the thread");
-        assert_eq!(error, WaitError::TimedOut);
-        assert_eq!(
-            wait_message(error),
-            "the browser did not answer in time".to_string()
-        );
+        assert!(matches!(error, WaitError::TimedOut));
+        assert!(matches!(
+            call_error(error, false),
+            BrowserError::Disconnected(_)
+        ));
 
         let failed = within(&runtime, std::time::Duration::from_secs(1), async {
-            Err::<(), String>("page closed".to_string())
+            Err::<(), _>(chromiumoxide::error::CdpError::ChromeMessage(
+                "page closed".to_string(),
+            ))
         })
         .expect_err("a failed call reports the browser's message");
-        assert_eq!(failed, WaitError::Failed("page closed".to_string()));
+        assert!(matches!(
+            call_error(failed, false),
+            BrowserError::Page(message) if message.contains("page closed")
+        ));
     }
 
     #[test]
@@ -795,6 +820,54 @@ mod tests {
             *launches.lock().unwrap(),
             0,
             "a snapshot or confirm never opens a window (F3)"
+        );
+    }
+
+    // F4: a script or page error must not close the window the user is
+    // filling; only a lost connection ends the session.
+    #[test]
+    fn a_script_error_keeps_the_session() {
+        let launches = std::sync::Arc::new(Mutex::new(0u32));
+        let counter = launches.clone();
+        let driver = SessionDriver::new(move || {
+            *counter.lock().unwrap() += 1;
+            let transport = FakeTransport::default();
+            *transport.page.lock().unwrap() = page("Apply");
+            Ok(PageDriver::new(transport, scratch("script")))
+        });
+        driver
+            .open(AtsProvider::Lever, "https://jobs.lever.co/nimbus/abc")
+            .unwrap();
+
+        // The read script hits an element the page has since replaced.
+        *driver
+            .session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .transport
+            .page_error
+            .lock()
+            .unwrap() = true;
+        assert!(matches!(driver.snapshot(), Err(BrowserError::Page(_))));
+
+        // The session is still there: the next read works without relaunching.
+        *driver
+            .session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .transport
+            .page_error
+            .lock()
+            .unwrap() = false;
+        driver.snapshot().unwrap();
+        assert_eq!(
+            *launches.lock().unwrap(),
+            1,
+            "a page error never costs the user their window"
         );
     }
 

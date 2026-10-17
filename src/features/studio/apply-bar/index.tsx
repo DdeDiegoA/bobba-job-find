@@ -4,9 +4,9 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { ChannelView, KitAnswerView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
-import EmailApplyPanel from "./email-apply";
 import AnswerApprovePanel from "./approve-panel";
 import AtsAssist from "./ats-assist";
+import EmailApplyPanel from "./email-apply";
 import { useApplyView, useExportPdfs, useMarkApplied } from "./use-apply-bar";
 
 /**

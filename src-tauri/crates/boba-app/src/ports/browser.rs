@@ -162,6 +162,11 @@ pub enum BrowserError {
     /// The attachment could not be written for the upload.
     #[error("the attachment could not be prepared: {0}")]
     Upload(String),
+    /// The CDP connection is gone (the window was closed, or a call timed
+    /// out). Only this kind of failure ends the session; a page or script
+    /// error leaves the browser the user is filling alive (S9.4 review F4).
+    #[error("the browser connection was lost: {0}")]
+    Disconnected(String),
 }
 
 /// Drives the user's own browser for the ATS Form channel (AD-10).
