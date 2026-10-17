@@ -31,9 +31,12 @@ pdf-extract = { workspace = true }
 # whose licenses (and decoders) this slice has no use for.
 zip = { workspace = true, default-features = false, features = ["deflate"] }
 quick-xml = { workspace = true }
+# The PDF bomb pre-scan (S3.5 review F2): lopdf parses the object table without
+# decompressing, and flate2 inflates each FlateDecode stream under a byte cap.
+lopdf = { workspace = true }
+flate2 = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-# Fixtures the extraction tests build in memory (a real PDF, a real DOCX ZIP).
-lopdf = { workspace = true }
+# The extraction tests build a real PDF and a real DOCX ZIP in memory.
 tempfile = { workspace = true }

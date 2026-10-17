@@ -30,6 +30,14 @@ pub const MAX_ARCHIVE_ENTRIES: usize = 200;
 /// alone do not stop a bomb: many small entries add up the same way.
 pub const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 
+/// The most one PDF `FlateDecode` stream may inflate to (S3.5 review F2). A
+/// few hundred KB of deflated zeros expand past this; a real CV's streams do
+/// not come close.
+pub const MAX_PDF_STREAM_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The most a PDF's streams may inflate to in total.
+pub const MAX_PDF_INFLATED_BYTES: u64 = 128 * 1024 * 1024;
+
 /// A scanned or image-only PDF yields a few form feeds at most; below this many
 /// alphanumeric characters there is no readable text layer (AC2).
 const MIN_ALNUM: usize = 20;
@@ -133,9 +141,7 @@ fn extract_one(name: &str, bytes: &[u8]) -> Result<String, TextError> {
 /// CSV rows are read by [`zipped_text`], which applies its own rule.
 fn extract_raw(name: &str, bytes: &[u8]) -> Result<String, TextError> {
     match extension_of(name).as_str() {
-        "pdf" => pdf_text(bytes).ok_or_else(|| TextError::NoText {
-            file: name.to_string(),
-        }),
+        "pdf" => pdf_text(name, bytes),
         "docx" => docx_text(name, bytes),
         "zip" => zipped_text(name, bytes),
         "txt" | "md" | "csv" | "json" => Ok(String::from_utf8_lossy(bytes).into_owned()),
@@ -153,13 +159,99 @@ fn readable(text: &str) -> bool {
 
 /// A PDF's text layer, or `None` when there is none. `pdf-extract` can panic on
 /// a malformed file; a panic means the same thing to the user as an empty layer.
-fn pdf_text(bytes: &[u8]) -> Option<String> {
+fn pdf_text(name: &str, bytes: &[u8]) -> Result<String, TextError> {
+    // A compressed stream can inflate into gigabytes before `pdf-extract` ever
+    // asks for it, and an OOM abort is not something `catch_unwind` can catch.
+    // So the object table is scanned first (S3.5 review F2): every FlateDecode
+    // stream is inflated under a byte cap and thrown away.
+    if !pdf_streams_within_cap(bytes) {
+        return Err(TextError::TooLarge);
+    }
     let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         pdf_extract::extract_text_from_mem(bytes)
     }));
     match parsed {
-        Ok(Ok(text)) => Some(text),
-        _ => None,
+        Ok(Ok(text)) => Ok(text),
+        // A panic or a malformed file means the same thing to the user: there
+        // is no readable text layer in this PDF (AC2).
+        _ => Err(TextError::NoText {
+            file: name.to_string(),
+        }),
+    }
+}
+
+/// Whether every `FlateDecode` stream in the PDF inflates within the caps.
+/// A PDF `lopdf` cannot parse is not judged here: `pdf-extract` fails on it
+/// the same way, and the caller reports `NoText`.
+fn pdf_streams_within_cap(bytes: &[u8]) -> bool {
+    let Ok(document) = lopdf::Document::load_mem(bytes) else {
+        return true;
+    };
+    let mut total: u64 = 0;
+    for object in document.objects.values() {
+        let lopdf::Object::Stream(stream) = object else {
+            continue;
+        };
+        if !stream_filters(stream)
+            .iter()
+            .any(|filter| filter == "FlateDecode" || filter == "Fl")
+        {
+            continue;
+        }
+        let Some(size) = inflate_len_within(&stream.content, MAX_PDF_STREAM_BYTES) else {
+            return false;
+        };
+        total += size;
+        if total > MAX_PDF_INFLATED_BYTES {
+            return false;
+        }
+    }
+    true
+}
+
+/// Every filter an object names, flattened: a stream's `/Filter` is one name or
+/// an array of them.
+fn stream_filters(stream: &lopdf::Stream) -> Vec<String> {
+    let Ok(filter) = stream.dict.get(b"Filter") else {
+        return Vec::new();
+    };
+    fn walk(object: &lopdf::Object, names: &mut Vec<String>) {
+        match object {
+            lopdf::Object::Name(name) => {
+                names.push(String::from_utf8_lossy(name).into_owned());
+            }
+            lopdf::Object::Array(items) => {
+                for item in items {
+                    walk(item, names);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut names = Vec::new();
+    walk(filter, &mut names);
+    names
+}
+
+/// Deflate `content` and stop one byte past `limit`. `None` means the stream
+/// inflates past the cap; an undecodable stream counts as `Some(0)` — it is not
+/// a bomb, and `pdf-extract` will report the malformed PDF itself.
+fn inflate_len_within(content: &[u8], limit: u64) -> Option<u64> {
+    use std::io::Read;
+    let mut decoder = flate2::read::ZlibDecoder::new(content).take(limit + 1);
+    let mut buffer = [0u8; 16 * 1024];
+    let mut total: u64 = 0;
+    loop {
+        match decoder.read(&mut buffer) {
+            Ok(0) => return Some(total),
+            Ok(read) => {
+                total += read as u64;
+                if total > limit {
+                    return None;
+                }
+            }
+            Err(_) => return Some(total),
+        }
     }
 }
 
@@ -401,6 +493,66 @@ mod tests {
         bytes
     }
 
+    /// A one-page PDF whose content stream is `payload` inflated through
+    /// `FlateDecode` (the real shape of most PDFs, and of a decompression bomb).
+    fn pdf_bytes_deflated(payload: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use lopdf::{Document, Object, Stream, dictionary};
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(payload).expect("deflate");
+        let compressed = encoder.finish().expect("finish");
+
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content_id = doc.add_object(Stream::new(
+            dictionary! { "Filter" => "FlateDecode" },
+            compressed,
+        ));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        doc.trailer.set("Root", catalog_id);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).expect("save");
+        bytes
+    }
+
+    /// The content stream of a one-page PDF with `line` drawn on it.
+    fn text_ops(line: &str) -> Vec<u8> {
+        use lopdf::Object;
+        lopdf::content::Content {
+            operations: vec![
+                lopdf::content::Operation::new("BT", vec![]),
+                lopdf::content::Operation::new("Tf", vec![Object::Name(b"F1".to_vec()), 12.into()]),
+                lopdf::content::Operation::new("Td", vec![72.into(), 720.into()]),
+                lopdf::content::Operation::new("Tj", vec![Object::string_literal(line)]),
+                lopdf::content::Operation::new("ET", vec![]),
+            ],
+        }
+        .encode()
+        .expect("encode")
+    }
+
     // AC1: a plain-text CV is read as-is.
     #[test]
     fn a_text_file_is_read_as_is() {
@@ -460,6 +612,34 @@ mod tests {
     fn a_corrupt_pdf_is_the_no_text_error_not_a_panic() {
         let error = extract(&[file("broken.pdf", "not a pdf at all".as_bytes())]).unwrap_err();
         assert!(matches!(error, TextError::NoText { .. }));
+    }
+
+    // AC1: a compressed (FlateDecode) content stream is read like any other.
+    #[test]
+    fn a_pdf_with_a_deflated_text_layer_is_read() {
+        let extracted = extract(&[file(
+            "cv.pdf",
+            pdf_bytes_deflated(&text_ops("Ada Lovelace, backend engineer, six years.")),
+        )])
+        .expect("a deflated text layer");
+        assert!(
+            extracted.text.contains("Ada Lovelace"),
+            "{}",
+            extracted.text
+        );
+    }
+
+    // S3.5 review F2: a small PDF whose streams inflate past the cap is refused
+    // before `pdf-extract` can allocate its way through memory.
+    #[test]
+    fn a_pdf_whose_streams_inflate_past_the_cap_is_refused() {
+        // 70 MB of zeros deflate to a few hundred KB: a classic bomb.
+        let mut payload = vec![0u8; (MAX_PDF_STREAM_BYTES + 1024 * 1024) as usize];
+        payload[0] = b'B';
+        payload[1] = b'T';
+        let error = extract(&[file("bomb.pdf", pdf_bytes_deflated(&payload))]).unwrap_err();
+        assert_eq!(error, TextError::TooLarge);
+        assert_eq!(error.message_key(), "errors.profile_import.too_large");
     }
 
     // AC1: a real PDF's text layer is extracted.

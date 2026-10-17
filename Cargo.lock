@@ -678,6 +678,7 @@ dependencies = [
  "ammonia",
  "boba-domain",
  "fastembed",
+ "flate2",
  "html2text",
  "lingua",
  "lopdf 0.45.0",

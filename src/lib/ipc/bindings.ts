@@ -341,6 +341,15 @@ export const commands = {
    *  Read the user's picked files, cap the size, and hand the text to one
    *  `profile_import` run (FR-5, AC1). Returns the proposals now waiting for
    *  review; nothing has been saved to the profile.
+   *
+   *  Off the UI thread (S3.5 review F1): the run waits on an agent CLI and can
+   *  take minutes, so the step's spinner keeps animating and the window stays
+   *  responsive, exactly like `agent_test_call` and `apply_ats_start`.
+   *
+   *  The paths are the ones the picker returned; the core limits what can be
+   *  read by extension and size, but it cannot know what the dialog granted
+   *  (S3.5 review F3 residual: a compromised webview could name another local
+   *  `.pdf`/`.txt` — the file would then be read and sent to the user's own CLI).
    */
   profileImportStart: (files: string[], pastedText: string | null, language: string) =>
     typedError<ImportOutcome, AppError_Serialize>(

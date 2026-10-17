@@ -33,6 +33,7 @@ enum CommandError {
     Store,
     NoEngine,
     Nothing,
+    Run,
 }
 
 impl CommandError {
@@ -42,13 +43,14 @@ impl CommandError {
             CommandError::Store => "errors.profile_import.store",
             CommandError::NoEngine => "errors.profile_import.no_engine",
             CommandError::Nothing => "errors.profile_import.nothing",
+            CommandError::Run => "errors.profile_import.run",
         }
     }
 
     fn app_error(self) -> AppError {
         let code = match self {
             CommandError::NoEngine | CommandError::Nothing => ErrorCode::InvalidInput,
-            CommandError::Store => ErrorCode::Internal,
+            CommandError::Store | CommandError::Run => ErrorCode::Internal,
         };
         AppError::new(code, self.message_key())
     }
@@ -104,10 +106,31 @@ fn chosen_engine(app: &tauri::AppHandle) -> AppResult<EngineChoice> {
 /// Read the user's picked files, cap the size, and hand the text to one
 /// `profile_import` run (FR-5, AC1). Returns the proposals now waiting for
 /// review; nothing has been saved to the profile.
+///
+/// Off the UI thread (S3.5 review F1): the run waits on an agent CLI and can
+/// take minutes, so the step's spinner keeps animating and the window stays
+/// responsive, exactly like `agent_test_call` and `apply_ats_start`.
+///
+/// The paths are the ones the picker returned; the core limits what can be
+/// read by extension and size, but it cannot know what the dialog granted
+/// (S3.5 review F3 residual: a compromised webview could name another local
+/// `.pdf`/`.txt` — the file would then be read and sent to the user's own CLI).
 #[tauri::command]
 #[specta::specta]
-pub fn profile_import_start(
+pub async fn profile_import_start(
     app: tauri::AppHandle,
+    files: Vec<String>,
+    pasted_text: Option<String>,
+    language: String,
+) -> AppResult<ImportOutcome> {
+    tauri::async_runtime::spawn_blocking(move || import(&app, files, pasted_text, language))
+        .await
+        .map_err(|_| CommandError::Run.app_error())?
+}
+
+/// The blocking body of [`profile_import_start`].
+fn import(
+    app: &tauri::AppHandle,
     files: Vec<String>,
     pasted_text: Option<String>,
     language: String,
@@ -128,8 +151,8 @@ pub fn profile_import_start(
     if imported.is_empty() {
         return Err(CommandError::Nothing.app_error());
     }
-    let engine = chosen_engine(&app)?;
-    service(&app)?
+    let engine = chosen_engine(app)?;
+    service(app)?
         .start(ImportRequest {
             cli: engine.cli,
             model: engine.model,
