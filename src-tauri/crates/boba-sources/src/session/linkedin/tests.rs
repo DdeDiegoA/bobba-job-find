@@ -334,7 +334,7 @@ impl SessionPages for FakePages {
 /// the pause.
 struct FakeCore {
     board: BoardView,
-    used_today: u32,
+    used_today: Mutex<u32>,
     loads: Mutex<Vec<u32>>,
     paused: Mutex<Vec<ChallengeKind>>,
 }
@@ -343,7 +343,7 @@ impl FakeCore {
     fn with(board: BoardView) -> Arc<Self> {
         Arc::new(Self {
             board,
-            used_today: 0,
+            used_today: Mutex::new(0),
             loads: Mutex::new(Vec::new()),
             paused: Mutex::new(Vec::new()),
         })
@@ -352,12 +352,22 @@ impl FakeCore {
 
 impl RunControl for FakeCore {
     fn board(&self, _source_id: &str) -> Result<(BoardView, u32), String> {
-        Ok((self.board.clone(), self.used_today))
+        Ok((self.board.clone(), *self.used_today.lock().unwrap()))
     }
 
-    fn page_loaded(&self, _source_id: &str, _url: &str, loads_today: u32) -> Result<(), String> {
-        self.loads.lock().unwrap().push(loads_today);
-        Ok(())
+    fn page_loaded(
+        &self,
+        _source_id: &str,
+        _url: &str,
+        cap: u32,
+    ) -> Result<crate::session::sdk::LoadSpend, String> {
+        let mut used = self.used_today.lock().unwrap();
+        if *used >= cap {
+            return Ok(crate::session::sdk::LoadSpend::CapReached { cap });
+        }
+        *used += 1;
+        self.loads.lock().unwrap().push(*used);
+        Ok(crate::session::sdk::LoadSpend::Spent { loads_today: *used })
     }
 
     fn pause(&self, _source_id: &str, kind: ChallengeKind) -> Result<(), String> {

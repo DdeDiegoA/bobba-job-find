@@ -19,8 +19,8 @@ pub mod service;
 
 use serde::{Deserialize, Serialize};
 
-pub use run::{RunControl, RunError, SessionRun, check};
-pub use service::{BoardView, SessionBoardError, SessionBoardService, SessionSnapshot};
+pub use run::{LoadSpend, RunControl, RunError, SessionRun, check};
+pub use service::{BoardView, PageLoad, SessionBoardError, SessionBoardService, SessionSnapshot};
 
 /// The warning copy version the UI shows and the opt-in records (FR-30).
 /// Bumping it forces every Session Board Source to be re-confirmed.

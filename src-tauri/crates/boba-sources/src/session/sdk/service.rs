@@ -38,6 +38,15 @@ pub const RESUME_ACTION: &str = "session.resumed";
 /// The audit action one page load of a session run writes (S11.1b).
 pub const PAGE_LOAD_ACTION: &str = "session.run";
 
+/// What a page load did to the Source's daily budget (S11.1b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageLoad {
+    /// The load was paid for; this is the day's new total.
+    Spent { loads_today: u32 },
+    /// The cap is already spent; nothing loaded.
+    CapReached { cap: u32 },
+}
+
 /// Why a Session Board action was refused.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionBoardError {
@@ -274,47 +283,43 @@ impl<C: ClockPort> SessionBoardService<C> {
         self.view(&self.session_source(source_id)?)
     }
 
-    /// Record one page load of a run: the local-day counter and the audit row
-    /// (S11.1b R1, AD-12).
+    /// Spend one page from the Source's daily budget: the counter, the audit
+    /// row and the pace all live here (S11.1b R1, AD-12).
     ///
-    /// The counter only ever grows for the day: two overlapping runs each read
-    /// it when they opened, so the second write must never lower the total
-    /// (S11.1b review R-a). The detail carries the Source and the board page it
-    /// opened — never a cookie, a URL query that could hold a token, or a page
-    /// body.
+    /// The spend is one conditional statement in the store, so two overlapping
+    /// runs cannot both slip past the cap (S11.1b R-a). The audit detail names
+    /// the board page without its query — search terms and locations are the
+    /// user's own data (R-b) — and never a cookie or a page body.
     pub fn record_page_load(
         &self,
         source_id: &str,
         url: &str,
-        loads_today: u32,
-    ) -> Result<(), SessionBoardError> {
+        cap: u32,
+    ) -> Result<PageLoad, SessionBoardError> {
         self.session_source(source_id)?;
         let now = self.clock.now_rfc3339();
         let key = loads_key(source_id, &now);
-        let stored = self
-            .system
-            .setting_get(&key)?
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(0);
-        let total = stored.max(loads_today);
         let detail = serde_json::json!({
             "source_id": source_id,
             // R-b (S11.1b review): search keywords and locations stay out of
             // the audit log; the page itself is what the row is about.
             "url": page_url(url),
-            "loads_today": total,
+            "cap": cap,
         });
-        self.audited(
+        let spent = self.audited(
             PAGE_LOAD_ACTION,
             source_id,
             detail,
-            || {
-                self.system.setting_put(&key, &total.to_string(), &now)?;
-                Ok(())
+            || Ok(self.system.setting_spend_below(&key, cap, &now)?),
+            |spent: &Option<u32>| match spent {
+                Some(loads_today) => serde_json::json!({ "loads_today": loads_today }),
+                None => serde_json::json!({ "cap_reached": cap }),
             },
-            |_| serde_json::json!({ "loads_today": total }),
         )?;
-        Ok(())
+        Ok(match spent {
+            Some(loads_today) => PageLoad::Spent { loads_today },
+            None => PageLoad::CapReached { cap },
+        })
     }
 
     /// Clear a challenge pause after the user acted on it.
@@ -573,6 +578,17 @@ mod tests {
                 .unwrap_or_default()
         }
 
+        /// Every `outcome` detail of `action`, in row order.
+        fn outcomes(&self, action: &str) -> Vec<String> {
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| row.action == action && row.phase == AuditPhase::Outcome)
+                .map(|row| row.detail_json.clone())
+                .collect()
+        }
+
         fn setting(&self, key: &str) -> Option<String> {
             self.settings.lock().unwrap().get(key).cloned()
         }
@@ -810,13 +826,15 @@ mod tests {
     #[test]
     fn a_page_load_is_audited_without_the_query() {
         let h = harness(CookieProtection::MacosKeychain);
-        h.service
+        let spent = h
+            .service
             .record_page_load(
                 "linkedin",
                 "https://www.linkedin.com/jobs/search/?keywords=rust&location=Madrid",
-                3,
+                10,
             )
             .unwrap();
+        assert_eq!(spent, PageLoad::Spent { loads_today: 1 });
         let detail = h.system.detail(PAGE_LOAD_ACTION);
         assert!(
             detail.contains("https://www.linkedin.com/jobs/search/"),
@@ -824,30 +842,43 @@ mod tests {
         );
         assert!(!detail.contains("keywords"), "{detail}");
         assert!(!detail.contains("Madrid"), "{detail}");
-        assert!(detail.contains("\"loads_today\":3"), "{detail}");
+        let outcomes = h.system.outcomes(PAGE_LOAD_ACTION);
+        assert!(
+            outcomes.iter().any(|row| row.contains("\"loads_today\":1")),
+            "{outcomes:?}"
+        );
         assert_eq!(
             h.system.setting_get(&loads_key("linkedin", NOW)).unwrap(),
-            Some("3".to_string()),
+            Some("1".to_string()),
             "the day's counter is what the next run reads"
         );
     }
 
     #[test]
-    fn an_overlapping_run_never_lowers_the_days_total() {
-        // R-a (S11.1b review): both runs read the counter when they opened; a
-        // stale total must not overwrite the newer one.
+    fn the_daily_budget_is_spent_atomically() {
+        // R-a (S11.1b review): the counter is spent by the core, one
+        // conditional statement at a time, so overlapping runs share it.
         let h = harness(CookieProtection::MacosKeychain);
         let key = loads_key("linkedin", NOW);
         h.system
-            .setting_put(&key, "5", NOW)
-            .expect("the day already spent 5");
-        h.service
-            .record_page_load("linkedin", "https://www.linkedin.com/jobs/search/", 3)
-            .unwrap();
+            .setting_put(&key, "2", NOW)
+            .expect("the day already spent 2");
+        assert_eq!(
+            h.service
+                .record_page_load("linkedin", "https://www.linkedin.com/jobs/search/", 3)
+                .unwrap(),
+            PageLoad::Spent { loads_today: 3 }
+        );
+        assert_eq!(
+            h.service
+                .record_page_load("linkedin", "https://www.linkedin.com/jobs/view/1/", 3)
+                .unwrap(),
+            PageLoad::CapReached { cap: 3 }
+        );
         assert_eq!(
             h.system.setting_get(&key).unwrap(),
-            Some("5".to_string()),
-            "the stale write did not lower the day's total"
+            Some("3".to_string()),
+            "a refused spend changes nothing"
         );
     }
 

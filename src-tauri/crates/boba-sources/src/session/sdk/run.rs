@@ -21,6 +21,15 @@ use std::sync::Arc;
 
 use super::{BoardView, ChallengeKind, DEFAULT_PACING, Pacing};
 
+/// What the core did with one page load (S11.1b R-a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoadSpend {
+    /// The core paid for the load; this is the day's new total.
+    Spent { loads_today: u32 },
+    /// The cap is already spent; nothing may load.
+    CapReached { cap: u32 },
+}
+
 /// What a run needs from the core around every page load: the board, the daily
 /// counter, the audit row and the challenge pause. The app implements it over
 /// [`super::SessionBoardService`]; a test implements it in memory.
@@ -29,9 +38,10 @@ pub trait RunControl: Send + Sync {
     /// loads already spent today, in the user's local day.
     fn board(&self, source_id: &str) -> Result<(BoardView, u32), String>;
 
-    /// Audit one page load (`session.run`) and persist `loads_today` — the
-    /// counter the next run of the day reads.
-    fn page_loaded(&self, source_id: &str, url: &str, loads_today: u32) -> Result<(), String>;
+    /// Spend one page from today's budget, atomically, and audit it
+    /// (`session.run`). The core owns the counter, so two overlapping runs
+    /// share one budget.
+    fn page_loaded(&self, source_id: &str, url: &str, cap: u32) -> Result<LoadSpend, String>;
 
     /// Pause a Source after a challenge: audit, persist and notify (AD-10).
     fn pause(&self, source_id: &str, kind: ChallengeKind) -> Result<(), String>;
@@ -128,12 +138,14 @@ impl SessionRun {
         })
     }
 
-    /// Audit the load, then return the human-like delay before it.
+    /// Spend one page from the day's budget, then return the human-like delay
+    /// before it.
     ///
     /// `url` is the page about to load, `sample` any changing number (a
     /// counter, a timer): it only jitters the delay, never lowers it below the
-    /// pacing floor. A refused audit refuses the load: nothing touches the
-    /// board unaudited.
+    /// pacing floor. The core's conditional spend is the authority on the cap,
+    /// so two overlapping runs cannot both pass it (S11.1b R-a). A refused
+    /// audit refuses the load: nothing touches the board unaudited.
     pub fn before_load(&mut self, url: &str, sample: u64) -> Result<u64, RunError> {
         if self.remaining == 0 {
             return Err(RunError::CapReached {
@@ -141,13 +153,22 @@ impl SessionRun {
                 cap: self.cap,
             });
         }
-        let loads_today = self.used_today + self.loads + 1;
-        self.control
-            .page_loaded(&self.source_id, url, loads_today)
-            .map_err(RunError::Control)?;
-        self.remaining -= 1;
-        self.loads += 1;
-        Ok(self.pacing.delay_ms(sample))
+        let delay = self.pacing.delay_ms(sample);
+        match self
+            .control
+            .page_loaded(&self.source_id, url, self.cap)
+            .map_err(RunError::Control)?
+        {
+            LoadSpend::CapReached { cap } => Err(RunError::CapReached {
+                source_id: self.source_id.clone(),
+                cap,
+            }),
+            LoadSpend::Spent { loads_today } => {
+                self.loads += 1;
+                self.remaining = self.cap.saturating_sub(loads_today);
+                Ok(delay)
+            }
+        }
     }
 
     /// Page loads this run has spent.
@@ -205,15 +226,20 @@ mod tests {
             Ok((board, *self.used_today.lock().unwrap()))
         }
 
-        fn page_loaded(&self, source_id: &str, _url: &str, loads_today: u32) -> Result<(), String> {
+        fn page_loaded(&self, source_id: &str, _url: &str, cap: u32) -> Result<LoadSpend, String> {
             if *self.fail.lock().unwrap() {
                 return Err("audit store down".into());
             }
+            let mut used = self.used_today.lock().unwrap();
+            if *used >= cap {
+                return Ok(LoadSpend::CapReached { cap });
+            }
+            *used += 1;
             self.loads
                 .lock()
                 .unwrap()
-                .push((source_id.to_string(), loads_today));
-            Ok(())
+                .push((source_id.to_string(), *used));
+            Ok(LoadSpend::Spent { loads_today: *used })
         }
 
         fn pause(&self, _source_id: &str, kind: ChallengeKind) -> Result<(), String> {
@@ -309,6 +335,34 @@ mod tests {
             }
         );
         assert_eq!(run.loads(), 2, "a refused load spends nothing");
+    }
+
+    #[test]
+    fn two_overlapping_runs_share_one_daily_budget() {
+        // R-a: both runs open against the same counter; the core spends every
+        // page, so together they still stop at the cap.
+        let core = Core::with(board(), 0);
+        let mut first = SessionRun::open(core.clone(), "linkedin", 3).unwrap();
+        let mut second = SessionRun::open(core.clone(), "linkedin", 3).unwrap();
+        first
+            .before_load("https://www.linkedin.com/jobs/search/", 0)
+            .unwrap();
+        second
+            .before_load("https://www.linkedin.com/jobs/search/", 1)
+            .unwrap();
+        first
+            .before_load("https://www.linkedin.com/jobs/view/1/", 2)
+            .unwrap();
+        assert_eq!(
+            second
+                .before_load("https://www.linkedin.com/jobs/view/2/", 3)
+                .unwrap_err(),
+            RunError::CapReached {
+                source_id: "linkedin".into(),
+                cap: 3
+            }
+        );
+        assert_eq!(*core.used_today.lock().unwrap(), 3, "one shared budget");
     }
 
     #[test]

@@ -18,7 +18,7 @@ use boba_app::ports::session::{SessionPages, SessionStore};
 use boba_app::system::SystemClock;
 use boba_browser::session;
 use boba_sources::session::sdk::{
-    BoardView, ChallengeKind, RunControl, SessionBoardService, loads_key,
+    BoardView, ChallengeKind, LoadSpend, PageLoad, RunControl, SessionBoardService, loads_key,
 };
 use tauri::Manager;
 
@@ -64,11 +64,19 @@ impl RunControl for SessionRunControl {
         Ok((board, used))
     }
 
-    fn page_loaded(&self, source_id: &str, url: &str, loads_today: u32) -> Result<(), String> {
-        // The audit row and the counter are written by the service (AD-12).
-        self.service
-            .record_page_load(source_id, url, loads_today)
-            .map_err(|error| error.to_string())
+    fn page_loaded(&self, source_id: &str, url: &str, cap: u32) -> Result<LoadSpend, String> {
+        // The audit row and the conditional spend live in the service (AD-12,
+        // S11.1b R-a).
+        Ok(
+            match self
+                .service
+                .record_page_load(source_id, url, cap)
+                .map_err(|error| error.to_string())?
+            {
+                PageLoad::Spent { loads_today } => LoadSpend::Spent { loads_today },
+                PageLoad::CapReached { cap } => LoadSpend::CapReached { cap },
+            },
+        )
     }
 
     fn pause(&self, source_id: &str, kind: ChallengeKind) -> Result<(), String> {
