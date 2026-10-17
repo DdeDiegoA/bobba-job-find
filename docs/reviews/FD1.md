@@ -3,7 +3,7 @@
 - **Reviewer:** reviewer-3 (qa)
 - **Branch:** `hermad/FD1` · **Reviewed commit:** `bbb61c3`
 - **Scope:** docs only. `git diff main bbb61c3 --stat`: 10 files, all under `docs/`. No code changed.
-- **Verdict:** CHANGES REQUESTED (1 must-fix)
+- **Verdict:** CHANGES REQUESTED at `bbb61c3`; re-review at `a28ceec`: APPROVED (see bottom)
 
 ## Gate checks
 
@@ -34,3 +34,15 @@
 
 - FD2 links to `docs/security/` resolve only after FD1 merges. Merge order: FD1 before FD2.
 - FD2 links to `docs/contributing/` do not resolve on any branch yet (CH13 has no commits). Merge CH13 before FD2, or remove those links.
+
+## Re-review at `a28ceec`
+
+- **Changed since `bbb61c3`:** `docs/security/security-model.md` (§2 T8 link, §9 exception), `docs/security/residuals.md` (new `R-S6.9-1` row, new §8 non-security notes), `docs/reviews/FD1.md`. Nothing else. No code changed.
+- **Must-fix 1 (HttpClient exception):** closed. §9 now names the `hf-hub` exception, cites `boba-embed/src/encoder.rs`, and points to `R-S6.9-1`, which is in the residuals table.
+- **Nit 1 (non-security notes):** closed. The S5.2 items moved to a separate §8 with an explicit "not gates" label.
+- **Nit 2 (T8 link):** closed. T8 links `R-S4.8-2`.
+- **Checked:** `boba-embed` builds the hf-hub client with `ApiBuilder::new()` and no endpoint override. The endpoint is therefore the library default, which is not user-configurable in the app code. Carry-over, not blocking: hf-hub may read `HF_ENDPOINT` from the environment by default, so "fixed HF model host" in `R-S6.9-1` is true for the app's own config, not for the process environment.
+- **Wording nit (optional):** §9 opening sentence reads "goes through one hardened `HttpClient`, with one exception (below) with https-only apply URLs, …". Splitting it into two sentences would read better.
+- **Links:** 0 broken in changed files. Workflow policy check: pass (re-run at `a28ceec`).
+
+**Verdict: APPROVED** at `a28ceec` for the docs scope of FD1. Residual-table additions are accepted for the security-gate record.
