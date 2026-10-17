@@ -1,1 +1,10 @@
-{}
+{
+  "notice": {
+    "limitedTitle": "Las funciones de IA están apagadas: no hay una CLI de agente conectada.",
+    "limitedBody": "La búsqueda, el puntaje y el seguimiento siguen funcionando. Adaptar, extraer tu perfil y leer correos necesitan una CLI de agente.",
+    "connect": "Conectar un agente",
+    "unsupportedTitle": "Esta acción necesita una CLI con herramientas totalmente restringidas.",
+    "unsupportedBody": "Tu CLI de agente no puede procesar contenido externo de forma segura. Elige otra CLI o sigue en modo limitado.",
+    "changeCli": "Cambiar CLI"
+  }
+}
