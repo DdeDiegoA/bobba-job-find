@@ -1,0 +1,28 @@
+[package]
+name = "boba-embed"
+description = "On-device F3 sentence encoder over fastembed (AD-8, Story 6.9)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+# The encoder is opt-in at build time (AC4): a default build carries neither
+# `fastembed` nor an ONNX runtime, and F3 is simply unavailable. The model
+# itself is still the user's opt-in download at runtime (AC1).
+[features]
+default = []
+embeddings = ["dep:fastembed", "dep:sha2", "dep:tracing"]
+
+[dependencies]
+boba-app = { path = "../boba-app" }
+boba-domain = { path = "../boba-domain" }
+fastembed = { workspace = true, optional = true }
+# The pinned SHA-256 of the one download (Story 6.9): the same RustCrypto
+# crate the OAuth PKCE code already uses (S8.1).
+sha2 = { workspace = true, optional = true }
+# `quarantine` logs when a failed cache cannot be removed.
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

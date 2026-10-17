@@ -9,8 +9,6 @@ publish = false
 
 [features]
 default = []
-# On-device F3 semantic score (AD-8). Opt-in download; needs no network at build.
-embeddings = ["dep:fastembed"]
 
 [dependencies]
 boba-domain = { path = "../boba-domain" }
@@ -27,7 +25,6 @@ lingua = { workspace = true, default-features = false, features = ["english", "s
 time = { workspace = true, features = ["local-offset"] }
 # Run ids (S5.2): every row this crate opens (a `source_run`) gets its own ULID.
 ulid = { workspace = true }
-fastembed = { workspace = true, optional = true }
 # Master CV import (S3.5): the user's own PDF, DOCX and LinkedIn export ZIP are
 # read here (never written), so the use case owns its extraction.
 pdf-extract = { workspace = true }

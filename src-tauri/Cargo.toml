@@ -11,6 +11,13 @@ publish = false
 name = "boba_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# On-device F3 semantic score (AD-8, S6.9): forwards to the `boba-embed`
+# adapter. Off by default — a build without it mounts no `EmbeddingPort` and
+# F3 drops out of scoring unchanged (AC4).
+[features]
+default = []
+embeddings = ["boba-embed/embeddings"]
+
 [build-dependencies]
 tauri-build = { workspace = true, features = [] }
 
@@ -46,6 +53,9 @@ boba-mail = { path = "crates/boba-mail" }
 boba-browser = { path = "crates/boba-browser" }
 # Manual intake (S4.7): the shared outbound HTTP client is mounted here.
 boba-sources = { path = "crates/boba-sources" }
+# The on-device F3 encoder (S6.9, AD-8): the `embeddings` feature above is what
+# builds its fastembed body; without it the port is never mounted (AC4).
+boba-embed = { path = "crates/boba-embed" }
 # Resolving a pasted URL and a redirect's `Location` (S4.7).
 url = { workspace = true }
 # The OS locale, for the core-side tray strings (S1.6, AD-17/AD-21).

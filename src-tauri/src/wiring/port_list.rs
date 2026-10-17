@@ -192,8 +192,33 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The scoped mail sync (S8.3): registers the scheduler's `email_sync`
     // handler, which reads the read+send connections into the sink above.
     crate::commands::email::mount(app);
+    // The on-device F3 encoder (S6.9, AD-8): mounted only in a build with the
+    // `embeddings` feature; without it F3 is unavailable and scoring is
+    // unchanged (AC4). The model itself is the user's opt-in download — this
+    // line mounts the port, `boba_app::embeddings` decides when it is used.
+    mount_embedding_port(app);
     // slices append ONE line above this comment; never reorder/remove
 }
+
+/// Mount `EmbeddingPort` when this build carries the on-device encoder (S6.9).
+///
+/// The model directory is app data `models/`: the opt-in download (AC1) writes
+/// there, and the network-activity view lists that same destination.
+#[cfg(feature = "embeddings")]
+fn mount_embedding_port<R: Runtime>(app: &AppHandle<R>) {
+    match app.path().app_data_dir() {
+        Ok(data) => mount_port::<dyn boba_app::ports::embedding::EmbeddingPort>(
+            app,
+            Arc::new(boba_embed::FastembedEncoder::new(data.join("models"))),
+        ),
+        Err(error) => tracing::error!(?error, "embedding port left unmounted"),
+    }
+}
+
+/// Without the `embeddings` feature there is no encoder to mount: F3 drops
+/// out and scoring is unchanged (AC4).
+#[cfg(not(feature = "embeddings"))]
+fn mount_embedding_port<R: Runtime>(_app: &AppHandle<R>) {}
 
 /// The Email Apply engine, built from the ports just mounted (startup pass only).
 fn recovery_engine<R: Runtime>(app: &AppHandle<R>) -> boba_app::error::AppResult<ApplyEngine> {

@@ -89,7 +89,8 @@ html2text = "0.17"
 jsonpath-rust = "1.0"
 lingua = "1.8"
 simhash = "0.3"
-# Optional feature on boba-app (`embeddings`); AD-8 F3. Pinned to the same two
+# Optional feature on boba-embed (`embeddings`, forwarded by src-tauri);
+# AD-8 F3. boba-app never depends on it (AC3, S6.9). Pinned to the same two
 # TLS features as fastembed's `default` (minus `image-models`, unused here) so
 # the dependency set does not drift when the default feature resets.
 fastembed = { version = "7.1", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
