@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use boba_domain::apply::outbox::OutboxItem;
-use boba_domain::audit::AuditRow;
+use boba_domain::audit::{AuditRow, ChainStatus};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -30,6 +30,13 @@ use crate::ports::repo::system::SystemRepo;
 /// every stored item comes back (AC-1: no decision may silently fall off the
 /// viewer or the CSV).
 const ALL_OUTBOX_ITEMS: usize = usize::MAX;
+
+/// The most rows one page of the viewer may ask for (CH12). The limit is the
+/// caller's, clamped here so a bad one cannot ship the whole log back.
+pub const MAX_PAGE: u32 = 200;
+
+/// The page size the viewer asks for when it does not say.
+pub const DEFAULT_PAGE: u32 = 50;
 
 /// What one timeline row is (the UI picks its icon and label from this).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -62,11 +69,16 @@ pub struct AuditEntry {
     pub hash: Option<String>,
 }
 
-/// The Audit Log as the viewer renders it.
+/// One page of the Audit Log as the viewer renders it (CH12: the log is
+/// paginated in the core, so the IPC message stays small however long it gets).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-pub struct AuditLogView {
-    /// Newest first.
+pub struct AuditLogPage {
+    /// Newest first; at most the requested limit.
     pub entries: Vec<AuditEntry>,
+    /// The id to ask the next page from; `None` when this is the last page.
+    pub next_cursor: Option<String>,
+    /// How many entries the whole merged log holds.
+    pub total: u32,
     /// Whether every `audit_event` row re-hashes and links (AD-12).
     pub chain_intact: bool,
     /// How many `audit_event` rows the check walked.
@@ -103,8 +115,45 @@ impl AuditLogService {
         }
     }
 
+    /// One page of the merged timeline, newest first, with the chain verdict
+    /// (CH12: the viewer never ships the whole log over IPC).
+    ///
+    /// `cursor` is the [`AuditEntry::id`] the previous page ended on; the page
+    /// starts right after it. The log is append-only, so that position stays
+    /// meaningful even while new rows arrive. A cursor the log no longer holds
+    /// starts from the newest entry rather than failing the read.
+    pub fn page(&self, cursor: Option<&str>, limit: u32) -> Result<AuditLogPage, StatsError> {
+        let (entries, chain) = self.all_entries()?;
+        let total = u32::try_from(entries.len()).unwrap_or(u32::MAX);
+        let start = cursor
+            .and_then(|cursor| entries.iter().position(|entry| entry.id == cursor))
+            .map(|index| index + 1)
+            .unwrap_or(0);
+        let limit = limit.clamp(1, MAX_PAGE) as usize;
+        let page: Vec<AuditEntry> = entries.into_iter().skip(start).take(limit).collect();
+        let next_cursor = (start + page.len() < total as usize).then(|| {
+            page.last()
+                .map(|entry| entry.id.clone())
+                .unwrap_or_default()
+        });
+        Ok(AuditLogPage {
+            entries: page,
+            next_cursor,
+            total,
+            chain_intact: chain.is_intact(),
+            chain_rows: u32::try_from(chain.rows).unwrap_or(u32::MAX),
+            broken_at: chain.broken_at.and_then(|seq| i32::try_from(seq).ok()),
+        })
+    }
+
+    /// The whole log as CSV (AC-1: "I can export it as CSV"). An export is the
+    /// one caller that wants every row.
+    pub fn csv(&self) -> Result<String, StatsError> {
+        Ok(to_csv(&self.all_entries()?.0))
+    }
+
     /// Every entry, newest first, with the chain verdict.
-    pub fn entries(&self) -> Result<AuditLogView, StatsError> {
+    fn all_entries(&self) -> Result<(Vec<AuditEntry>, ChainStatus), StatsError> {
         let rows = self.system.audit_rows()?;
         let chain = self.system.audit_verify_chain()?;
 
@@ -114,31 +163,27 @@ impl AuditLogService {
         entries.extend(self.opt_in_entries()?);
 
         entries.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| b.id.cmp(&a.id)));
-        Ok(AuditLogView {
-            entries,
-            chain_intact: chain.is_intact(),
-            chain_rows: u32::try_from(chain.rows).unwrap_or(u32::MAX),
-            broken_at: chain.broken_at.and_then(|seq| i32::try_from(seq).ok()),
-        })
+        Ok((entries, chain))
     }
 
-    /// The whole log as CSV (AC-1: "I can export it as CSV").
-    pub fn csv(&self) -> Result<String, StatsError> {
-        Ok(to_csv(&self.entries()?.entries))
-    }
-
-    /// Every Stage change: the Tracker's own history (S9.1, FR-89).
+    /// Every Stage change: the Tracker's own history (S9.1, FR-89), in one
+    /// query over the whole history (CH12).
     fn stage_entries(&self) -> Result<Vec<AuditEntry>, StatsError> {
-        let mut entries = Vec::new();
-        for application in self.applications.applications()? {
-            for event in self.applications.status_events(&application.id)? {
+        Ok(self
+            .applications
+            .all_status_events()?
+            .into_iter()
+            .map(|event| {
                 let detail = serde_json::json!({
                     "from": event.from_status.map(|status| status.as_str()),
                     "to": event.to_status.as_str(),
                     "reason": event.reason,
                 })
                 .to_string();
-                entries.push(AuditEntry {
+                // The event carries its own Application id (AD-16): no lookup
+                // per Application, and no chance of a row falling off.
+                let application_id = Some(event.application_id);
+                AuditEntry {
                     id: format!("status:{}", event.id),
                     kind: "stage_change".to_string(),
                     at: event.created_at,
@@ -147,15 +192,14 @@ impl AuditLogService {
                     phase: None,
                     outcome: None,
                     target_kind: "application".to_string(),
-                    target_id: Some(application.id.clone()),
-                    application_id: Some(application.id.clone()),
+                    target_id: application_id.clone(),
+                    application_id,
                     detail_json: detail,
                     payload_blake3: None,
                     hash: None,
-                });
-            }
-        }
-        Ok(entries)
+                }
+            })
+            .collect())
     }
 
     /// Auto decisions that produced (or held back) an Outbox item, with the rule
@@ -570,7 +614,7 @@ mod tests {
             FakeRules::default(),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
 
         assert_eq!(view.entries.len(), 1);
@@ -597,7 +641,7 @@ mod tests {
             FakeRules::default(),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
         assert_eq!(view.entries[0].kind, "kill_switch");
     }
@@ -626,7 +670,7 @@ mod tests {
             FakeRules::default(),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
 
         let entry = view
@@ -668,7 +712,7 @@ mod tests {
             FakeRules(vec![rule("rule_1", "Email x Remotive")]),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
 
         let entry = &view.entries[0];
@@ -698,7 +742,7 @@ mod tests {
             FakeRules::default(),
             sources,
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
 
         let entry = &view.entries[0];
@@ -735,7 +779,7 @@ mod tests {
             FakeRules::default(),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
         assert_eq!(view.entries[0].kind, "stage_change");
         assert_eq!(view.entries[1].kind, "send");
@@ -757,7 +801,7 @@ mod tests {
             FakeRules::default(),
             OptInSources::default(),
         )
-        .entries()
+        .page(None, MAX_PAGE)
         .unwrap();
         assert!(!view.chain_intact);
         assert_eq!(view.broken_at, Some(1));
@@ -818,5 +862,102 @@ mod tests {
 
     fn rule(id: &str, name: &str) -> boba_domain::apply::policy::AutoRule {
         boba_domain::apply::policy::AutoRule::defaults(id, name, NOW)
+    }
+
+    // CH12: the viewer asks for one page at a time; the cursor walks the whole
+    // merged timeline with no gap and no repeat.
+    #[test]
+    fn the_log_is_paginated_by_cursor() {
+        let system = FakeSystemRepo::default();
+        for action in ["apply.submitted", "apply.kill_switch", "auto.decision"] {
+            system.audit_append_intent(&intent(action, NOW)).unwrap();
+        }
+        let service = service(
+            system,
+            FakeApplyRepo::default(),
+            FakeHold::default(),
+            FakeRules::default(),
+            OptInSources::default(),
+        );
+
+        let first = service.page(None, 2).expect("a page");
+        assert_eq!(first.entries.len(), 2);
+        assert_eq!(first.total, 3, "the total counts the whole log");
+        let cursor = first.next_cursor.expect("a second page exists");
+
+        let second = service.page(Some(&cursor), 2).expect("a page");
+        assert_eq!(second.entries.len(), 1);
+        assert_eq!(second.total, 3);
+        assert_eq!(second.next_cursor, None, "the last page says so");
+
+        let ids: Vec<&str> = first
+            .entries
+            .iter()
+            .chain(second.entries.iter())
+            .map(|entry| entry.id.as_str())
+            .collect();
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(ids.len(), unique.len(), "the pages never overlap");
+    }
+
+    // CH12: the page size is the caller's, clamped so a bad one cannot ship
+    // the whole log over IPC.
+    #[test]
+    fn a_page_size_is_clamped() {
+        let system = FakeSystemRepo::default();
+        for _ in 0..3 {
+            system
+                .audit_append_intent(&intent("apply.submitted", NOW))
+                .unwrap();
+        }
+        let service = service(
+            system,
+            FakeApplyRepo::default(),
+            FakeHold::default(),
+            FakeRules::default(),
+            OptInSources::default(),
+        );
+        assert_eq!(service.page(None, 0).expect("a page").entries.len(), 1);
+        assert_eq!(
+            service.page(None, u32::MAX).expect("a page").entries.len(),
+            3
+        );
+    }
+
+    // CH12: the history is read in one query, not one per Application.
+    #[test]
+    fn stage_changes_cost_one_query_for_the_whole_log() {
+        let apply = FakeApplyRepo::default();
+        for id in ["app_1", "app_2", "app_3"] {
+            apply.seed_application(application(id, "pst_1", AppStatus::Applied));
+            apply
+                .append_status_event(&StatusEvent {
+                    id: new_status_event_id(),
+                    application_id: id.to_string(),
+                    from_status: None,
+                    to_status: AppStatus::Applied,
+                    source: StatusSource::ApplyOutcome,
+                    reason: None,
+                    created_at: NOW.to_string(),
+                })
+                .unwrap();
+        }
+        let service = service(
+            FakeSystemRepo::default(),
+            apply.clone(),
+            FakeHold::default(),
+            FakeRules::default(),
+            OptInSources::default(),
+        );
+
+        let page = service.page(None, MAX_PAGE).expect("a page");
+        assert_eq!(page.entries.len(), 3);
+        assert_eq!(
+            apply.status_event_queries(),
+            0,
+            "one batched query, never one per Application"
+        );
     }
 }

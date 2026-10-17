@@ -161,8 +161,18 @@ toml = "0.9"
 # Dev builds: keep line tables only in our own crates and no debuginfo for
 # dependencies. Backtraces still show file:line, but target/ is far smaller
 # (disk was the incident). Release profile and split-debuginfo are untouched.
+#
+# Incremental compilation is off (CH12): its cache is what grows target/ into
+# the tens of gigabytes on this workspace, and a fresh gate run rebuilds from
+# scratch either way.
 [profile.dev]
 debug = "line-tables-only"
+incremental = false
 
 [profile.dev.package."*"]
 debug = false
+
+# `profile.test` inherits `dev`; the cache that matters for `cargo test` is its
+# own, so the same switch is repeated here rather than assumed.
+[profile.test]
+incremental = false

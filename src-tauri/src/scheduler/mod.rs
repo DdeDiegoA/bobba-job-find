@@ -237,15 +237,20 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
         // notice per threshold; the sweep itself holds them for quiet hours.
         crate::commands::apply::spawn_nudge_sweep(app.clone());
     }
+    // The clock and the offset are read once, here, and handed to everything
+    // this tick touches (CH12): no helper reads the machine's clock behind a
+    // test's back.
+    let clock = SystemClock;
+    let now = clock.now_rfc3339();
+    let offset = local_offset();
+
     let Some(repo) = jobs_repo(app) else {
         // No store this launch (locked at startup): nothing can be recorded,
         // but the user is still told a run was skipped (AC4).
-        note_locked_slots(app);
+        note_locked_slots(app, offset, &now);
         return;
     };
 
-    let clock = SystemClock;
-    let now = clock.now_rfc3339();
     let system = system_repo(app);
 
     // A run that died with the previous process (power loss, crash) must not
@@ -272,7 +277,7 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
         repo: repo.as_ref(),
         clock: &clock,
         notifier: &notifier,
-        offset: local_offset(),
+        offset,
         locked,
         schedules: &schedules,
         started_at,
@@ -342,17 +347,19 @@ fn record_pending_skips<R: Runtime>(app: &AppHandle<R>, repo: &dyn JobsRepo, now
 /// (AC4, ADR-009 §3). Today only — without the store there is no way to tell
 /// which earlier days already have their row, and a locked launch must not
 /// replay a week of notifications.
-fn note_locked_slots<R: Runtime>(app: &AppHandle<R>) {
+///
+/// `offset` and `now` are the tick's own reading (CH12): a test injects a
+/// fixed instant instead of racing the machine's clock.
+fn note_locked_slots<R: Runtime>(app: &AppHandle<R>, offset: UtcOffset, now: &str) {
     let Some(state) = app.try_state::<SchedulerState>() else {
         return;
     };
-    let clock = SystemClock;
-    let Ok(now) = OffsetDateTime::parse(&clock.now_rfc3339(), &Rfc3339) else {
+    let Ok(now) = OffsetDateTime::parse(now, &Rfc3339) else {
         return;
     };
     let notifier = notify::TauriNotifier::new(app.clone());
 
-    for (job, slot) in locked_slots(local_offset(), now) {
+    for (job, slot) in locked_slots(offset, now) {
         let first = state
             .pending
             .lock()
@@ -677,16 +684,18 @@ mod tests {
         let _ = handle.plugin(tauri_plugin_notification::init());
         handle.manage(SchedulerState::default());
 
-        // Two ticks of a locked launch notify each slot once (AC4).
-        note_locked_slots(&handle);
-        note_locked_slots(&handle);
+        // Two ticks at one fixed instant of a locked launch notify each slot
+        // once (AC4). The clock is injected, never read: 09:00 UTC is past
+        // today's 08:00 daily search.
+        note_locked_slots(&handle, UtcOffset::UTC, "2026-10-16T09:00:00Z");
+        note_locked_slots(&handle, UtcOffset::UTC, "2026-10-16T09:00:00Z");
         let pending = handle
             .state::<SchedulerState>()
             .pending
             .lock()
             .unwrap()
             .len();
-        assert!(pending <= 1, "today's slot only, and only once");
+        assert_eq!(pending, 1, "today's slot only, and only once");
 
         // The store mounts: every pending slot becomes a skipped_locked row.
         let repo = Arc::new(FakeJobs::default());

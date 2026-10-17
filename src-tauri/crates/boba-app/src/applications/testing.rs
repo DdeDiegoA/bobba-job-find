@@ -27,6 +27,9 @@ struct State {
     events: Vec<StatusEvent>,
     package: Vec<(String, PackageItem)>,
     answers: Vec<BankAnswer>,
+    /// How many per-Application history queries ran: the Audit Log must not
+    /// ask once per row (CH12).
+    status_event_queries: usize,
 }
 
 impl FakeApplyRepo {
@@ -47,6 +50,11 @@ impl FakeApplyRepo {
     /// Every event written, oldest first, for assertions on the history.
     pub fn events(&self) -> Vec<StatusEvent> {
         self.state.lock().unwrap().events.clone()
+    }
+
+    /// How many per-Application history queries ran (CH12).
+    pub fn status_event_queries(&self) -> usize {
+        self.state.lock().unwrap().status_event_queries
     }
 
     /// The stored status, or `None` when the application is unknown.
@@ -99,15 +107,24 @@ impl ApplyRepo for FakeApplyRepo {
     }
 
     fn status_events(&self, application_id: &str) -> Result<Vec<StatusEvent>, ApplyRepoError> {
-        Ok(self
-            .state
-            .lock()
-            .unwrap()
+        let mut state = self.state.lock().unwrap();
+        state.status_event_queries += 1;
+        Ok(state
             .events
             .iter()
             .filter(|event| event.application_id == application_id)
             .cloned()
             .collect())
+    }
+
+    fn all_status_events(&self) -> Result<Vec<StatusEvent>, ApplyRepoError> {
+        let mut events = self.state.lock().unwrap().events.clone();
+        events.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(events)
     }
 
     fn package(&self, application_id: &str) -> Result<Vec<PackageItem>, ApplyRepoError> {

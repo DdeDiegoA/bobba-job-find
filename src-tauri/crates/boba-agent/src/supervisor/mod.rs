@@ -33,10 +33,12 @@ pub enum SupervisorError {
     NoStdout,
 }
 
-/// How long `reap` waits for the stderr reader once the child is gone. Long
-/// enough to drain a closed pipe, short enough that a grandchild still holding
-/// stderr open cannot stall the run.
-const STDERR_JOIN_GRACE: Duration = Duration::from_millis(500);
+/// How long `reap` waits for a pipe reader once the child is gone. Long enough
+/// to drain a closed pipe — including one a grandchild closes a moment later,
+/// which is what `run_lifecycle`'s late-stderr test relies on — and short
+/// enough that a grandchild holding either end open cannot stall the run
+/// (CH12: stdout is bounded like stderr).
+const READER_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 /// One item from the child's stdout stream.
 #[derive(Debug)]
@@ -170,23 +172,28 @@ impl SupervisedProcess {
         }
         self.reaped = true;
         let _ = self.child.wait();
+        // Both joins are bounded: a grandchild that inherits either pipe can
+        // hold it open for good, and the run must not hang on it. Past the
+        // grace the reader is detached and the buffer is whatever it collected.
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            join_bounded(reader);
         }
-        // Join the stderr reader too: `stderr_so_far()` must never race it, or
-        // an auth failure can be classified from an empty string. The join is
-        // bounded: a grandchild that inherits stderr can hold the pipe open for
-        // good, and the run must not hang on it. Past the grace the reader is
-        // detached and stderr is whatever it had collected.
+        // `stderr_so_far()` must never race its reader, or an auth failure can
+        // be classified from an empty string.
         if let Some(reader) = self.stderr_reader.take() {
-            let deadline = Instant::now() + STDERR_JOIN_GRACE;
-            while !reader.is_finished() && Instant::now() < deadline {
-                thread::sleep(Duration::from_millis(1));
-            }
-            if reader.is_finished() {
-                let _ = reader.join();
-            }
+            join_bounded(reader);
         }
+    }
+}
+
+/// Join a pipe reader, but only if it is done within [`READER_JOIN_GRACE`].
+fn join_bounded(reader: JoinHandle<()>) {
+    let deadline = Instant::now() + READER_JOIN_GRACE;
+    while !reader.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(1));
+    }
+    if reader.is_finished() {
+        let _ = reader.join();
     }
 }
 
@@ -245,21 +252,31 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
         let marker = dir.join("grandchild-ran");
+        let ready = dir.join("grandchild-started");
+        let pid_file = dir.join("grandchild-pid");
 
         let mut proc = SupervisedProcess::spawn(&spec(&[
             ("BOBA_FAKE_MODE", "spawn-child"),
             ("BOBA_FAKE_MARKER", marker.to_str().unwrap()),
-            ("BOBA_FAKE_DELAY_MS", "400"),
+            ("BOBA_FAKE_READY", ready.to_str().unwrap()),
+            ("BOBA_FAKE_GRANDCHILD_PID", pid_file.to_str().unwrap()),
+            // Long enough that only the kill can stop it.
+            ("BOBA_FAKE_DELAY_MS", "60000"),
         ]))
         .expect("spawn");
 
-        // Let the child start, then kill the group while the grandchild sleeps.
-        std::thread::sleep(Duration::from_millis(100));
+        // Deterministic sync (CH12): wait for the grandchild to say it is up,
+        // then kill the group. Nothing here sleeps "long enough and hopes".
+        let pid = wait_for_pid(&pid_file);
         proc.kill();
 
-        // The grandchild would touch the marker at 400ms; it must never run.
-        std::thread::sleep(Duration::from_millis(600));
-        assert!(!marker.exists(), "grandchild survived the group kill");
+        // The grandchild is gone now — proven by its pid, not by waiting out
+        // its sleep — and it never touched the marker.
+        assert!(
+            until(|| !alive(pid)),
+            "grandchild {pid} survived the group kill"
+        );
+        assert!(!marker.exists(), "grandchild ran after the group kill");
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -270,7 +287,9 @@ mod tests {
     fn a_grandchild_holding_stderr_does_not_hang_wait() {
         let mut proc = SupervisedProcess::spawn(&spec(&[
             ("BOBA_FAKE_MODE", "fail-auth"),
-            ("BOBA_FAKE_STDERR_HOLD_MS", "5000"),
+            // Far longer than any assertion below, so a pass can only mean the
+            // join was bounded.
+            ("BOBA_FAKE_STDERR_HOLD_MS", "60000"),
         ]))
         .expect("spawn");
 
@@ -280,9 +299,68 @@ mod tests {
         let started = Instant::now();
         proc.wait();
         assert!(
-            started.elapsed() < Duration::from_secs(2),
+            started.elapsed() < Duration::from_secs(5),
             "wait blocked on a grandchild holding stderr for {:?}",
             started.elapsed()
         );
+    }
+
+    // CH12: the stdout join is bounded too. The CLI exits at once while a
+    // grandchild keeps stdout open, so `wait` must not block on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_grandchild_holding_stdout_does_not_hang_wait() {
+        let mut proc = SupervisedProcess::spawn(&spec(&[
+            ("BOBA_FAKE_MODE", "fail-auth"),
+            ("BOBA_FAKE_STDOUT_HOLD_MS", "60000"),
+        ]))
+        .expect("spawn");
+
+        let started = Instant::now();
+        // `wait` reaps the (already exited) CLI, then joins both readers.
+        proc.wait();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "wait blocked on a grandchild holding stdout for {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Wait (bounded) for the grandchild to write its pid.
+    fn wait_for_pid(path: &std::path::Path) -> u32 {
+        let mut pid = None;
+        assert!(
+            until(|| {
+                pid = fs::read_to_string(path)
+                    .ok()
+                    .and_then(|text| text.trim().parse().ok());
+                pid.is_some()
+            }),
+            "the grandchild never announced itself: {path:?}"
+        );
+        pid.expect("checked above")
+    }
+
+    /// Whether `pid` still exists (`kill -0`).
+    fn alive(pid: u32) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// Poll `condition` until it holds, with a deadline. Used for conditions
+    /// another process produces (never as a substitute for a signal).
+    fn until(mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if condition() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        condition()
     }
 }

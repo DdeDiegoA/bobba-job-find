@@ -781,8 +781,14 @@ export const commands = {
   /**  Undo an automatically applied proposal (AC5). */
   statusProposalsUndo: (proposalId: string) =>
     typedError<null, AppError_Serialize>(__TAURI_INVOKE("status_proposals_undo", { proposalId })),
-  /**  The Audit Log timeline, newest first (AC-1). */
-  auditLog: () => typedError<AuditLogView, AppError_Serialize>(__TAURI_INVOKE("audit_log")),
+  /**
+   *  One page of the Audit Log timeline, newest first (AC-1).
+   *
+   *  `cursor` is the `next_cursor` of the page before; `limit` is clamped in the
+   *  core. CH12: the viewer never asks for — or receives — the whole log.
+   */
+  auditLog: (cursor: string | null, limit: number | null) =>
+    typedError<AuditLogPage, AppError_Serialize>(__TAURI_INVOKE("audit_log", { cursor, limit })),
   /**
    *  Write the Audit Log as CSV to the path the user picked in the native dialog
    *  (AC-1: "I can export it as CSV"). Returns the path written.
@@ -997,10 +1003,17 @@ export type AuditEntry = {
   hash: string | null;
 };
 
-/**  The Audit Log as the viewer renders it. */
-export type AuditLogView = {
-  /**  Newest first. */
+/**
+ *  One page of the Audit Log as the viewer renders it (CH12: the log is
+ *  paginated in the core, so the IPC message stays small however long it gets).
+ */
+export type AuditLogPage = {
+  /**  Newest first; at most the requested limit. */
   entries: AuditEntry[];
+  /**  The id to ask the next page from; `None` when this is the last page. */
+  next_cursor: string | null;
+  /**  How many entries the whole merged log holds. */
+  total: number;
   /**  Whether every `audit_event` row re-hashes and links (AD-12). */
   chain_intact: boolean;
   /**  How many `audit_event` rows the check walked. */

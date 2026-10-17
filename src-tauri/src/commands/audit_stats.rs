@@ -11,7 +11,7 @@ use boba_app::ports::repo::outbox_hold::OutboxHoldRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
-use boba_app::stats::audit::{AuditLogService, AuditLogView};
+use boba_app::stats::audit::{AuditLogPage, AuditLogService, DEFAULT_PAGE};
 use boba_app::stats::{FunnelStats, StatsError, StatsService};
 
 use crate::wiring;
@@ -20,10 +20,17 @@ fn to_app(error: StatsError) -> AppError {
     AppError::new(ErrorCode::Internal, error.message_key())
 }
 
-/// The Audit Log timeline, newest first (AC-1).
+/// One page of the Audit Log timeline, newest first (AC-1).
+///
+/// `cursor` is the `next_cursor` of the page before; `limit` is clamped in the
+/// core. CH12: the viewer never asks for — or receives — the whole log.
 #[tauri::command]
 #[specta::specta]
-pub fn audit_log(app: tauri::AppHandle) -> AppResult<AuditLogView> {
+pub fn audit_log(
+    app: tauri::AppHandle,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> AppResult<AuditLogPage> {
     let service = AuditLogService::new(
         wiring::port::<dyn SystemRepo>(&app)?,
         wiring::port::<dyn ApplyRepo>(&app)?,
@@ -31,7 +38,9 @@ pub fn audit_log(app: tauri::AppHandle) -> AppResult<AuditLogView> {
         wiring::port::<dyn AutoRulesRepo>(&app)?,
         wiring::port::<dyn SourcesRepo>(&app)?,
     );
-    service.entries().map_err(to_app)
+    service
+        .page(cursor.as_deref(), limit.unwrap_or(DEFAULT_PAGE))
+        .map_err(to_app)
 }
 
 /// Write the Audit Log as CSV to the path the user picked in the native dialog

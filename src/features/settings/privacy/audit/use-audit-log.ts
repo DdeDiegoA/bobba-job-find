@@ -3,17 +3,23 @@ import { commands } from "@/lib/ipc/bindings";
 import { unwrap } from "@/lib/ipc/errors";
 
 /**
- * The Audit Log (S9.9, FR-89): one read of the merged timeline. The core owns
- * the ordering and the chain verdict; this layer never re-sorts or re-verifies.
+ * The Audit Log (S9.9, FR-89): one page of the merged timeline at a time.
+ * The core owns the ordering, the pagination and the chain verdict; this layer
+ * never re-sorts or re-verifies (CH12: the whole log never crosses IPC).
  */
-export const auditLogKey = ["audit-log"] as const;
+export const auditLogKey = (cursor: string | null) => ["audit-log", cursor] as const;
 
-export function useAuditLog() {
+export function useAuditLog(cursor: string | null) {
   return useQuery({
-    queryKey: auditLogKey,
-    queryFn: () => commands.auditLog().then(unwrap),
+    queryKey: auditLogKey(cursor),
+    queryFn: () => commands.auditLog(cursor ?? null, PAGE_SIZE).then(unwrap),
+    // No placeholder from the previous page: showing page 1's rows under a
+    // "Page 2" label while page 2 loads would mislabel what the user sees.
   });
 }
+
+/** How many rows one page asks the core for (the core clamps it too). */
+export const PAGE_SIZE = 50;
 
 /**
  * Export to the path the user picked in the native dialog. The core writes the

@@ -57,11 +57,16 @@ pub struct ScoreRequest {
 
 impl ScoreRequest {
     /// The three versions this request would store a card under (AC3).
+    ///
+    /// The model version includes whether F3's encoder contributed to this
+    /// request (CH12): the embeddings opt-in is the user's, and toggling it
+    /// changes the card, so it must never hand back a card scored the other
+    /// way.
     pub fn versions(&self) -> CardVersions {
         CardVersions {
             profile_version: self.profile_version,
             prefs_version: self.prefs_version,
-            model_version: rank::MODEL_VERSION,
+            model_version: rank::model_version(self.semantic.is_some()),
         }
     }
 }
@@ -169,12 +174,16 @@ mod tests {
     use super::*;
     use boba_domain::posting::{ApplyHints, Money, PayPeriod, WorkMode};
     use boba_domain::posting_features::{Claim, FeatureKind, Seniority};
-    use boba_domain::scoring::factors::{BenchmarkBasis, CompanySignals, SalaryBenchmark};
+    use boba_domain::scoring::factors::{
+        BenchmarkBasis, CompanySignals, SalaryBenchmark, SemanticScore,
+    };
     use boba_domain::scoring::gates::{
         Cefr, Confidence, DeclaredLanguage, Evidence, GateKind, GateReason, GateResult, QuotedSpan,
         Verdict as GateVerdict,
     };
-    use boba_domain::scoring::rank::{MODEL_VERSION, ScoreCard, Verdict as Band, score};
+    use boba_domain::scoring::rank::{
+        MODEL_VERSION, MODEL_VERSION_WITH_EMBEDDINGS, ScoreCard, Verdict as Band, score,
+    };
 
     use crate::scoring::testing::{FakeScoringRepo, FixedTestClock};
 
@@ -347,6 +356,37 @@ mod tests {
             .expect("a card");
         assert_eq!(first, second, "the stored card is handed back");
         assert_eq!(repo.cards_for("pst_01").expect("read").len(), 1);
+    }
+
+    // CH12/S6.9: the embeddings opt-in is part of the key, so a run that has
+    // F3 never hands back a card scored without it (and vice versa).
+    #[test]
+    fn turning_embeddings_on_re_keys_the_card() {
+        let repo = Arc::new(FakeScoringRepo::default());
+        let service = service(repo.clone());
+        let deterministic = service
+            .score(request(2))
+            .expect("no failure")
+            .expect("a card");
+        assert_eq!(deterministic.versions().model_version, MODEL_VERSION);
+
+        let mut with_embeddings = request(2);
+        with_embeddings.semantic = SemanticScore::new(0.8);
+        let embedded = service
+            .score(with_embeddings)
+            .expect("no failure")
+            .expect("a card");
+
+        assert_eq!(
+            embedded.versions().model_version,
+            MODEL_VERSION_WITH_EMBEDDINGS
+        );
+        assert_ne!(embedded.id, deterministic.id);
+        assert_eq!(
+            repo.cards_for("pst_01").expect("read").len(),
+            2,
+            "the deterministic card is kept and a new one is written"
+        );
     }
 
     // AC3: a Preferences change re-scores, and the earlier card stays readable

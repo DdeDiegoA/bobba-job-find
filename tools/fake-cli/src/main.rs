@@ -13,11 +13,16 @@
 //!                   which is how ADR-010's run-time observation is tested both
 //!                   ways
 //!   spawn-child   — spawn a background grandchild that touches
-//!                   `BOBA_FAKE_MARKER` after `BOBA_FAKE_DELAY_MS`, then exit 0
+//!                   `BOBA_FAKE_MARKER` after `BOBA_FAKE_DELAY_MS`, then exit 0.
+//!                   `BOBA_FAKE_READY` is written once that grandchild exists
+//!                   and `BOBA_FAKE_GRANDCHILD_PID` receives its pid, so a test
+//!                   can sync on it and then prove it is gone without waiting
+//!                   out the delay (CH12)
 //!   emit-lines    — alias of replay, kept for readability in fixtures
 //!   fail-auth     — write an auth error to stderr, exit 1. `BOBA_FAKE_STDERR_HOLD_MS`
-//!                   also leaves a grandchild holding stderr open that long,
-//!                   so a test can prove a run waits for stderr to close
+//!                   or `BOBA_FAKE_STDOUT_HOLD_MS` also leaves a grandchild
+//!                   holding that pipe open that long, so a test can prove the
+//!                   run's join on it is bounded
 //!   mcp-run       — open with the init event, then speak the run's MCP endpoint
 //!                   (`BOBA_IPC_ENDPOINT`/`BOBA_RUN_TOKEN`): authenticate and make
 //!                   one `tools/call` per entry in `BOBA_FAKE_CALLS` (JSON array
@@ -105,7 +110,15 @@ fn spawn_child() {
 
     // A grandchild that keeps running until after the parent is killed. Its
     // process group is the fake CLI's, so a group kill must take it down too.
-    let script = format!("sleep {}; : > {}", delay_ms as f64 / 1000.0, marker);
+    // It writes its pid first: a test kills it and then checks it is gone,
+    // instead of sleeping past the delay and hoping (CH12).
+    let script = match std::env::var("BOBA_FAKE_GRANDCHILD_PID") {
+        Ok(pid_file) => format!(
+            "echo $$ > \"{pid_file}\"; sleep {}; : > \"{marker}\"",
+            delay_ms as f64 / 1000.0
+        ),
+        Err(_) => format!("sleep {}; : > \"{marker}\"", delay_ms as f64 / 1000.0),
+    };
     let _ = Command::new("sh")
         .arg("-c")
         .arg(&script)
@@ -114,6 +127,11 @@ fn spawn_child() {
         .stderr(Stdio::null())
         .spawn();
 
+    // Tell a test the grandchild is up, rather than making it sleep and hope.
+    if let Ok(path) = std::env::var("BOBA_FAKE_READY") {
+        let _ = std::fs::write(path, "ready");
+    }
+
     // Keep the parent alive long enough for the test to kill the group.
     std::thread::sleep(Duration::from_millis(delay_ms + 2_000));
     println!(r#"{{"type":"finished","exit_code":0}}"#);
@@ -121,20 +139,38 @@ fn spawn_child() {
 
 fn fail_auth() {
     eprintln!("error: not authenticated, please log in");
-    // A grandchild keeps the stderr pipe open past this process (its stdio is
-    // inherited, unlike `spawn-child`). The reader only sees stderr at EOF, so
-    // this is how a test forces a run to wait for the pipe to close.
-    if let Ok(ms) = std::env::var("BOBA_FAKE_STDERR_HOLD_MS")
-        && let Ok(ms) = ms.parse::<u64>()
-    {
-        let _ = Command::new("sh")
-            .arg("-c")
-            .arg(format!("sleep {}", ms as f64 / 1000.0))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn();
-    }
+    // A grandchild keeps one pipe open past this process, inheriting only that
+    // pipe. A reader sees EOF when the last writer closes, so this is how a
+    // test proves each join is bounded (CH12).
+    hold_pipe("BOBA_FAKE_STDERR_HOLD_MS", false, true);
+    hold_pipe("BOBA_FAKE_STDOUT_HOLD_MS", true, false);
     std::process::exit(1);
+}
+
+/// Leave a grandchild sleeping `ms` while holding stdout and/or stderr open;
+/// a no-op when the variable is unset or not a number.
+fn hold_pipe(variable: &str, stdout: bool, stderr: bool) {
+    let Some(ms) = std::env::var(variable)
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    else {
+        return;
+    };
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(format!("sleep {}", ms as f64 / 1000.0))
+        .stdin(Stdio::null())
+        .stdout(if stdout {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
+        .stderr(if stderr {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
+        .spawn();
 }
 
 /// A fake run that talks to its own MCP endpoint, so a test can drive the whole

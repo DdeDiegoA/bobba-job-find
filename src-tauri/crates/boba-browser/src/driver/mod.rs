@@ -399,6 +399,9 @@ pub struct ChromeTransport {
     runtime: tokio::runtime::Runtime,
     browser: Mutex<chromiumoxide::Browser>,
     page: chromiumoxide::Page,
+    /// How long one CDP call may take (CH12: configurable, see
+    /// [`DEFAULT_CALL_TIMEOUT`]).
+    call_timeout: std::time::Duration,
 }
 
 impl ChromeTransport {
@@ -427,13 +430,25 @@ impl ChromeTransport {
             runtime,
             browser: Mutex::new(browser),
             page,
+            call_timeout: DEFAULT_CALL_TIMEOUT,
         })
+    }
+
+    /// Use `timeout` for every CDP call instead of [`DEFAULT_CALL_TIMEOUT`].
+    pub fn with_call_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.call_timeout = timeout;
+        self
     }
 }
 
 /// How long one CDP call may take before it reports a timeout. A hung page
 /// must not hold the calling thread forever (S9.4 review F2).
-pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+///
+/// 90s rather than 30s (CH12): slow ATS pages legitimately take tens of
+/// seconds to load, and a timeout ends the session. A caller that knows its
+/// pages are slower or faster can override it with
+/// [`ChromeTransport::with_call_timeout`].
+pub const DEFAULT_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 /// Why a CDP call did not answer.
 #[derive(Debug)]
@@ -501,7 +516,7 @@ fn call_error(error: WaitError, navigation: bool) -> BrowserError {
 impl CdpTransport for ChromeTransport {
     fn navigate(&self, url: &str) -> Result<(), BrowserError> {
         let page = &self.page;
-        within(&self.runtime, CALL_TIMEOUT, async move {
+        within(&self.runtime, self.call_timeout, async move {
             page.goto(url).await.map(|_| ())
         })
         .map_err(|error| call_error(error, true))
@@ -509,7 +524,7 @@ impl CdpTransport for ChromeTransport {
 
     fn evaluate(&self, script: &str) -> Result<String, BrowserError> {
         let page = &self.page;
-        let result = within(&self.runtime, CALL_TIMEOUT, async move {
+        let result = within(&self.runtime, self.call_timeout, async move {
             page.evaluate_expression(script).await
         })
         .map_err(|error| call_error(error, false))?;
@@ -520,7 +535,7 @@ impl CdpTransport for ChromeTransport {
 
     fn screenshot_png(&self) -> Result<Vec<u8>, BrowserError> {
         let page = &self.page;
-        within(&self.runtime, CALL_TIMEOUT, async move {
+        within(&self.runtime, self.call_timeout, async move {
             page.screenshot(chromiumoxide::page::ScreenshotParams::default())
                 .await
         })
@@ -537,7 +552,7 @@ impl CdpTransport for ChromeTransport {
         }
         let selector = format!("[data-boba-field=\"{handle}\"]");
         let page = &self.page;
-        let element = within(&self.runtime, CALL_TIMEOUT, async move {
+        let element = within(&self.runtime, self.call_timeout, async move {
             page.find_element(selector).await
         })
         .map_err(|error| call_error(error, false))?;
@@ -551,7 +566,7 @@ impl CdpTransport for ChromeTransport {
             .backend_node_id(element.backend_node_id)
             .build()
             .map_err(BrowserError::Page)?;
-        within(&self.runtime, CALL_TIMEOUT, async move {
+        within(&self.runtime, self.call_timeout, async move {
             page.execute(params).await.map(|_| ())
         })
         .map_err(|error| call_error(error, false))
@@ -562,7 +577,7 @@ impl CdpTransport for ChromeTransport {
             .browser
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        within(&self.runtime, CALL_TIMEOUT, async move {
+        within(&self.runtime, self.call_timeout, async move {
             browser.close().await.map(|_| ())
         })
         .map_err(|error| call_error(error, false))
