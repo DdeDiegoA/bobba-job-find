@@ -323,6 +323,12 @@ impl Dispatcher<'_> {
 
     /// A manual "Run now" (FR-41, AC3): join the run already executing, or
     /// start one whose slot is the moment it was asked for.
+    ///
+    /// A manual run asked for **after** today's slot stands in for it: the next
+    /// tick plans forward from this run's row, so the earlier slot is never due
+    /// again (a second search minutes later would be the same search). Asked for
+    /// before the slot, that slot still runs at its time — the run is idempotent
+    /// (AD-18), so the pair is harmless.
     pub fn run_now(&self, job: JobKind) -> Result<DriveOutcome, JobsRepoError> {
         let now = self.clock.now_rfc3339();
         if let Some(running) = self.repo.running_run(job)? {
@@ -402,7 +408,10 @@ pub fn tick(ctx: &TickContext<'_>) -> Vec<(JobKind, DriveOutcome)> {
             .map(|start| start.max(floor))
             .or(Some(floor));
         for slot in schedule.due_slots(ctx.offset, after, now) {
-            let Ok(scheduled_for) = slot.format(&Rfc3339) else {
+            // `scheduled_for` is UTC (AD-17), whatever offset the schedule runs
+            // in: the column is also the uniqueness key and the sort order, so
+            // one instant must have exactly one spelling.
+            let Ok(scheduled_for) = slot.to_offset(UtcOffset::UTC).format(&Rfc3339) else {
                 continue;
             };
             match dispatcher.drive(job, &scheduled_for, ctx.locked) {
@@ -855,6 +864,32 @@ mod tests {
             repo.rows.lock().unwrap().len(),
             2,
             "one old row plus today's"
+        );
+    }
+
+    #[test]
+    fn a_tick_stores_the_slot_in_utc_whatever_the_local_offset() {
+        // 08:00 at UTC-5 is 13:00 UTC; the row says UTC (AD-17).
+        let repo = FakeRepo::default();
+        let notifier = CountingNotifier::default();
+        let clock = FixedClock("2026-10-16T14:00:00Z");
+        let schedules = default_schedules();
+
+        let ticked = tick(&TickContext {
+            repo: &repo,
+            clock: &clock,
+            notifier: &notifier,
+            offset: utc_offset(-5),
+            locked: false,
+            schedules: &schedules,
+            started_at: Some(utc(2026, 10, 16, 0, 0)),
+        });
+
+        assert_eq!(ticked.len(), 1, "one run was due");
+        assert_eq!(
+            repo.rows.lock().unwrap()[0].scheduled_for,
+            "2026-10-16T13:00:00Z",
+            "one instant, one UTC spelling"
         );
     }
 

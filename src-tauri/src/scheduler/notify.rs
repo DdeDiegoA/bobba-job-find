@@ -93,13 +93,18 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
         let (title, body) = match notification {
             Notification::LockedSearch => (text(locale, &LOCKED_TITLE), text(locale, &LOCKED_BODY)),
         };
-        self.app
-            .notification()
-            .builder()
-            .title(title)
-            .body(body)
-            .show()
-            .map_err(|error| NotifierError::new(error.to_string()))
+        // A host without the notification plugin panics inside Tauri's accessor
+        // rather than returning an error; a missing toast never kills the tick.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.app
+                .notification()
+                .builder()
+                .title(title)
+                .body(body)
+                .show()
+        }))
+        .map_err(|_| NotifierError::new("the notification plugin is not available"))?
+        .map_err(|error| NotifierError::new(error.to_string()))
     }
 }
 

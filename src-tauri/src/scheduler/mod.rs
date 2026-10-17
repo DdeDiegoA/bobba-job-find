@@ -17,7 +17,7 @@
 
 mod notify;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,6 +28,7 @@ use boba_app::jobs::{
     TickContext, default_schedules,
 };
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::notifier::NotifierPort;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;
 use serde::{Deserialize, Serialize};
@@ -87,10 +88,16 @@ impl Handlers {
 #[derive(Debug)]
 struct Installed;
 
-/// Per-launch scheduler state: the recovery of stale runs happens once.
+/// Per-launch scheduler state.
 #[derive(Debug, Default)]
 struct SchedulerState {
+    /// Whether this launch already closed the runs a previous process left
+    /// `running`; set only once the store confirmed it.
     recovered: AtomicBool,
+    /// Slots notified while no store was mounted (the store was locked at
+    /// launch), keyed by job and UTC `scheduled_for`. Each is notified once per
+    /// launch (AC4) and recorded `skipped_locked` as soon as the store mounts.
+    pending: Mutex<HashSet<(JobKind, String)>>,
 }
 
 /// The scheduler's own handlers, once installed.
@@ -196,7 +203,9 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     let Some(repo) = jobs_repo(app) else {
-        // No store this launch (locked at startup): nothing can be recorded.
+        // No store this launch (locked at startup): nothing can be recorded,
+        // but the user is still told a run was skipped (AC4).
+        note_locked_slots(app);
         return;
     };
 
@@ -206,12 +215,9 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
 
     // A run that died with the previous process (power loss, crash) must not
     // hold the single-run lock (FR-47).
-    if let Some(state) = app.try_state::<SchedulerState>()
-        && !state.recovered.swap(true, Ordering::SeqCst)
-        && let Err(error) = repo.mark_interrupted(&now, "interrupted by a previous shutdown")
-    {
-        tracing::warn!(%error, "stale job runs not closed");
-    }
+    recover_stale(app, repo.as_ref(), &now);
+    // Slots notified while the store was locked get their row now (AC4).
+    record_pending_skips(app, repo.as_ref(), &now);
 
     let locked = matches!(wiring::store_state(app), StoreStatus::Locked { .. });
     let schedules = system
@@ -239,6 +245,107 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Close the runs a previous process left `running`, once per launch. The flag
+/// is set only after the store confirmed the update, so a failed attempt is
+/// retried on the next tick (FR-47).
+fn recover_stale<R: Runtime>(app: &AppHandle<R>, repo: &dyn JobsRepo, now: &str) {
+    let Some(state) = app.try_state::<SchedulerState>() else {
+        return;
+    };
+    if state.recovered.load(Ordering::SeqCst) {
+        return;
+    }
+    match repo.mark_interrupted(now, "interrupted by a previous shutdown") {
+        Ok(closed) => {
+            state.recovered.store(true, Ordering::SeqCst);
+            if closed > 0 {
+                tracing::info!(closed, "stale job runs closed");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "stale job runs not closed"),
+    }
+}
+
+/// Record the slots notified while no store was mounted (AC4): each becomes a
+/// `skipped_locked` row the moment the store is open, and leaves the list only
+/// once the store accepted it.
+fn record_pending_skips<R: Runtime>(app: &AppHandle<R>, repo: &dyn JobsRepo, now: &str) {
+    let Some(state) = app.try_state::<SchedulerState>() else {
+        return;
+    };
+    let pending: Vec<(JobKind, String)> = state
+        .pending
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .cloned()
+        .collect();
+    for key in pending {
+        match repo.record_skipped_locked(key.0, &key.1, now) {
+            Ok(_) => {
+                state
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .remove(&key);
+            }
+            Err(error) => {
+                tracing::warn!(%error, job = key.0.as_str(), "locked slot not recorded");
+            }
+        }
+    }
+}
+
+/// While no store is mounted, a due slot cannot be recorded: notify once per
+/// slot in this launch and remember it, so the store records it when it mounts
+/// (AC4, ADR-009 §3). Today only — without the store there is no way to tell
+/// which earlier days already have their row, and a locked launch must not
+/// replay a week of notifications.
+fn note_locked_slots<R: Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<SchedulerState>() else {
+        return;
+    };
+    let clock = SystemClock;
+    let Ok(now) = OffsetDateTime::parse(&clock.now_rfc3339(), &Rfc3339) else {
+        return;
+    };
+    let notifier = notify::TauriNotifier::new(app.clone());
+
+    for (job, slot) in locked_slots(local_offset(), now) {
+        let first = state
+            .pending
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert((job, slot));
+        if first {
+            let _ = notifier.notify(boba_app::ports::notifier::Notification::LockedSearch);
+        }
+    }
+}
+
+/// The slots a locked launch reports today, in UTC (AC4): at most one per job,
+/// because there is no store to say what earlier ticks already recorded.
+fn locked_slots(offset: UtcOffset, now: OffsetDateTime) -> Vec<(JobKind, String)> {
+    let today = now
+        .to_offset(offset)
+        .date()
+        .midnight()
+        .assume_offset(offset);
+    let schedules = default_schedules();
+    let mut slots = Vec::new();
+    for job in JobKind::ALL {
+        let Some(schedule) = schedules.get(&job) else {
+            continue;
+        };
+        for slot in schedule.due_slots(offset, Some(today), now) {
+            if let Ok(text) = slot.to_offset(UtcOffset::UTC).format(&Rfc3339) {
+                slots.push((job, text));
+            }
+        }
+    }
+    slots
+}
+
 /// Run one started job off the tick thread, then close its row: the outcome is
 /// what `job_run` ends with, and a panic in a handler becomes `failed`.
 fn execute<R: Runtime>(app: AppHandle<R>, job: JobKind, run: JobRun) {
@@ -248,16 +355,24 @@ fn execute<R: Runtime>(app: AppHandle<R>, job: JobKind, run: JobRun) {
         .name(format!("boba-job-{}", job.as_str()))
         .spawn(move || {
             let handler = handlers(&thread_app).and_then(|handlers| handlers.get(job));
-            let outcome = match handler {
-                Some(handler) => handler.run(job),
-                None => Err(format!("no handler registered for {}", job.as_str())),
-            };
+            let outcome = run_handler(handler, job);
             close(&thread_app, &thread_run, outcome);
         });
     if let Err(error) = spawned {
         tracing::error!(%error, job = job.as_str(), "job thread not started");
         close(&app, &run, Err(format!("job thread not started: {error}")));
     }
+}
+
+/// Run the job's handler, if any, with a panic turned into a failure: a handler
+/// that panics must not leave its row `running` forever and hold the single-run
+/// lock until the next launch (FR-47).
+fn run_handler(handler: Option<Arc<dyn JobHandler>>, job: JobKind) -> Result<(), String> {
+    let Some(handler) = handler else {
+        return Err(format!("no handler registered for {}", job.as_str()));
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler.run(job)))
+        .unwrap_or_else(|_| Err(format!("{} handler panicked", job.as_str())))
 }
 
 /// Close a run with the outcome its handler reported.
@@ -461,5 +576,190 @@ mod tests {
     fn the_local_offset_falls_back_to_utc() {
         // Whatever this host reports, the scheduler always gets a usable offset.
         let _ = local_offset();
+    }
+
+    fn at(text: &str) -> OffsetDateTime {
+        OffsetDateTime::parse(text, &Rfc3339).unwrap()
+    }
+
+    #[test]
+    fn a_locked_launch_reports_todays_slot_once() {
+        // 09:00 UTC with the 08:00 daily search already past: one slot.
+        assert_eq!(
+            locked_slots(UtcOffset::UTC, at("2026-10-16T09:00:00Z")),
+            vec![(JobKind::DailySearch, "2026-10-16T08:00:00Z".to_string())]
+        );
+        // Before the run time there is nothing to report (it will not be missed).
+        assert!(locked_slots(UtcOffset::UTC, at("2026-10-16T07:00:00Z")).is_empty());
+        // The slot is the local wall clock, stored in UTC (AD-17).
+        assert_eq!(
+            locked_slots(
+                UtcOffset::from_hms(-5, 0, 0).unwrap(),
+                at("2026-10-16T14:00:00Z")
+            ),
+            vec![(JobKind::DailySearch, "2026-10-16T13:00:00Z".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_panicking_handler_fails_its_run_instead_of_holding_the_lock() {
+        struct Panics;
+        impl JobHandler for Panics {
+            fn run(&self, _job: JobKind) -> Result<(), String> {
+                panic!("boom");
+            }
+        }
+        struct Works;
+        impl JobHandler for Works {
+            fn run(&self, _job: JobKind) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        assert!(run_handler(Some(Arc::new(Panics)), JobKind::DailySearch).is_err());
+        assert!(run_handler(Some(Arc::new(Works)), JobKind::DailySearch).is_ok());
+        let missing = run_handler(None, JobKind::DailySearch).unwrap_err();
+        assert!(missing.contains("no handler registered"));
+    }
+
+    #[test]
+    fn slots_notified_while_locked_are_recorded_and_dropped_once_the_store_mounts() {
+        use tauri::Manager;
+        use tauri::test::mock_app;
+
+        let app = mock_app();
+        let handle = app.handle().clone();
+        // The notification plugin, so a notifier call in the mock runtime resolves.
+        let _ = handle.plugin(tauri_plugin_notification::init());
+        handle.manage(SchedulerState::default());
+
+        // Two ticks of a locked launch notify each slot once (AC4).
+        note_locked_slots(&handle);
+        note_locked_slots(&handle);
+        let pending = handle
+            .state::<SchedulerState>()
+            .pending
+            .lock()
+            .unwrap()
+            .len();
+        assert!(pending <= 1, "today's slot only, and only once");
+
+        // The store mounts: every pending slot becomes a skipped_locked row.
+        let repo = Arc::new(FakeJobs::default());
+        handle.manage::<Arc<dyn JobsRepo>>(repo.clone());
+        record_pending_skips(&handle, repo.as_ref(), "2026-10-16T09:00:00Z");
+
+        assert!(
+            handle
+                .state::<SchedulerState>()
+                .pending
+                .lock()
+                .unwrap()
+                .is_empty()
+        );
+        let rows = repo.rows.lock().unwrap();
+        assert_eq!(rows.len(), pending);
+        assert!(
+            rows.iter()
+                .all(|run| run.status == boba_app::jobs::RunStatus::SkippedLocked)
+        );
+    }
+
+    /// An in-memory `job_run` table, enough for the pending-skip path.
+    #[derive(Default)]
+    struct FakeJobs {
+        rows: Mutex<Vec<JobRun>>,
+    }
+
+    impl JobsRepo for FakeJobs {
+        fn open_run(
+            &self,
+            job: JobKind,
+            scheduled_for: &str,
+            started_at: &str,
+        ) -> Result<boba_app::jobs::OpenOutcome, boba_app::jobs::JobsRepoError> {
+            let run = JobRun {
+                id: format!("run-{}", self.rows.lock().unwrap().len() + 1),
+                job,
+                scheduled_for: scheduled_for.to_string(),
+                started_at: started_at.to_string(),
+                finished_at: None,
+                status: boba_app::jobs::RunStatus::Running,
+                detail: None,
+            };
+            self.rows.lock().unwrap().push(run.clone());
+            Ok(boba_app::jobs::OpenOutcome::Started(run))
+        }
+
+        fn record_skipped_locked(
+            &self,
+            job: JobKind,
+            scheduled_for: &str,
+            at: &str,
+        ) -> Result<Option<JobRun>, boba_app::jobs::JobsRepoError> {
+            if self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|run| run.job == job && run.scheduled_for == scheduled_for)
+            {
+                return Ok(None);
+            }
+            let run = JobRun {
+                id: format!("run-{}", self.rows.lock().unwrap().len() + 1),
+                job,
+                scheduled_for: scheduled_for.to_string(),
+                started_at: at.to_string(),
+                finished_at: Some(at.to_string()),
+                status: boba_app::jobs::RunStatus::SkippedLocked,
+                detail: None,
+            };
+            self.rows.lock().unwrap().push(run.clone());
+            Ok(Some(run))
+        }
+
+        fn finish_run(
+            &self,
+            _id: &str,
+            _finished_at: &str,
+            _status: boba_app::jobs::RunStatus,
+            _detail: Option<&str>,
+        ) -> Result<JobRun, boba_app::jobs::JobsRepoError> {
+            Err(boba_app::jobs::JobsRepoError::new("unused"))
+        }
+
+        fn get_run(
+            &self,
+            job: JobKind,
+            scheduled_for: &str,
+        ) -> Result<Option<JobRun>, boba_app::jobs::JobsRepoError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|run| run.job == job && run.scheduled_for == scheduled_for)
+                .cloned())
+        }
+
+        fn running_run(
+            &self,
+            _job: JobKind,
+        ) -> Result<Option<JobRun>, boba_app::jobs::JobsRepoError> {
+            Ok(None)
+        }
+
+        fn last_run(&self, _job: JobKind) -> Result<Option<JobRun>, boba_app::jobs::JobsRepoError> {
+            Ok(None)
+        }
+
+        fn mark_interrupted(
+            &self,
+            _at: &str,
+            _detail: &str,
+        ) -> Result<u64, boba_app::jobs::JobsRepoError> {
+            Ok(0)
+        }
     }
 }
