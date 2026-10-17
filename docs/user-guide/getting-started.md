@@ -22,7 +22,7 @@ left off**.
 2. **Engine.** Boba lists the agent CLIs it found. Pick one and a model, then run the **test
    call** to see that it works. Boba checks, for each run, that the CLI's tool lockdown is
    verified before it reads untrusted text such as job postings.
-3. **Master CV.** Import your CV (PDF, DOCX or text) and review what Boba understood. These
+3. **Master CV.** Import your CV (PDF, DOCX, a LinkedIn data export, or pasted text) and confirm each suggested fact; nothing is saved until you do. These
    become the facts in your **Profile**, the only source for everything Boba writes about you.
 4. **Preferences.** Roles, seniority, salary floor (hard or soft), locations, languages and the
    things you want to avoid. Ranking follows these.

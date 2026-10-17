@@ -50,7 +50,6 @@ what remains on disk. Uninstall afterwards from your system's app list.
 
 ## Retention
 
-Boba clears old seen jobs and snapshots on a schedule so your database doesn't grow forever.
-The audit log chain is never touched by this.
+Boba runs a retention sweep so old data doesn't pile up forever. The audit log chain is never touched by it.
 
 Next: [Troubleshooting](troubleshooting.md).
