@@ -86,7 +86,7 @@ export function cardsIn(cards: readonly Card[], section: SectionId): Card[] {
   if (section === "weak_poor") {
     return ranked.filter((card) => bandOf(card) === "weak_poor");
   }
-  return ranked.filter((card) => bandOf(card) === section && card.verdict === section);
+  return ranked.filter((card) => bandOf(card) === section);
 }
 
 /** How many cards each Verdict band holds (Today's "3 Strong · 5 Good …"). */
