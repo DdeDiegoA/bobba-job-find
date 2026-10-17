@@ -24,6 +24,9 @@ const ipc = vi.hoisted(() => {
       agentTestCall: vi.fn(),
       agentEngineChoose: vi.fn(),
       profileImportProposals: vi.fn(),
+      capabilitiesSnapshot: vi.fn(),
+      profileGapsQuestions: vi.fn(),
+      profileSnapshot: vi.fn(),
       preferencesSnapshot: vi.fn(),
       preferencesSave: vi.fn(),
       sourcesCatalogue: vi.fn(),
@@ -168,6 +171,23 @@ beforeEach(() => {
   );
 
   vi.mocked(commands.profileImportProposals).mockReturnValue(ok([]));
+  // S3.3: the fake CLI is healthy, so the AI-only actions on the gap step are
+  // available (S3.6 gates them through <Gated>).
+  vi.mocked(commands.capabilitiesSnapshot).mockReturnValue(
+    ok({
+      limited: false,
+      capabilities: [
+        { id: "profile_gaps", available: true, reason: null },
+        { id: "profile_translation", available: true, reason: null },
+      ],
+    }),
+  );
+  // S3.6: the gap interview has nothing to ask in this fixture, so the step
+  // renders its empty state and Next continues.
+  vi.mocked(commands.profileGapsQuestions).mockReturnValue(ok([]));
+  vi.mocked(commands.profileSnapshot).mockReturnValue(
+    ok({ profile_version: 1, facts: [], pending_proposals: 0 }),
+  );
   vi.mocked(commands.preferencesSnapshot).mockReturnValue(
     ok({ version: 0, values: preferences(), scores_stale: false }),
   );
@@ -252,10 +272,17 @@ describe("first run — wizard to ranked list (AC5, SM-1)", () => {
     // 3. Master CV: no CV on hand.
     fireEvent.click(await screen.findByRole("button", { name: "Skip for now" }));
 
-    // 4. Preferences: the defaults are already valid.
+    // 4. Gap interview: nothing to ask with this fixture, and every question
+    // is skippable anyway (FR-6), so Next continues.
+    expect(
+      await screen.findByText(/Boba asks only what your profile can't answer/),
+    ).toBeTruthy();
     fireEvent.click(next());
 
-    // 5. Sources: the Safe Sources are pre-selected, LinkedIn is not.
+    // 5. Preferences: the defaults are already valid.
+    fireEvent.click(next());
+
+    // 6. Sources: the Safe Sources are pre-selected, LinkedIn is not.
     const remotive = await screen.findByRole("checkbox", { name: /Remotive/ });
     expect((remotive as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("checkbox", { name: /LinkedIn/ }) as HTMLInputElement).checked).toBe(

@@ -417,6 +417,54 @@ export const commands = {
   /**  Delete a proposal: it never becomes a fact (AC1). */
   profileImportDiscard: (id: string) =>
     typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_import_discard", { id })),
+  /**
+   *  The questions the Profile's facts leave open, without any run. This is what
+   *  the step shows before the user asks for help, and the whole step in limited
+   *  mode (S3.3: no working CLI).
+   */
+  profileGapsQuestions: () =>
+    typedError<Gap[], AppError_Serialize>(__TAURI_INVOKE("profile_gaps_questions")),
+  /**
+   *  Run one `profile_gaps` pass: the agent writes the questions, the core keeps
+   *  the ones that are really missing (AC1). Runs off the UI thread: the run
+   *  waits on an agent CLI and can take minutes (S3.5 review F1).
+   */
+  profileGapsStart: (extraContext: string | null, language: string) =>
+    typedError<InterviewOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("profile_gaps_start", { extraContext, language }),
+    ),
+  /**  Answer one question: the fact it states is saved as the user's own (AC1). */
+  profileGapsAnswer: (key: string, answer: GapAnswer, language: string) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("profile_gaps_answer", { key, answer, language }),
+    ),
+  /**  Skip one question: the Gates that needed it lose confidence (AC1). */
+  profileGapsSkip: (key: string) =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_gaps_skip", { key })),
+  /**
+   *  Run one `translate_profile` pass for a fact with one variant (AC2). The
+   *  draft waits as a proposal; nothing is saved before the user confirms.
+   */
+  profileGapsTranslate: (itemId: string, lang: string, language: string) =>
+    typedError<TranslateOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("profile_gaps_translate", { itemId, lang, language }),
+    ),
+  /**  Confirm a drafted variant — as proposed, or with the user's edit (AC3). */
+  profileGapsConfirm: (
+    id: string,
+    edit: {
+      text_en: string | null;
+      text_es: string | null;
+      evidence: string | null;
+      detail_json: string | null;
+    } | null,
+  ) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("profile_gaps_confirm", { id, edit }),
+    ),
+  /**  Delete a drafted variant: it never becomes a fact (AC3). */
+  profileGapsDiscard: (id: string) =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_gaps_discard", { id })),
   /**  The rules and the global Auto settings (AC1). */
   applyRulesSnapshot: () =>
     typedError<RulesSnapshot, AppError_Serialize>(__TAURI_INVOKE("apply_rules_snapshot")),
@@ -1349,6 +1397,40 @@ export type Finding_Serialize = {
   suggestion?: string | null;
 };
 
+/**  One question the Profile cannot answer itself (FR-6). */
+export type Gap = {
+  kind: GapKind;
+  /**  A language tag for `Cefr` (`"en"`, `"es"`), `None` otherwise. */
+  subject: string | null;
+  /**  The fact whose level is missing, for `Cefr`; the answer revises it. */
+  item_id: string | null;
+};
+
+/**  The user's answer to one question, as the step collects it. */
+export type GapAnswer =
+  /**  Where the user may work, and under what authorization. */
+  | { kind: "eligibility"; region: string; permit: string }
+  /**  A CEFR level (`A1`..`C2`). */
+  | { kind: "cefr"; level: string }
+  /**  How much notice the user owes (`"1 month"`). */
+  | { kind: "notice_period"; text: string }
+  /**  The user's own writing, verbatim. */
+  | { kind: "writing_sample"; text: string };
+
+/**
+ *  The four things the interview asks about (FR-6): the Profile fields the
+ *  Gates and Tailoring need that nothing could infer.
+ */
+export type GapKind =
+  /**  Work authorization per country or region (the Eligibility Gate). */
+  | "eligibility"
+  /**  The CEFR level of a declared language (the Language Gate). */
+  | "cefr"
+  /**  How much notice the user owes an employer. */
+  | "notice_period"
+  /**  A short sample of the user's own writing (optional, FR-6). */
+  | "writing_sample";
+
 /**
  *  One Gate as the detail shows it (FR-65, EXPERIENCE §9.4): the verdict in
  *  words and icons, and the posting's own quote when the Gate read one.
@@ -1387,6 +1469,16 @@ export type ImportOutcome = {
   dropped: number;
   /**  The files the run read, in merge order. */
   files: string[];
+};
+
+/**
+ *  What one interview did: the questions to ask and the fact proposals the
+ *  run made from the context it was given (nothing is saved to the profile).
+ */
+export type InterviewOutcome = {
+  run_id: string;
+  questions: QuestionView[];
+  proposals: ProposalView[];
 };
 
 /**
@@ -1775,6 +1867,21 @@ export type ProposalView = {
   /**  Always `false` for a CV import (AC4): the user's own input. */
   untrusted_origin: boolean;
   created_at: string;
+};
+
+/**
+ *  One question as the step renders it: the gap's key and kind, whether it may
+ *  be skipped, and the agent's wording in both languages.
+ */
+export type QuestionView = {
+  /**  The gap key the answer and the skip use (`"eligibility"`, `"cefr:en"`). */
+  key: string;
+  /**  The gap kind, for the input the step renders. */
+  kind: string;
+  /**  FR-6: the writing sample is optional. */
+  optional: boolean;
+  text_en: string | null;
+  text_es: string | null;
 };
 
 /**
@@ -2419,6 +2526,12 @@ export type TransitionInput = {
   /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
   source: string;
   reason: string | null;
+};
+
+/**  What one translate run did: the drafts waiting for review. */
+export type TranslateOutcome = {
+  run_id: string;
+  proposals: ProposalView[];
 };
 
 /**  One field the fill left alone, so the user can see what it skipped. */

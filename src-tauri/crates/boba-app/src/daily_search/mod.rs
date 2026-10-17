@@ -525,7 +525,10 @@ impl DailySearch {
                     continue;
                 }
             };
-            let gate_report = gates::run(&offer, &inputs.gates);
+            let mut gate_report = gates::run(&offer, &inputs.gates);
+            // S3.6 AC1: a gap the user skipped lowers the Confidence of the
+            // Gate that needed it — the answer is missing, not the rule.
+            crate::profile_gaps::gaps::lower_confidence(&mut gate_report, &inputs.skipped_gaps);
             if is_new
                 && gate_report
                     .results

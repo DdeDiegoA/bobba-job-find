@@ -1,0 +1,10 @@
+{
+  "errors.profile_gaps.store": "No se pudo leer o guardar tu perfil.",
+  "errors.profile_gaps.bad_answer": "Esa respuesta no encaja con la pregunta. Revísala e inténtalo de nuevo.",
+  "errors.profile_gaps.contract": "El agente envió preguntas que Boba no pudo leer. Ejecuta la entrevista otra vez.",
+  "errors.profile_gaps.run": "La entrevista no terminó. Puede que el motor de IA esté desconectado o sin cuota.",
+  "errors.profile_gaps.unknown_proposal": "Esa sugerencia ya no está esperando revisión.",
+  "errors.profile_gaps.unknown_gap": "Esa pregunta ya no está abierta. Actualiza el paso.",
+  "errors.profile_gaps.unknown_item": "Ese dato del perfil ya no existe.",
+  "errors.profile_gaps.no_engine": "Elige un motor de IA en el paso anterior antes de pedir ayuda a Boba."
+}

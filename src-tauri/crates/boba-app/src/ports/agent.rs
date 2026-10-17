@@ -23,6 +23,10 @@ pub enum InputTrust {
 #[serde(rename_all = "snake_case")]
 pub enum AgentTaskKind {
     ProfileImport,
+    /// The profile gap interview (S3.6): short questions for what the Profile
+    /// is missing. Trusted by default; a run whose input carries third-party
+    /// text declares `InputTrust::Untrusted` and takes the lockdown gate (AC4).
+    ProfileGaps,
     ExtractPostings,
     NarrateScores,
     TailorApplication,
@@ -36,8 +40,9 @@ impl AgentTaskKind {
     /// Every kind, in the order the UI lists them. Mirrors
     /// `boba_mcp_proto::tool::ALL_TASKS`: a task the catalog does not know is a
     /// task the core cannot run.
-    pub const ALL: [AgentTaskKind; 8] = [
+    pub const ALL: [AgentTaskKind; 9] = [
         AgentTaskKind::ProfileImport,
+        AgentTaskKind::ProfileGaps,
         AgentTaskKind::ExtractPostings,
         AgentTaskKind::NarrateScores,
         AgentTaskKind::TailorApplication,
@@ -51,6 +56,7 @@ impl AgentTaskKind {
     pub const fn id(self) -> &'static str {
         match self {
             AgentTaskKind::ProfileImport => "profile_import",
+            AgentTaskKind::ProfileGaps => "profile_gaps",
             AgentTaskKind::ExtractPostings => "extract_postings",
             AgentTaskKind::NarrateScores => "narrate_scores",
             AgentTaskKind::TailorApplication => "tailor_application",
@@ -67,7 +73,9 @@ impl AgentTaskKind {
     pub const fn reads_untrusted(self) -> bool {
         !matches!(
             self,
-            AgentTaskKind::ProfileImport | AgentTaskKind::TranslateProfile
+            AgentTaskKind::ProfileImport
+                | AgentTaskKind::ProfileGaps
+                | AgentTaskKind::TranslateProfile
         )
     }
 }

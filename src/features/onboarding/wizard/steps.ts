@@ -3,6 +3,7 @@ import CvImportStep from "../steps/cv-import";
 import EmailStep from "../steps/email";
 import EngineStep, { engineStepIsValid } from "../steps/engine";
 import FinishStep, { finishSetup } from "../steps/finish";
+import GapsStep from "../steps/gaps";
 import LanguageStep from "../steps/language";
 import PreferencesStep from "../steps/preferences";
 import SourcesStep from "../steps/sources";
@@ -32,6 +33,10 @@ export const WIZARD_STEPS: WizardStep[] = [
     optional: true,
     Component: CvImportStep,
   },
+  // The gap interview fills what the CV import could not infer (FR-6, S3.6):
+  // every question is skippable, and a skip lowers the related Gate's
+  // Confidence.
+  { id: "gaps", titleKey: "onboarding_gaps:step.title", Component: GapsStep },
   { id: "preferences", titleKey: "preferences:step.title", Component: PreferencesStep },
   // Sources are on by default and shown with their Risk Tier (FR-8, S3.8 AC1).
   { id: "sources", titleKey: "onboarding_finish:step.sources.title", Component: SourcesStep },

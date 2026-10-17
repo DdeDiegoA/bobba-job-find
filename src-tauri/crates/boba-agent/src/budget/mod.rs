@@ -57,6 +57,9 @@ impl BudgetSettings {
 pub fn default_budget(kind: AgentTaskKind) -> RunBudget {
     let (turns, tool_calls, wall_clock) = match kind {
         AgentTaskKind::ProfileImport => (20, 40, Duration::from_secs(600)),
+        // S3.6: the gap interview reads the input, the profile and the
+        // preferences, then asks its questions in one call.
+        AgentTaskKind::ProfileGaps => (12, 20, Duration::from_secs(300)),
         AgentTaskKind::ExtractPostings => (30, 60, Duration::from_secs(600)),
         AgentTaskKind::NarrateScores => (12, 20, Duration::from_secs(300)),
         AgentTaskKind::TailorApplication => (40, 60, Duration::from_secs(900)),

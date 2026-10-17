@@ -5,7 +5,7 @@ use std::sync::Arc;
 use boba_domain::source::{RunStatus as SourceRunStatus, SourceError};
 
 use boba_domain::scoring::factors::{Factor, FactorScore, FactorWeights};
-use boba_domain::scoring::gates::{Confidence, Evidence, GateReport};
+use boba_domain::scoring::gates::{Confidence, Evidence, GateKind, GateReport};
 use boba_domain::scoring::rank::{MODEL_VERSION, ScoreCardRow, Verdict, card as build_card};
 
 use crate::ingest::normalize::testing::FakeIngestionRepo;
@@ -75,6 +75,7 @@ struct Harness {
     agent: Arc<SilentAgent>,
     clock: Arc<StepClock>,
     system: Arc<FakeSystemRepo>,
+    scoring: Arc<FakeScoringRepo>,
 }
 
 impl Harness {
@@ -87,6 +88,17 @@ impl Harness {
             agent: Arc::new(SilentAgent::default()),
             clock: Arc::new(StepClock::new()),
             system: Arc::new(FakeSystemRepo::default()),
+            scoring: Arc::new(FakeScoringRepo::default()),
+        }
+    }
+
+    /// A harness whose store already holds one `setting` row.
+    fn with_setting(sources: ScriptedSources, key: &str, value: &str) -> Self {
+        let mut system = FakeSystemRepo::default();
+        system.seed_setting(key, value);
+        Self {
+            system: Arc::new(system),
+            ..Self::new(sources)
         }
     }
 
@@ -128,7 +140,8 @@ impl Harness {
     }
 
     fn scoring(&self) -> Arc<dyn ScoringRepo> {
-        Arc::new(FakeScoringRepo::default())
+        let scoring: Arc<dyn ScoringRepo> = self.scoring.clone();
+        scoring
     }
 
     fn run(&self, options: RunOptions) -> RunReport {
@@ -556,6 +569,48 @@ fn the_non_ai_stages_finish_within_three_minutes_on_fixtures() {
         elapsed < std::time::Duration::from_secs(180),
         "the non-AI stages took {elapsed:?}"
     );
+}
+
+/// AC1 (S3.6): a gap interview question the user skipped lowers the
+/// Confidence of the Gate that needed the answer, on the card the run stores —
+/// and only that Gate, only by one step.
+#[test]
+fn a_skipped_gap_lowers_the_gate_confidence_on_the_stored_card() {
+    let posting = || {
+        let mut posting = raw("a1", "https://jobs.example.com/1", "Backend Engineer");
+        posting.description_html =
+            Some("<p>Must be authorized to work in the EU. We build APIs in Rust.</p>".to_string());
+        posting
+    };
+
+    // Without the skip the gate is sure of itself.
+    let sure = Harness::new(ScriptedSources::new([(
+        source("remotive"),
+        Ok(vec![posting()]),
+    )]));
+    sure.run(Harness::options());
+    let id = sure.ingestion.offers(10, 0).expect("read")[0].id.clone();
+    let card = sure.scoring.cards_for(&id).expect("read").remove(0);
+    let eligibility = card.gates.gate(GateKind::Eligibility).expect("eligibility");
+    assert_eq!(
+        eligibility.verdict,
+        boba_domain::scoring::gates::Verdict::Veto
+    );
+    assert_eq!(eligibility.confidence, Confidence::High);
+
+    // A skipped eligibility question lowers exactly that Gate.
+    let skipped = Harness::with_setting(
+        ScriptedSources::new([(source("remotive"), Ok(vec![posting()]))]),
+        "profile_gaps.skipped",
+        r#"["eligibility"]"#,
+    );
+    skipped.run(Harness::options());
+    let id = skipped.ingestion.offers(10, 0).expect("read")[0].id.clone();
+    let card = skipped.scoring.cards_for(&id).expect("read").remove(0);
+    let eligibility = card.gates.gate(GateKind::Eligibility).expect("eligibility");
+    assert_eq!(eligibility.confidence, Confidence::Medium);
+    let language = card.gates.gate(GateKind::Language).expect("language");
+    assert_eq!(language.confidence, Confidence::High);
 }
 
 /// A stored card with a chosen band and confidence, so the top-match rule can

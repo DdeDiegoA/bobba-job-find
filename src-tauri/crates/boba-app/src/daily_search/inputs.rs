@@ -45,6 +45,9 @@ pub struct ScoringInputs {
     pub prefs: Prefs,
     /// What the five Gates read (S6.1).
     pub gates: GateInputs,
+    /// The gap interview questions the user skipped (S3.6): each lowers the
+    /// Confidence of the Gate that needed the field (AC1).
+    pub skipped_gaps: Vec<String>,
     /// Salary benchmarks; the user's own arrive with S6.8, so this is empty
     /// until then — the Quality axis says what it is missing.
     pub market: MarketData,
@@ -98,6 +101,7 @@ pub fn scoring_inputs(
         profile: snapshot,
         prefs,
         gates,
+        skipped_gaps: crate::profile_gaps::gaps::skipped(system),
         market: MarketData::default(),
     })
 }
