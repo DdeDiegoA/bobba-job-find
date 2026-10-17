@@ -3,5 +3,6 @@
   "errors.session.not_session_board": "Ese portal no se navega con tu sesión.",
   "errors.session.warning_changed": "El aviso cambió. Léelo de nuevo antes de activar este portal.",
   "errors.session.weak_ack": "Marca el consentimiento aparte sobre las cookies antes de activar este portal.",
-  "errors.session.store": "No se pudieron guardar los ajustes de sesión."
+  "errors.session.store": "No se pudieron guardar los ajustes de sesión.",
+  "errors.session.in_use": "Cierra la ventana del navegador que usa esta sesión y vuelve a cerrar sesión."
 }

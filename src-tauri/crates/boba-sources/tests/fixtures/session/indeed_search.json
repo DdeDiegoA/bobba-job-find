@@ -1,0 +1,47 @@
+{
+  "url": "https://www.indeed.com/jobs?q=rust&l=Remote",
+  "title": "Rust jobs in Remote | Indeed",
+  "text": "Senior Rust Engineer Boba Labs Remote in United States $150,000 a year Backend Engineer Tapioca Inc Austin, TX",
+  "captcha": false,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": false,
+  "cards": [
+    {
+      "jk": "abc123def4567890",
+      "title": "Senior Rust Engineer",
+      "company": "Boba Labs",
+      "location": "Remote in United States",
+      "url": "https://www.indeed.com/viewjob?jk=abc123def4567890",
+      "snippet": "Build a local-first job search engine.",
+      "salary": "$150,000 a year"
+    },
+    {
+      "jk": "fedcba0987654321",
+      "title": "Backend Engineer",
+      "company": "Tapioca Inc",
+      "location": "Austin, TX",
+      "url": "https://www.indeed.com/viewjob?jk=fedcba0987654321",
+      "snippet": "Event-driven services in Rust.",
+      "salary": ""
+    },
+    {
+      "jk": "0123456789abcdef",
+      "title": "Plain HTTP link",
+      "company": "Old Board",
+      "location": "Remote",
+      "url": "http://www.indeed.com/viewjob?jk=0123456789abcdef",
+      "snippet": "",
+      "salary": ""
+    },
+    {
+      "jk": "../authwall",
+      "title": "Path traversal",
+      "company": "Evil Corp",
+      "location": "Remote",
+      "url": "https://www.indeed.com/viewjob?jk=deadbeefdeadbeef",
+      "snippet": "",
+      "salary": ""
+    }
+  ]
+}

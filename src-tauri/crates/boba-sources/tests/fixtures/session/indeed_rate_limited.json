@@ -1,0 +1,10 @@
+{
+  "url": "https://www.indeed.com/jobs?q=rust",
+  "title": "Access denied | Indeed",
+  "text": "Too many requests from your network. Please try again later.",
+  "captcha": false,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": true,
+  "cards": []
+}

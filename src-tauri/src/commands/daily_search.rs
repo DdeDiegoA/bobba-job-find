@@ -34,6 +34,7 @@ use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
+use boba_app::ports::session::SessionPages;
 use boba_app::ports::source::{SourceFuture, SourcePort};
 use boba_app::posting_features::ExtractFeatures;
 use boba_app::sources::custom;
@@ -45,6 +46,7 @@ use boba_sources::http::HttpClient;
 use boba_sources::registry::SourceRegistry;
 use boba_sources::rss::CustomFeed;
 use boba_sources::sdk::SourceAdapter;
+use boba_sources::session::sdk::RunControl;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_specta::Event;
@@ -214,9 +216,23 @@ pub struct LiveSources {
     http: Arc<HttpClient>,
     sources: Arc<dyn SourcesRepo>,
     system: Arc<dyn SystemRepo>,
+    /// The Session Board handles (S11.1b): the user's Chrome and the core
+    /// gate/audit/pause. Absent in tests, and in a host where they could not
+    /// be built — the run then simply has no session boards.
+    session: Option<(Arc<dyn SessionPages>, Arc<dyn RunControl>)>,
 }
 
 type AdapterSet = Vec<(String, Result<Box<dyn SourceAdapter>, SourceError>)>;
+
+/// Whether a Session Board belongs in the run (S11.1b): it must be opted in
+/// and its `source` row must not be disabled.
+///
+/// A board the user never opted into is left out rather than reported as a
+/// failed Source on every run — the registry's opt-in gate would refuse it and
+/// a Retry could never succeed (dev-1, 2026-10-17).
+fn session_board_runs(id: &str, opted_in: &[String], enabled: &dyn Fn(&str) -> bool) -> bool {
+    opted_in.iter().any(|source| source == id) && enabled(id)
+}
 
 impl LiveSources {
     pub fn new(
@@ -228,7 +244,19 @@ impl LiveSources {
             http,
             sources,
             system,
+            session: None,
         }
+    }
+
+    /// Register the Session Board adapters with their run-side handles
+    /// (S11.1b): LinkedIn and Indeed then run like any other Source.
+    pub fn with_session(
+        mut self,
+        pages: Arc<dyn SessionPages>,
+        control: Arc<dyn RunControl>,
+    ) -> Self {
+        self.session = Some((pages, control));
+        self
     }
 
     /// Every adapter a run may use: each built-in that is not disabled, plus the
@@ -269,6 +297,19 @@ impl LiveSources {
                 }
             }
             Err(error) => tracing::warn!(%error, "custom feeds not read for the run"),
+        }
+        // The Session Board Sources (S11.1b) run like any other Source, but
+        // only once their own opt-in is recorded: an un-opted-in board is left
+        // out rather than reported as a failed Source every run. Each page load
+        // still passes SessionRun inside the adapter.
+        if let Some((pages, control)) = &self.session {
+            let opted_in = self.sources.opted_in_ids().unwrap_or_default();
+            for adapter in boba_sources::session::builtin(Arc::clone(pages), Arc::clone(control)) {
+                let id = adapter.manifest().id;
+                if session_board_runs(&id, &opted_in, &enabled) {
+                    adapters.push((id, Ok(adapter)));
+                }
+            }
         }
         Ok(adapters)
     }
@@ -501,11 +542,13 @@ fn execute<R: Runtime>(
     ));
     let notifier: Arc<dyn NotifierPort> =
         Arc::new(crate::scheduler::notify::TauriNotifier::new(app.clone()));
-    let live = Arc::new(LiveSources::new(
-        Arc::clone(&http),
-        Arc::clone(&sources),
-        Arc::clone(&system),
-    ));
+    // S11.1b: the Session Board handles; an unavailable browser/port leaves
+    // them failing per Source, never aborting the run.
+    let (session_pages, session_control) = wiring::session::controls(app);
+    let live = Arc::new(
+        LiveSources::new(Arc::clone(&http), Arc::clone(&sources), Arc::clone(&system))
+            .with_session(session_pages, session_control),
+    );
 
     let mut options = options;
     options.only_sources = only_sources;
@@ -763,7 +806,10 @@ pub fn mount<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         wiring::port::<dyn SourcesRepo>(app).map_err(|error| error.message_key.to_string())?;
     let system =
         wiring::port::<dyn SystemRepo>(app).map_err(|error| error.message_key.to_string())?;
-    let live = Arc::new(LiveSources::new(http, sources, system));
+    let (session_pages, session_control) = wiring::session::controls(app);
+    let live = Arc::new(
+        LiveSources::new(http, sources, system).with_session(session_pages, session_control),
+    );
     wiring::mount_port::<dyn SourcePort>(app, live);
     crate::scheduler::register_handler(
         app,
@@ -1024,6 +1070,25 @@ mod tests {
         })
         .expect("client");
         LiveSources::new(Arc::new(http), sources, Arc::new(MemorySettings::default()))
+    }
+
+    /// S11.1b: a session board joins the run only when opted in and enabled;
+    /// otherwise it is left out, never reported as an impossible failed Source.
+    #[test]
+    fn a_session_board_runs_only_when_opted_in_and_enabled() {
+        let opted = vec!["linkedin".to_string()];
+        let all_enabled = |_id: &str| true;
+        let none_enabled = |_id: &str| false;
+        assert!(session_board_runs("linkedin", &opted, &all_enabled));
+        assert!(
+            !session_board_runs("indeed", &opted, &all_enabled),
+            "never opted in: left out, not failed"
+        );
+        assert!(
+            !session_board_runs("linkedin", &opted, &none_enabled),
+            "disabled by the user"
+        );
+        assert!(!session_board_runs("linkedin", &[], &all_enabled));
     }
 
     /// F1: a failed read of the source rows fails the run closed instead of

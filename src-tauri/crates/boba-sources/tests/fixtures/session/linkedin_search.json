@@ -1,0 +1,51 @@
+{
+  "url": "https://www.linkedin.com/jobs/search/?keywords=rust&location=Remote",
+  "title": "Rust jobs | LinkedIn",
+  "text": "Senior Rust Engineer Boba Labs Remote 2 days ago Backend Engineer Tapioca Inc Madrid, Spain 3 days ago A role that pays 142900 a year.",
+  "captcha": false,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": false,
+  "cards": [
+    {
+      "id": "4123456789",
+      "title": "Senior Rust Engineer",
+      "company": "Boba Labs",
+      "location": "Remote",
+      "url": "https://www.linkedin.com/jobs/view/4123456789/?refId=abc123",
+      "posted": "2026-10-15"
+    },
+    {
+      "id": "4123456790",
+      "title": "Backend Engineer",
+      "company": "Tapioca Inc",
+      "location": "Madrid, Spain",
+      "url": "https://www.linkedin.com/jobs/view/4123456790/",
+      "posted": "2026-10-14"
+    },
+    {
+      "id": "4123456791",
+      "title": "Unsafe link",
+      "company": "Evil Corp",
+      "location": "Remote",
+      "url": "javascript:alert(1)",
+      "posted": ""
+    },
+    {
+      "id": "4123456792",
+      "title": "",
+      "company": "No Title",
+      "location": "Remote",
+      "url": "https://www.linkedin.com/jobs/view/4123456792/",
+      "posted": ""
+    },
+    {
+      "id": "../authwall",
+      "title": "Path traversal",
+      "company": "Evil Corp",
+      "location": "Remote",
+      "url": "https://www.linkedin.com/jobs/view/4123456793/",
+      "posted": ""
+    }
+  ]
+}

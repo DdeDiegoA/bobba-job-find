@@ -1,0 +1,17 @@
+{
+  "url": "https://www.linkedin.com/jobs/view/4123456789/",
+  "title": "Senior Rust Engineer | LinkedIn",
+  "text": "Senior Rust Engineer Boba Labs Remote Apply now",
+  "captcha": false,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": false,
+  "job": {
+    "id": "4123456789",
+    "title": "Senior Rust Engineer",
+    "company": "Boba Labs",
+    "location": "Remote",
+    "posted": "2026-10-15",
+    "descriptionHtml": "<p>Build the core of a local-first job search app in Rust.</p>"
+  }
+}

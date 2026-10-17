@@ -323,6 +323,22 @@ impl SystemRepo for SqliteSystemRepo {
             .map_err(store_err)
     }
 
+    fn setting_spend_below(
+        &self,
+        key: &str,
+        cap: u32,
+        updated_at: &str,
+    ) -> Result<Option<u32>, SystemRepoError> {
+        // One conditional statement (S11.1b R-a): two runs cannot both pass.
+        let (key, updated_at) = (key.to_string(), updated_at.to_string());
+        self.store
+            .execute(move |conn| {
+                settings::spend_below(conn, &key, cap, &updated_at)
+                    .map_err(|e| StoreError::Sqlite(e.to_string()))
+            })
+            .map_err(store_err)
+    }
+
     fn setting_delete(&self, key: &str) -> Result<bool, SystemRepoError> {
         let key = key.to_string();
         self.store

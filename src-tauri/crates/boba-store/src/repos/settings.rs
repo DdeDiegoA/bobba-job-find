@@ -26,6 +26,37 @@ pub fn put(conn: &Connection, key: &str, value: &str, updated_at: &str) -> rusql
     Ok(())
 }
 
+/// Spend one unit from a capped counter at `key` in **one** statement
+/// (S11.1b): the row is created at 1, or incremented only while it is below
+/// `cap`. Returns the new total, `None` when the cap is already spent.
+///
+/// The conditional `WHERE` makes two overlapping runs safe: they cannot both
+/// slip past the cap between a read and a write.
+pub fn spend_below(
+    conn: &Connection,
+    key: &str,
+    cap: u32,
+    updated_at: &str,
+) -> rusqlite::Result<Option<u32>> {
+    // A zero cap is refused before the INSERT: the WHERE below only guards the
+    // update path, and a fresh key would otherwise be created at 1.
+    if cap == 0 {
+        return Ok(None);
+    }
+    let changed = conn.execute(
+        "INSERT INTO setting (key, value, updated_at) VALUES (?1, '1', ?3)
+         ON CONFLICT(key) DO UPDATE SET
+             value = CAST(CAST(setting.value AS INTEGER) + 1 AS TEXT),
+             updated_at = excluded.updated_at
+         WHERE CAST(setting.value AS INTEGER) < ?2",
+        params![key, cap, updated_at],
+    )?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    Ok(get(conn, key)?.and_then(|value| value.parse::<u32>().ok()))
+}
+
 /// All settings, ordered by key.
 pub fn list(conn: &Connection) -> rusqlite::Result<Vec<SettingRecord>> {
     let mut stmt = conn.prepare("SELECT key, value, updated_at FROM setting ORDER BY key")?;
@@ -73,6 +104,30 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value, "dark");
         assert_eq!(rows[0].updated_at, "2026-10-05T02:00:00Z");
+    }
+
+    #[test]
+    fn spend_below_never_passes_the_cap() {
+        let conn = conn();
+        assert_eq!(
+            spend_below(&conn, "session.loads.linkedin", 2, "t1").unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            spend_below(&conn, "session.loads.linkedin", 2, "t2").unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            spend_below(&conn, "session.loads.linkedin", 2, "t3").unwrap(),
+            None,
+            "the third spend is refused"
+        );
+        assert_eq!(
+            get(&conn, "session.loads.linkedin").unwrap().as_deref(),
+            Some("2"),
+            "a refused spend changes nothing"
+        );
+        assert_eq!(spend_below(&conn, "another.key", 0, "t4").unwrap(), None);
     }
 
     #[test]

@@ -1,0 +1,17 @@
+{
+  "url": "https://www.indeed.com/viewjob?jk=abc123def4567890",
+  "title": "Senior Rust Engineer - Boba Labs",
+  "text": "Senior Rust Engineer Boba Labs Remote in United States $150,000 a year",
+  "captcha": false,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": false,
+  "job": {
+    "jk": "abc123def4567890",
+    "title": "Senior Rust Engineer",
+    "company": "Boba Labs",
+    "location": "Remote in United States",
+    "salary": "$150,000 a year",
+    "descriptionHtml": "<p>Own the ingestion pipeline. Rust, SQLite, no cloud.</p>"
+  }
+}

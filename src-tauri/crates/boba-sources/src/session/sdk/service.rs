@@ -24,7 +24,7 @@ use boba_domain::session::{ClearReport, CookieProtection, SessionError};
 use boba_domain::source::{AccessClass, OptInRecord, SourceRecord};
 use serde::{Deserialize, Serialize};
 
-use super::{ChallengeKind, PauseRecord, WARNING_VERSION, pause_key, weak_ack_key};
+use super::{ChallengeKind, PauseRecord, WARNING_VERSION, loads_key, pause_key, weak_ack_key};
 
 /// The audit action the per-Source opt-in writes (AD-12: a settings change that
 /// enables automation is audited).
@@ -35,6 +35,17 @@ pub const SIGN_OUT_ACTION: &str = "session.signed_out";
 pub const CHALLENGE_ACTION: &str = "session.challenge_paused";
 /// The audit action clearing a challenge pause writes.
 pub const RESUME_ACTION: &str = "session.resumed";
+/// The audit action one page load of a session run writes (S11.1b).
+pub const PAGE_LOAD_ACTION: &str = "session.run";
+
+/// What a page load did to the Source's daily budget (S11.1b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageLoad {
+    /// The load was paid for; this is the day's new total.
+    Spent { loads_today: u32 },
+    /// The cap is already spent; nothing loaded.
+    CapReached { cap: u32 },
+}
 
 /// Why a Session Board action was refused.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +78,9 @@ impl SessionBoardError {
             Self::NotSessionBoard(_) => "errors.session.not_session_board",
             Self::WarningChanged { .. } => "errors.session.warning_changed",
             Self::WeakAckRequired => "errors.session.weak_ack",
+            // A profile a browser still holds open is a state conflict, not a
+            // store failure (S11.1b R2).
+            Self::Sessions(SessionError::InUse { .. }) => "errors.session.in_use",
             Self::Sources(_) | Self::System(_) | Self::Sessions(_) => "errors.session.store",
         }
     }
@@ -100,6 +114,12 @@ pub struct SessionSnapshot {
     pub protection: CookieProtection,
     /// Every configured Session Board Source, by name.
     pub boards: Vec<BoardView>,
+}
+
+/// The page a load opened, without its query or fragment: the audit row names
+/// the board page, never the user's search terms or location (S11.1b R-b).
+fn page_url(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or(url)
 }
 
 /// The Session Board opt-in, sign-out and pause use case.
@@ -261,6 +281,45 @@ impl<C: ClockPort> SessionBoardService<C> {
             let _ = notifier.notify(Notification::SessionChallengePaused);
         }
         self.view(&self.session_source(source_id)?)
+    }
+
+    /// Spend one page from the Source's daily budget: the counter, the audit
+    /// row and the pace all live here (S11.1b R1, AD-12).
+    ///
+    /// The spend is one conditional statement in the store, so two overlapping
+    /// runs cannot both slip past the cap (S11.1b R-a). The audit detail names
+    /// the board page without its query — search terms and locations are the
+    /// user's own data (R-b) — and never a cookie or a page body.
+    pub fn record_page_load(
+        &self,
+        source_id: &str,
+        url: &str,
+        cap: u32,
+    ) -> Result<PageLoad, SessionBoardError> {
+        self.session_source(source_id)?;
+        let now = self.clock.now_rfc3339();
+        let key = loads_key(source_id, &now);
+        let detail = serde_json::json!({
+            "source_id": source_id,
+            // R-b (S11.1b review): search keywords and locations stay out of
+            // the audit log; the page itself is what the row is about.
+            "url": page_url(url),
+            "cap": cap,
+        });
+        let spent = self.audited(
+            PAGE_LOAD_ACTION,
+            source_id,
+            detail,
+            || Ok(self.system.setting_spend_below(&key, cap, &now)?),
+            |spent: &Option<u32>| match spent {
+                Some(loads_today) => serde_json::json!({ "loads_today": loads_today }),
+                None => serde_json::json!({ "cap_reached": cap }),
+            },
+        )?;
+        Ok(match spent {
+            Some(loads_today) => PageLoad::Spent { loads_today },
+            None => PageLoad::CapReached { cap },
+        })
     }
 
     /// Clear a challenge pause after the user acted on it.
@@ -519,6 +578,17 @@ mod tests {
                 .unwrap_or_default()
         }
 
+        /// Every `outcome` detail of `action`, in row order.
+        fn outcomes(&self, action: &str) -> Vec<String> {
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| row.action == action && row.phase == AuditPhase::Outcome)
+                .map(|row| row.detail_json.clone())
+                .collect()
+        }
+
         fn setting(&self, key: &str) -> Option<String> {
             self.settings.lock().unwrap().get(key).cloned()
         }
@@ -751,6 +821,80 @@ mod tests {
         assert_eq!(actions, vec![OPT_IN_ACTION, OPT_IN_ACTION]);
         assert!(h.system.detail(OPT_IN_ACTION).contains("linkedin"));
         assert!(h.system.detail(OPT_IN_ACTION).contains(WARNING_VERSION));
+    }
+
+    #[test]
+    fn a_page_load_is_audited_without_the_query() {
+        let h = harness(CookieProtection::MacosKeychain);
+        let spent = h
+            .service
+            .record_page_load(
+                "linkedin",
+                "https://www.linkedin.com/jobs/search/?keywords=rust&location=Madrid",
+                10,
+            )
+            .unwrap();
+        assert_eq!(spent, PageLoad::Spent { loads_today: 1 });
+        let detail = h.system.detail(PAGE_LOAD_ACTION);
+        assert!(
+            detail.contains("https://www.linkedin.com/jobs/search/"),
+            "{detail}"
+        );
+        assert!(!detail.contains("keywords"), "{detail}");
+        assert!(!detail.contains("Madrid"), "{detail}");
+        let outcomes = h.system.outcomes(PAGE_LOAD_ACTION);
+        assert!(
+            outcomes.iter().any(|row| row.contains("\"loads_today\":1")),
+            "{outcomes:?}"
+        );
+        assert_eq!(
+            h.system.setting_get(&loads_key("linkedin", NOW)).unwrap(),
+            Some("1".to_string()),
+            "the day's counter is what the next run reads"
+        );
+    }
+
+    #[test]
+    fn the_daily_budget_is_spent_atomically() {
+        // R-a (S11.1b review): the counter is spent by the core, one
+        // conditional statement at a time, so overlapping runs share it.
+        let h = harness(CookieProtection::MacosKeychain);
+        let key = loads_key("linkedin", NOW);
+        h.system
+            .setting_put(&key, "2", NOW)
+            .expect("the day already spent 2");
+        assert_eq!(
+            h.service
+                .record_page_load("linkedin", "https://www.linkedin.com/jobs/search/", 3)
+                .unwrap(),
+            PageLoad::Spent { loads_today: 3 }
+        );
+        assert_eq!(
+            h.service
+                .record_page_load("linkedin", "https://www.linkedin.com/jobs/view/1/", 3)
+                .unwrap(),
+            PageLoad::CapReached { cap: 3 }
+        );
+        assert_eq!(
+            h.system.setting_get(&key).unwrap(),
+            Some("3".to_string()),
+            "a refused spend changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_page_load_for_a_source_that_is_not_a_board_is_refused() {
+        let h = harness(CookieProtection::MacosKeychain);
+        assert!(matches!(
+            h.service
+                .record_page_load("remotive", "https://remotive.com/api/remote-jobs", 1),
+            Err(SessionBoardError::NotSessionBoard(_))
+        ));
+        assert!(matches!(
+            h.service
+                .record_page_load("telepathy", "https://example.com/", 1),
+            Err(SessionBoardError::UnknownSource(_))
+        ));
     }
 
     #[test]

@@ -15,6 +15,11 @@ pub enum SessionError {
     /// Deleting or reading the profile folder failed.
     #[error("session store failed: {0}")]
     Io(String),
+    /// A browser still has this Source's profile open. Deleting a live profile
+    /// leaves Chrome, and the cookies it rewrites on exit, in an undefined
+    /// state, so "Sign out / clear session" waits for the window to close.
+    #[error("a browser is still using source '{source_id}' (pid {pid})")]
+    InUse { source_id: String, pid: u32 },
     /// No Chromium-family browser is installed.
     #[error("no Chromium-family browser was found")]
     NoBrowser,

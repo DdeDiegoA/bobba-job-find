@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use boba_app::error::{AppError, AppResult, ErrorCode};
+use boba_app::ports::clock::ClockPort;
 use boba_app::ports::notifier::NotifierPort;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
@@ -91,6 +92,8 @@ fn to_app(error: SessionBoardError) -> AppError {
         | SessionBoardError::WarningChanged { .. }
         | SessionBoardError::WeakAckRequired => ErrorCode::InvalidInput,
         SessionBoardError::Sessions(SessionError::NoBrowser) => ErrorCode::Unsupported,
+        // The browser still has that profile open (S11.1b R2).
+        SessionBoardError::Sessions(SessionError::InUse { .. }) => ErrorCode::Conflict,
         SessionBoardError::Sources(_)
         | SessionBoardError::System(_)
         | SessionBoardError::Sessions(_) => ErrorCode::Internal,
@@ -128,6 +131,23 @@ fn snapshot_view(snapshot: SessionSnapshot) -> SessionSnapshotView {
 #[tauri::command]
 #[specta::specta]
 pub fn session_snapshot(app: tauri::AppHandle) -> AppResult<SessionSnapshotView> {
+    // Lazy seam (S11.1b): the boards must be listed — and their rows must
+    // exist — before the user can opt in, even if Connections never opened.
+    let sources = wiring::port::<dyn SourcesRepo>(&app)?;
+    let now = SystemClock.now_rfc3339();
+    let store_error = |error: boba_app::ports::repo::sources::SourcesRepoError| {
+        AppError::new(ErrorCode::Internal, "errors.session.store")
+            .with_detail("reason", error.to_string())
+    };
+    for record in boba_sources::session::records(&now) {
+        if sources
+            .get_source(&record.id)
+            .map_err(store_error)?
+            .is_none()
+        {
+            sources.upsert_source(&record).map_err(store_error)?;
+        }
+    }
     service(&app)?.snapshot().map(snapshot_view).map_err(to_app)
 }
 
@@ -208,6 +228,14 @@ mod tests {
         let mapped = to_app(SessionBoardError::Sessions(SessionError::NoBrowser));
         assert_eq!(mapped.code, ErrorCode::Unsupported);
         assert_eq!(mapped.message_key, "errors.session.store");
+
+        // S11.1b R2: a live browser holds the profile; ask the user to close it.
+        let mapped = to_app(SessionBoardError::Sessions(SessionError::InUse {
+            source_id: "linkedin".into(),
+            pid: 4242,
+        }));
+        assert_eq!(mapped.code, ErrorCode::Conflict);
+        assert_eq!(mapped.message_key, "errors.session.in_use");
 
         let mapped = to_app(SessionBoardError::Sources(SourcesRepoError::Invalid(
             "linkedin".into(),

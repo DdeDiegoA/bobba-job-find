@@ -54,6 +54,31 @@ pub trait SystemRepo: Send + Sync {
 
     fn setting_list(&self) -> Result<Vec<SettingRecord>, SystemRepoError>;
 
+    /// Spend one unit from a capped counter at `key` (S11.1b): increment it
+    /// only while it is below `cap`, atomically. Returns the new total, or
+    /// `None` when the cap is already spent.
+    ///
+    /// The default is read-then-write, which is enough for an in-memory fake;
+    /// the SQL adapter overrides it with one conditional statement so that two
+    /// overlapping runs cannot both slip past the cap.
+    fn setting_spend_below(
+        &self,
+        key: &str,
+        cap: u32,
+        updated_at: &str,
+    ) -> Result<Option<u32>, SystemRepoError> {
+        let stored = self
+            .setting_get(key)?
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        if stored >= cap {
+            return Ok(None);
+        }
+        let total = stored + 1;
+        self.setting_put(key, &total.to_string(), updated_at)?;
+        Ok(Some(total))
+    }
+
     fn setting_delete(&self, key: &str) -> Result<bool, SystemRepoError>;
 
     // ---- audit_event (AD-12) ----------------------------------------------
