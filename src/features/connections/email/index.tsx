@@ -12,7 +12,7 @@ import type {
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import {
-  GMAIL_SCOPES,
+  GMAIL_SCOPES_BY_MODE,
   SCOPES_BY_MODE,
   useConnectGmail,
   useConnectImapSmtp,
@@ -68,6 +68,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "Mail.Send": "connections_email:scopes.Mail.Send",
   offline_access: "connections_email:scopes.offline_access",
   "https://www.googleapis.com/auth/gmail.send": "connections_email:scopes.gmail.send",
+  "https://www.googleapis.com/auth/gmail.readonly": "connections_email:scopes.gmail.readonly",
 };
 
 const PROVIDER_LABELS: Record<MailProvider, string> = {
@@ -279,21 +280,28 @@ function ConnectOutlook() {
 }
 
 /**
- * The Gmail connect form (S8.2, AC1): address, the single scope, and the
+ * The Gmail connect form (S8.2/S8.5, AC1): address, mode, the scopes, and the
  * advanced client id and public client secret.
  *
- * There is no mode switch here on purpose: Boba's bundled Google client asks for
- * `gmail.send` only, so a Gmail connection is always send-only.
+ * Reading is opt-in and needs the user's own Google client: Boba's bundled
+ * client stays send-only until CASA, so the read option only becomes reachable
+ * once a client id is typed. The core enforces the same rule — the form never
+ * asks for a consent the core would refuse.
  */
 function ConnectGmail() {
   const { t } = useTranslation("connections_email");
   const { t: tError } = useTranslation();
   const connect = useConnectGmail();
   const [address, setAddress] = useState("");
+  const [mode, setMode] = useState<EmailMode>("send_only");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
 
   const error = connect.error && isAppError(connect.error) ? connect.error : null;
+
+  // AC1: read+send is the user's own client or nothing.
+  const readBlocked = mode === "read_send" && clientId.trim() === "";
+  const shownMode = readBlocked ? "send_only" : mode;
 
   return (
     <form
@@ -301,8 +309,10 @@ function ConnectGmail() {
       aria-labelledby="email-connect-gmail-title"
       onSubmit={(event) => {
         event.preventDefault();
+        if (readBlocked) return;
         connect.mutate({
           address: address.trim(),
+          mode,
           client_id: clientId.trim() === "" ? null : clientId.trim(),
           client_secret: clientSecret.trim() === "" ? null : clientSecret.trim(),
         });
@@ -325,10 +335,40 @@ function ConnectGmail() {
         />
       </label>
 
+      <fieldset className="flex flex-col gap-2">
+        <legend className="text-sm font-medium text-fg">{t("mode")}</legend>
+        {MODES.map((option) => (
+          <label key={option} className="flex items-start gap-2 text-sm">
+            <input
+              type="radio"
+              name="gmail-connect-mode"
+              value={option}
+              checked={mode === option}
+              onChange={() => setMode(option)}
+            />
+            <span>
+              <span className="text-fg">{t(MODE_LABELS[option].label)}</span>
+              <span className="block text-fg-subtle">{t(MODE_LABELS[option].hint)}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+
+      {readBlocked ? (
+        <p role="alert" className="text-xs text-danger">
+          {t("gmail.read_needs_client")}
+        </p>
+      ) : null}
+
       <div className="rounded-xl bg-surface-muted p-3">
         <p className="text-sm font-medium text-fg">{t("gmail.scopes.heading")}</p>
-        <ScopeList scopes={GMAIL_SCOPES} />
-        <p className="mt-2 text-xs text-fg-subtle">{t("gmail.send_only")}</p>
+        <ScopeList scopes={GMAIL_SCOPES_BY_MODE[shownMode]} />
+        <p className="mt-2 text-xs text-fg-subtle">
+          {shownMode === "send_only" ? t("gmail.send_only") : t("gmail.read_local")}
+        </p>
+        {shownMode === "read_send" ? (
+          <p className="mt-1 text-xs text-fg-subtle">{t("gmail.read_testing")}</p>
+        ) : null}
       </div>
 
       <label className="flex flex-col gap-1 text-sm text-fg">
@@ -354,7 +394,7 @@ function ConnectGmail() {
       </label>
 
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={connect.isPending}>
+        <Button type="submit" disabled={connect.isPending || readBlocked}>
           {connect.isPending ? t("connecting") : t("gmail.connect")}
         </Button>
       </div>

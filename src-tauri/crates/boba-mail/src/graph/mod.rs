@@ -77,7 +77,7 @@ impl GraphMail {
         if !tokens.is_expired(oauth::now_unix(), REFRESH_SKEW_SECS) {
             return Ok(tokens.access_token);
         }
-        let refresh = tokens.refresh_token.ok_or(MailError::Reauthorize)?;
+        let refresh = tokens.refresh_token.clone().ok_or(MailError::Reauthorize)?;
         let response = oauth::refresh_tokens(
             &self.http,
             &self.endpoints,
@@ -87,7 +87,8 @@ impl GraphMail {
         .await
         .map_err(|_| MailError::Reauthorize)?;
 
-        let renewed = TokenSet::new(&response, &tokens.scopes);
+        // A refresh that omits the refresh token keeps the stored one (AD-13).
+        let renewed = tokens.renewed(&response);
         self.secrets
             .put(&account.secret_ref, &renewed.to_json())
             .map_err(|_| MailError::Reauthorize)?;

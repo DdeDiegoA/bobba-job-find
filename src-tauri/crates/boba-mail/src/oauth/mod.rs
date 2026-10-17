@@ -470,6 +470,20 @@ impl TokenSet {
         }
     }
 
+    /// The set after a refresh: the new access token, the provider's refresh
+    /// token when it rotated one, and **the stored refresh token otherwise**.
+    ///
+    /// A refresh response may omit the refresh token (RFC 6749 §6 makes it
+    /// optional, and Google never re-issues it), and dropping it would leave the
+    /// connection unrenewable at the next expiry (AD-13).
+    pub fn renewed(&self, response: &TokenResponse) -> Self {
+        let mut renewed = Self::new(response, &self.scopes);
+        if renewed.refresh_token.is_none() {
+            renewed.refresh_token.clone_from(&self.refresh_token);
+        }
+        renewed
+    }
+
     /// The keychain representation.
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
@@ -660,6 +674,42 @@ mod tests {
             token: format!("{uri}/token"),
             revoke: Some(format!("{uri}/revoke")),
         }
+    }
+
+    // --- Token renewal (AD-13) ----------------------------------------------
+
+    /// Google does not re-issue the refresh token on a refresh (RFC 6749 §6: it
+    /// is optional), so a renewal that omits it must keep the stored one —
+    /// otherwise the connection dies at the next expiry.
+    #[test]
+    fn a_renewal_that_omits_the_refresh_token_keeps_the_stored_one() {
+        let stored = TokenSet {
+            access_token: "at-1".to_string(),
+            refresh_token: Some("rt-1".to_string()),
+            expires_at_unix: 0,
+            scopes: vec!["Mail.Send".to_string()],
+        };
+        let omitted = TokenResponse {
+            access_token: "at-2".to_string(),
+            refresh_token: None,
+            expires_in: Some(3600),
+            scope: None,
+        };
+        let renewed = stored.renewed(&omitted);
+        assert_eq!(renewed.access_token, "at-2");
+        assert_eq!(renewed.refresh_token.as_deref(), Some("rt-1"));
+
+        // A provider that rotates the token replaces the stored one.
+        let rotated = TokenResponse {
+            access_token: "at-3".to_string(),
+            refresh_token: Some("rt-2".to_string()),
+            expires_in: Some(3600),
+            scope: None,
+        };
+        assert_eq!(
+            stored.renewed(&rotated).refresh_token.as_deref(),
+            Some("rt-2")
+        );
     }
 
     // --- PKCE (AC1) ---------------------------------------------------------

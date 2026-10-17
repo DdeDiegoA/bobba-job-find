@@ -20,11 +20,19 @@ export const SCOPES_BY_MODE: Record<EmailMode, string[]> = {
 };
 
 /**
- * The one scope the Gmail connection asks for (AC1): `gmail.send`. Sending only,
- * by design — Google's restricted read scope needs a CASA assessment, so reading
- * Gmail goes through IMAP (S8.3), a BYO client (S8.5) or a `.eml` import.
+ * The Gmail scopes per mode (AC1). Send-only asks for `gmail.send` and nothing
+ * else: Google's restricted read scope needs a CASA assessment for a bundled
+ * client, so `gmail.readonly` is only ever shown — and only ever requested by
+ * the core — for a read+send connection on the user's own client (S8.5).
+ * Presentation only, like `SCOPES_BY_MODE`: the core decides what it asks for.
  */
-export const GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"];
+export const GMAIL_SCOPES_BY_MODE: Record<EmailMode, string[]> = {
+  send_only: ["https://www.googleapis.com/auth/gmail.send"],
+  read_send: [
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+  ],
+};
 
 /** The connections screen is one query: every connected mailbox (AC1). */
 export const emailAccountsKey = ["email", "accounts"] as const;

@@ -187,7 +187,8 @@ impl GmailMail {
         .map_err(|_| MailError::Reauthorize)?;
 
         let renewed = GmailSecret {
-            tokens: TokenSet::new(&response, &secret.tokens.scopes),
+            // A refresh that omits the refresh token keeps the stored one (AD-13).
+            tokens: secret.tokens.renewed(&response),
             client_secret: secret.client_secret,
         };
         self.secrets
@@ -568,6 +569,59 @@ mod tests {
             renewed.client_secret.as_deref(),
             Some(BYO_SECRET),
             "the public client secret is kept for the next run"
+        );
+    }
+
+    /// R1: Google does not re-issue the refresh token on a refresh, so a renewal
+    /// that omits it must leave the stored one in place (AD-13).
+    #[tokio::test]
+    async fn a_refresh_that_omits_the_refresh_token_keeps_the_stored_one() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "at-2",
+                "expires_in": 3600
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/users/me/messages/send"))
+            .and(header("authorization", "Bearer at-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "18f2" })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secrets = FakeSecrets::with(
+            REF,
+            GmailSecret {
+                tokens: TokenSet {
+                    access_token: "at-1".to_string(),
+                    refresh_token: Some("rt-1".to_string()),
+                    expires_at_unix: oauth::now_unix() - 1,
+                    scopes: vec![GMAIL_SEND_SCOPE.to_string()],
+                },
+                client_secret: Some(BYO_SECRET.to_string()),
+            }
+            .to_json(),
+        );
+        let mail = adapter(
+            &server,
+            secrets.clone(),
+            Arc::new(FakeAccounts(Some(account()))),
+        );
+
+        mail.send("01GMAIL", &message()).await.expect("sent");
+        assert_eq!(
+            GmailSecret::from_json(&secrets.value(REF).expect("stored"))
+                .expect("json")
+                .tokens
+                .refresh_token
+                .as_deref(),
+            Some("rt-1"),
+            "the next expiry must still be renewable"
         );
     }
 
