@@ -37,6 +37,7 @@ use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::posting_features;
+use boba_app::profile_gaps;
 use boba_app::profile_import;
 use boba_app::tailoring;
 use boba_mcp_proto::tool;
@@ -578,6 +579,20 @@ impl ToolHandler for RepoTools {
                     .map(|accepted| json!({ "accepted": accepted }))
                     .map_err(|error| error.to_string())
             }
+            // S3.6: the interview's questions and the translate pass's drafts.
+            // The payloads are shape-checked here so a malformed call costs the
+            // run a retry; `boba_app::profile_gaps` keeps what the core asked
+            // for and stores the drafts as proposals, never as facts.
+            Some(spec) if spec.name == profile_gaps::ASK_TOOL => {
+                profile_gaps::validate_questions(args)
+                    .map(|accepted| json!({ "accepted": accepted }))
+                    .map_err(|error| error.to_string())
+            }
+            Some(spec) if spec.name == profile_gaps::TRANSLATE_TOOL => {
+                profile_gaps::validate_translations(args)
+                    .map(|accepted| json!({ "accepted": accepted }))
+                    .map_err(|error| error.to_string())
+            }
             // S7.7: what a `tailor_application` run reads, and the two drafts it
             // writes. The user's own data (facts, preferences) is not untrusted
             // and the posting is (the endpoint decides the envelope, AD-7).
@@ -691,7 +706,6 @@ fn save_document_draft(
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
         "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
-        "propose_translations" => "S3.6 (bilingual drafting)",
         "get_company_research" => {
             "no slice yet (company research is not built, and the tailor skill reads it only when it exists)"
         }
@@ -925,6 +939,8 @@ mod tests {
                 | "save_score_narration"
         ) || name == posting_features::PROPOSE_TOOL
             || name == profile_import::PROPOSE_TOOL
+            || name == profile_gaps::ASK_TOOL
+            || name == profile_gaps::TRANSLATE_TOOL
     }
 
     /// A handler over a real (encrypted, temp) store: the same construction the

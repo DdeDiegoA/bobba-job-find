@@ -1,0 +1,10 @@
+{
+  "errors.profile_gaps.store": "Your profile could not be read or saved.",
+  "errors.profile_gaps.bad_answer": "That answer doesn't fit the question. Check it and try again.",
+  "errors.profile_gaps.contract": "The agent sent questions Boba couldn't read. Run the interview again.",
+  "errors.profile_gaps.run": "The interview didn't finish. The AI engine may be signed out or out of quota.",
+  "errors.profile_gaps.unknown_proposal": "That suggestion is no longer waiting for review.",
+  "errors.profile_gaps.unknown_gap": "That question is no longer open. Refresh the step.",
+  "errors.profile_gaps.unknown_item": "That profile fact no longer exists.",
+  "errors.profile_gaps.no_engine": "Choose an AI engine in the previous step before asking Boba."
+}

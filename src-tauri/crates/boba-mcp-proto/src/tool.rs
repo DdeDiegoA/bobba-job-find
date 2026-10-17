@@ -16,6 +16,7 @@ pub const SERVER_NAME: &str = "boba";
 
 /// Task ids, as carried on `AgentTaskKind::id()` (`boba-app/src/ports/agent.rs`).
 pub const PROFILE_IMPORT: &str = "profile_import";
+pub const PROFILE_GAPS: &str = "profile_gaps";
 pub const EXTRACT_POSTINGS: &str = "extract_postings";
 pub const NARRATE_SCORES: &str = "narrate_scores";
 pub const TAILOR_APPLICATION: &str = "tailor_application";
@@ -25,8 +26,9 @@ pub const CLASSIFY_EMAILS: &str = "classify_emails";
 pub const TRANSLATE_PROFILE: &str = "translate_profile";
 
 /// Every task kind, in the order the UI lists them.
-pub const ALL_TASKS: [&str; 8] = [
+pub const ALL_TASKS: [&str; 9] = [
     PROFILE_IMPORT,
+    PROFILE_GAPS,
     EXTRACT_POSTINGS,
     NARRATE_SCORES,
     TAILOR_APPLICATION,
@@ -86,6 +88,7 @@ pub const TOOLS: &[ToolSpec] = &[
         kind: ToolKind::Read,
         tasks: &[
             PROFILE_IMPORT,
+            PROFILE_GAPS,
             TAILOR_APPLICATION,
             REVIEW_APPLICATION,
             ANSWER_QUESTIONS,
@@ -100,6 +103,7 @@ pub const TOOLS: &[ToolSpec] = &[
         kind: ToolKind::Read,
         tasks: &[
             PROFILE_IMPORT,
+            PROFILE_GAPS,
             TAILOR_APPLICATION,
             REVIEW_APPLICATION,
             ANSWER_QUESTIONS,
@@ -152,10 +156,18 @@ pub const TOOLS: &[ToolSpec] = &[
     ToolSpec {
         name: "propose_profile_facts",
         kind: ToolKind::WriteProposal,
-        tasks: &[PROFILE_IMPORT, TRANSLATE_PROFILE],
+        tasks: &[PROFILE_IMPORT, PROFILE_GAPS, TRANSLATE_PROFILE],
         untrusted: false,
         about: "Propose profile facts for the user to confirm.",
         input_schema: r#"{"type":"object","properties":{"facts":{"type":"array","items":{"type":"object"}}},"required":["facts"],"additionalProperties":false}"#,
+    },
+    ToolSpec {
+        name: "propose_gap_questions",
+        kind: ToolKind::WriteProposal,
+        tasks: &[PROFILE_GAPS],
+        untrusted: false,
+        about: "Propose the short, skippable questions that fill the Profile's gaps.",
+        input_schema: r#"{"type":"object","properties":{"questions":{"type":"array","items":{"type":"object"}}},"required":["questions"],"additionalProperties":false}"#,
     },
     ToolSpec {
         name: "propose_translations",
@@ -264,6 +276,24 @@ mod tests {
         );
         assert!(!allows(PROFILE_IMPORT, "get_email_batch"));
         assert!(!allows(PROFILE_IMPORT, "save_document_draft"));
+        // S3.6: the interview asks questions and may propose what the context
+        // it was given states — never a translation, never a posting feature.
+        let gaps: Vec<&str> = tools_for_task(PROFILE_GAPS)
+            .iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(
+            gaps,
+            vec![
+                "get_task_input",
+                "get_profile_facts",
+                "get_preferences",
+                "propose_profile_facts",
+                "propose_gap_questions",
+            ]
+        );
+        assert!(!allows(PROFILE_GAPS, "propose_translations"));
+        assert!(!allows(PROFILE_GAPS, "get_email_batch"));
         assert!(allows(CLASSIFY_EMAILS, "propose_status_change"));
         assert!(allows(TAILOR_APPLICATION, "save_document_draft"));
     }
@@ -317,7 +347,8 @@ mod tests {
         }
         let writes = TOOLS.iter().filter(|tool| tool.kind.is_write()).count();
         let reads = TOOLS.len() - writes;
-        assert_eq!((reads, writes), (8, 8));
+        // S3.6 added `propose_gap_questions`, so the catalog holds nine writes.
+        assert_eq!((reads, writes), (8, 9));
     }
 
     #[test]

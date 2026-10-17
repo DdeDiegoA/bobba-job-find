@@ -486,6 +486,7 @@ mod tests {
     fn the_user_input_tasks_still_run_with_a_security_badge() {
         for kind in [
             AgentTaskKind::ProfileImport,
+            AgentTaskKind::ProfileGaps,
             AgentTaskKind::TranslateProfile,
         ] {
             assert_eq!(
@@ -520,6 +521,7 @@ mod tests {
     fn every_task_runs_on_a_verified_full_cli() {
         for kind in [
             AgentTaskKind::ProfileImport,
+            AgentTaskKind::ProfileGaps,
             AgentTaskKind::ExtractPostings,
             AgentTaskKind::NarrateScores,
             AgentTaskKind::TailorApplication,

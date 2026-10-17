@@ -20,7 +20,7 @@ pub use output::{InvalidOutput, MAX_OUTPUT_RETRIES, OutputAttempts, OutputVerdic
 
 /// Every agent task, as the catalog lists them. A task is only real when it
 /// appears here, in `AgentTaskKind` and as `agent-pack/skills/<id>/SKILL.md`.
-pub const TASKS: [&str; 8] = tool::ALL_TASKS;
+pub const TASKS: [&str; 9] = tool::ALL_TASKS;
 
 /// The tools whose arguments are `task`'s output: the write tools the catalog
 /// gives it, in catalog order (AD-5). Unknown ids get nothing.

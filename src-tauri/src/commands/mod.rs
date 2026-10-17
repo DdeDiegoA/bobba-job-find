@@ -16,6 +16,7 @@ pub mod offers;
 pub mod onboarding;
 pub mod preferences;
 pub mod profile;
+pub mod profile_gaps;
 pub mod profile_import;
 pub mod session;
 pub mod sources;
