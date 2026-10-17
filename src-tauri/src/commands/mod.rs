@@ -9,6 +9,7 @@ pub mod apply;
 pub mod daily_search;
 pub mod email;
 pub mod ingest;
+pub mod kill_switch;
 pub mod offers;
 pub mod preferences;
 pub mod profile;

@@ -36,6 +36,7 @@ use crate::applications::{TrackerError, TrackerService, TransitionInput};
 use crate::apply::manual::{ManualError, ManualService, PdfExport};
 use crate::ports::browser::{BrowserError, BrowserPort, PageField, PageFieldKind, Upload};
 use crate::ports::clock::ClockPort;
+use crate::ports::kill_switch::KillSwitchPort;
 use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
@@ -68,6 +69,10 @@ pub enum AtsFormError {
     /// The attempt id names no unresolved submission.
     #[error("unknown ATS attempt: {0}")]
     UnknownAttempt(String),
+    /// The user engaged the Kill Switch: no automation opens or finishes a
+    /// form (FR-86). Never a silent skip.
+    #[error("the kill switch is engaged")]
+    KillSwitch,
     #[error(transparent)]
     Manual(#[from] ManualError),
     #[error(transparent)]
@@ -92,6 +97,7 @@ impl AtsFormError {
         match self {
             AtsFormError::NotAtsForm => "errors.apply.ats_not_a_form",
             AtsFormError::OptInRequired => "errors.apply.ats_opt_in",
+            AtsFormError::KillSwitch => "errors.apply.outbox_kill_switch",
             AtsFormError::NotReady(_) => "errors.apply.not_ready",
             AtsFormError::UnknownAttempt(_) => "errors.apply.ats_unknown_attempt",
             AtsFormError::Manual(error) => error.message_key(),
@@ -205,6 +211,9 @@ pub struct AtsFormService {
     browser: std::sync::Arc<dyn BrowserPort>,
     system: std::sync::Arc<dyn SystemRepo>,
     clock: std::sync::Arc<dyn ClockPort>,
+    /// The Kill Switch (S9.8, FR-86): read before a page opens and again just
+    /// before the form is handed to the user. Unmounted reads as "not engaged".
+    kill_switch: Option<std::sync::Arc<dyn KillSwitchPort>>,
 }
 
 impl AtsFormService {
@@ -215,6 +224,7 @@ impl AtsFormService {
         browser: std::sync::Arc<dyn BrowserPort>,
         system: std::sync::Arc<dyn SystemRepo>,
         clock: std::sync::Arc<dyn ClockPort>,
+        kill_switch: Option<std::sync::Arc<dyn KillSwitchPort>>,
     ) -> Self {
         Self {
             apply,
@@ -223,6 +233,7 @@ impl AtsFormService {
             browser,
             system,
             clock,
+            kill_switch,
         }
     }
 
@@ -244,6 +255,10 @@ impl AtsFormService {
         // AC1: nothing drives the user's browser before they accept the warning.
         if !self.opted_in()? {
             return Err(AtsFormError::OptInRequired);
+        }
+        // FR-86: with the Kill Switch engaged, no automation opens a page.
+        if self.kill_switch_engaged() {
+            return Err(AtsFormError::KillSwitch);
         }
         let (provider, url) = ats_channel(offer).ok_or(AtsFormError::NotAtsForm)?;
 
@@ -310,6 +325,14 @@ impl AtsFormService {
                     }
                 }
             }
+        }
+
+        // FR-86 (AC2): the switch is read again immediately before the form is
+        // handed over. On, the fill stops here: the window closes, no intent is
+        // recorded and nothing is left for the user to submit.
+        if self.kill_switch_engaged() {
+            let _ = self.browser.close();
+            return Err(AtsFormError::KillSwitch);
         }
 
         // AD-12: the attempt is on record before the user's submit can happen.
@@ -454,6 +477,13 @@ impl AtsFormService {
         self.system
             .audit_append_outcome(&intent, AuditOutcome::Ok, "{}", &now)?;
         Ok(enabled)
+    }
+
+    /// Whether the user engaged the Kill Switch (S9.8, FR-86).
+    fn kill_switch_engaged(&self) -> bool {
+        self.kill_switch
+            .as_ref()
+            .is_some_and(|switch| switch.engaged())
     }
 
     /// The application's answer bank, drafts and approved rows (S7.8 surface).
@@ -1106,6 +1136,14 @@ mod tests {
     }
 
     fn harness(fields: Vec<PageField>, opted_in: bool) -> Harness {
+        harness_with_switch(fields, opted_in, None)
+    }
+
+    fn harness_with_switch(
+        fields: Vec<PageField>,
+        opted_in: bool,
+        kill_switch: Option<Arc<dyn KillSwitchPort>>,
+    ) -> Harness {
         let apply = Arc::new(FakeApplyRepo::default());
         let documents = Arc::new(FakeDocumentsRepo::default());
         let system = Arc::new(FakeSystemRepo::default());
@@ -1124,6 +1162,7 @@ mod tests {
             browser.clone(),
             system.clone(),
             Arc::new(FixedClock::new(NOW)),
+            kill_switch,
         );
         Harness {
             apply,
@@ -1144,6 +1183,75 @@ mod tests {
         assert!(
             h.apply.events().is_empty(),
             "nothing is written without the opt-in"
+        );
+    }
+
+    /// A Kill Switch the test scripts: each call takes the next answer.
+    struct ScriptedSwitch {
+        answers: Mutex<Vec<bool>>,
+    }
+
+    impl ScriptedSwitch {
+        fn new(answers: &[bool]) -> Arc<Self> {
+            Arc::new(Self {
+                answers: Mutex::new(answers.to_vec()),
+            })
+        }
+    }
+
+    impl KillSwitchPort for ScriptedSwitch {
+        fn engaged(&self) -> bool {
+            let mut answers = self.answers.lock().unwrap();
+            if answers.len() > 1 {
+                answers.remove(0)
+            } else {
+                answers.first().copied().unwrap_or(false)
+            }
+        }
+    }
+
+    // FR-86: an engaged switch never opens the browser, and nothing is written.
+    #[test]
+    fn an_engaged_switch_never_opens_the_browser() {
+        let h = harness_with_switch(
+            vec![field("boba-1", "Email", PageFieldKind::Email, true)],
+            true,
+            Some(ScriptedSwitch::new(&[true])),
+        );
+
+        let error = h.service.start(&application(), &offer()).unwrap_err();
+
+        assert_eq!(error.message_key(), "errors.apply.outbox_kill_switch");
+        assert!(h.browser.fills.lock().unwrap().is_empty());
+        assert_eq!(
+            h.system.audit_verify_chain().unwrap().rows,
+            0,
+            "no submission intent is recorded"
+        );
+    }
+
+    // FR-86 AC2: engaging mid-fill stops the handover, before the submit could
+    // happen: the window closes and no intent reaches the audit log.
+    #[test]
+    fn a_switch_engaged_mid_fill_stops_before_the_handover() {
+        let h = harness_with_switch(
+            vec![field("boba-1", "Email", PageFieldKind::Email, true)],
+            true,
+            Some(ScriptedSwitch::new(&[false, true])),
+        );
+
+        let error = h.service.start(&application(), &offer()).unwrap_err();
+
+        assert_eq!(error.message_key(), "errors.apply.outbox_kill_switch");
+        assert_eq!(
+            *h.browser.closes.lock().unwrap(),
+            1,
+            "the handover window is closed"
+        );
+        assert_eq!(
+            h.system.audit_verify_chain().unwrap().rows,
+            0,
+            "no submission intent is recorded"
         );
     }
 

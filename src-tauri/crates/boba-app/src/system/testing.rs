@@ -18,6 +18,9 @@ pub struct FakeSystemRepo {
     settings: Mutex<BTreeMap<String, SettingRecord>>,
     rows: Mutex<Vec<AuditRow>>,
     anchor: Mutex<Option<String>>,
+    /// When set, every audit append fails: the store-under-stress case a panic
+    /// control must keep working through (S9.8 H-1). Settings still work.
+    audit_down: std::sync::atomic::AtomicBool,
 }
 
 impl FakeSystemRepo {
@@ -36,6 +39,17 @@ impl FakeSystemRepo {
     /// Force the keychain anchor to a value (to simulate a mismatch).
     pub fn set_anchor(&self, hash: &str) {
         *self.anchor.lock().unwrap() = Some(hash.to_string());
+    }
+
+    /// Make every audit append fail while settings keep working.
+    pub fn fail_audit(&self) {
+        self.audit_down
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Every audit row, in append order (a use case's own event inspection).
+    pub fn rows(&self) -> Vec<AuditRow> {
+        self.rows.lock().unwrap().clone()
     }
 
     /// Drop the last row, simulating a tail truncation by an attacker.
@@ -129,6 +143,9 @@ impl SystemRepo for FakeSystemRepo {
     }
 
     fn audit_append_intent(&self, intent: &NewIntent) -> Result<AuditRow, SystemRepoError> {
+        if self.audit_down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SystemRepoError::new("audit log down"));
+        }
         Ok(self.append(AuditRow {
             seq: 0,
             id: fake_id(),
@@ -155,6 +172,9 @@ impl SystemRepo for FakeSystemRepo {
         detail_json: &str,
         created_at: &str,
     ) -> Result<AuditRow, SystemRepoError> {
+        if self.audit_down.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SystemRepoError::new("audit log down"));
+        }
         Ok(self.append(AuditRow {
             seq: 0,
             id: fake_id(),

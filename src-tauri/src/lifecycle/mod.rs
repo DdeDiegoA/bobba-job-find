@@ -39,6 +39,8 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if let Err(error) = tray::attach(app, ui_locale(app)) {
         tracing::warn!(%error, "tray menu not installed");
     }
+    // The one panic shortcut (S9.8, FR-86): Cmd/Ctrl+Shift+K stops automation.
+    crate::shortcuts::install(app);
     // The one in-core scheduler (S5.1, AD-18): a login or a wake ticks at once,
     // which is how a slot missed while asleep still runs (FR-43).
     crate::scheduler::install(app);
@@ -78,9 +80,17 @@ pub fn on_menu_action<R: Runtime>(app: &AppHandle<R>, picked: &str) {
             }
         }
         menu::Action::Quit => app.exit(0),
-        // Run now is wired in E5 (S5.1) and the Kill Switch in E9 (S9.8): both
-        // are on the menu, disabled, so the shape users learn does not change.
-        menu::Action::RunNow | menu::Action::KillSwitch => {
+        // The Kill Switch (S9.8, FR-86): the tray only ever stops automation.
+        // Turning it back off is the header chip's job, where the user can see
+        // what they are re-enabling.
+        menu::Action::KillSwitch => {
+            if let Err(error) = tray::kill_switch::engage(app) {
+                tracing::warn!(key = error.message_key, "tray: kill switch failed");
+            }
+        }
+        // Run now is wired in E5 (S5.1): it is on the menu, disabled, so the
+        // shape users learn does not change.
+        menu::Action::RunNow => {
             tracing::debug!(%picked, "tray action is wired in a later epic");
         }
         menu::Action::Ignore => {}
@@ -225,9 +235,15 @@ mod tests {
     /// AC1/AC2: `install` registers the state and wires close-to-tray; a second
     /// call (a language change re-localizing the menu) must not re-register the
     /// window handler. Without a tray icon the menu is skipped, not fatal.
+    ///
+    /// The mock app carries the global-shortcut plugin, exactly as `lib.rs`
+    /// registers it: `install` reads that plugin's state (S9.8, FR-86).
     #[test]
     fn install_wires_what_is_there_and_only_the_window_handler_once() {
-        let app = tauri::test::mock_app();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
         let _window =
             tauri::WebviewWindowBuilder::new(&app, MAIN_WINDOW, tauri::WebviewUrl::default())
                 .build()

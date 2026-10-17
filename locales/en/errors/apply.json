@@ -35,5 +35,6 @@
   "errors.apply.outbox_edit": "That edit cannot be saved. Keep it short and non-empty.",
   "errors.apply.outbox_clock": "Boba cannot read its own clock, so it cannot time this hold.",
   "errors.apply.outbox_queued": "This application is already waiting in the Outbox.",
-  "errors.apply.outbox_kill_switch": "The Kill Switch is on, so Boba is not sending anything automatically."
+  "errors.apply.outbox_kill_switch": "The Kill Switch is on, so Boba is not sending anything automatically.",
+  "errors.apply.kill_switch": "Boba could not read or change the Kill Switch."
 }

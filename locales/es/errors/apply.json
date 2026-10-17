@@ -35,5 +35,6 @@
   "errors.apply.outbox_edit": "Esa edición no se puede guardar. Déjala corta y no vacía.",
   "errors.apply.outbox_clock": "Boba no puede leer su propio reloj, así que no puede medir esta espera.",
   "errors.apply.outbox_queued": "Esta postulación ya espera en la bandeja de salida.",
-  "errors.apply.outbox_kill_switch": "El interruptor de emergencia está activo, así que Boba no envía nada de forma automática."
+  "errors.apply.outbox_kill_switch": "El interruptor de emergencia está activo, así que Boba no envía nada de forma automática.",
+  "errors.apply.kill_switch": "Boba no pudo leer ni cambiar el Kill Switch."
 }
