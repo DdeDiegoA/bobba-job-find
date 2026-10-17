@@ -359,7 +359,7 @@ fn write_applications(
                 "status": application.status.as_str(),
                 "title": snapshot.title,
                 "company": snapshot.company,
-                "apply_url": snapshot.apply_url,
+                "apply_url": snapshot.apply_url.as_deref().map(public_url),
                 "lang": snapshot.lang,
                 "deadline": snapshot.deadline,
                 "notes": application.notes,
@@ -427,6 +427,23 @@ fn one_line(value: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
+}
+
+/// A URL as it may leave the app: no query, no fragment and no embedded
+/// credentials. A signed or session token can live in the query of an apply
+/// URL; the export is unencrypted, so only the path ships (S10.1 review).
+fn public_url(url: &str) -> String {
+    let without_fragment = url.split('#').next().unwrap_or_default();
+    let without_query = without_fragment.split('?').next().unwrap_or_default();
+    match without_query.split_once("://") {
+        Some((scheme, rest)) => {
+            let authority_end = rest.find('/').unwrap_or(rest.len());
+            let (authority, path) = rest.split_at(authority_end);
+            let host = authority.rsplit('@').next().unwrap_or(authority);
+            format!("{scheme}://{host}{path}")
+        }
+        None => without_query.to_string(),
+    }
 }
 
 /// The `YYYY-MM-DD` of a stored RFC 3339 timestamp, empty when it is not one.
@@ -577,9 +594,10 @@ fn write_seen_jobs(
             "new"
         };
         let mut entry = Map::new();
+        entry.insert("key".into(), json!(key.clone()));
         entry.insert("title".into(), json!(posting.title));
         entry.insert("company".into(), json!(posting.company));
-        entry.insert("url".into(), json!(posting.apply_url));
+        entry.insert("url".into(), json!(public_url(&posting.apply_url)));
         entry.insert(
             "portal".into(),
             json!(posting.source.clone().unwrap_or_default()),
@@ -1074,6 +1092,35 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&read(&out.join(SEEN_JOBS_JSON))).expect("seen jobs json");
         let entry = &json["seen"]["acme-data-scientist"];
+        assert_eq!(entry["key"], "acme-data-scientist");
+        // The ranked-entry schema upstream's `rank_state.py` reads and writes
+        // (`docs/research/upstream-analysis.md`, `tests/test_rank_state.py`).
+        let expected: std::collections::BTreeSet<&str> = [
+            "key",
+            "title",
+            "company",
+            "url",
+            "portal",
+            "status",
+            "posted_date",
+            "deadline",
+            "rank_score",
+            "rank_verdict",
+            "rank_date",
+            "location_verdict",
+            "language_gate",
+            "strengths",
+            "gaps",
+        ]
+        .into_iter()
+        .collect();
+        let actual: std::collections::BTreeSet<&str> = entry
+            .as_object()
+            .expect("entry object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(actual, expected, "the upstream entry schema");
         assert_eq!(entry["title"], "Data Scientist");
         assert_eq!(entry["company"], "Acme");
         assert_eq!(entry["portal"], "linkedin");
@@ -1086,6 +1133,102 @@ mod tests {
         assert_eq!(entry["gaps"][0], "Kubernetes");
         assert_eq!(entry["posted_date"], "2026-10-01");
         assert_eq!(entry["deadline"], "2026-11-01");
+    }
+
+    #[test]
+    fn strips_tokens_from_exported_urls() {
+        let dir = temp();
+        let store = store(dir.path());
+        let out = dir.path().join("out");
+        fs::create_dir(&out).expect("out");
+        seed_source(&store);
+        exec(
+            &store,
+            "INSERT INTO posting (id, source_id, external_id, title, company, work_mode, \
+             posted_at, deadline, first_seen, last_seen, lang, apply_url, dedup_key) \
+             VALUES ('pst_1', 'src_1', 'ext_1', 'Data Scientist', 'Acme', 'remote', \
+             '2026-10-01T00:00:00Z', NULL, '2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z', \
+             'en', 'https://acme.test/jobs/1?token=super-secret#apply', \
+             'acme-data-scientist'); \
+             INSERT INTO posting_source (posting_id, source_id, external_id, url, raw, fetched_at) \
+             VALUES ('pst_1', 'src_1', 'ext_1', 'https://acme.test/jobs/1', '{}', \
+             '2026-10-02T00:00:00Z'); \
+             INSERT INTO application (id, posting_id, status, offer_snapshot_json, notes, \
+             next_action, created_at, updated_at) VALUES ('app_1', 'pst_1', 'applied', \
+             '{\"title\":\"Data Scientist\",\"company\":\"Acme\",\
+             \"apply_url\":\"https://user:pw@acme.test/jobs/1?session=super-secret\",\
+             \"lang\":\"en\",\"deadline\":null}', NULL, NULL, \
+             '2026-10-03T09:00:00Z', '2026-10-04T09:00:00Z');",
+        );
+
+        export(&store, &out).expect("export");
+
+        let applications = read(&out.join(APPLICATIONS_JSON));
+        assert!(
+            !applications.contains("super-secret") && !applications.contains("user:pw"),
+            "a signed or session token must not leave the app: {applications}"
+        );
+        assert!(applications.contains("https://acme.test/jobs/1"));
+        let seen = read(&out.join(SEEN_JOBS_JSON));
+        assert!(
+            !seen.contains("super-secret"),
+            "the seen map must not carry the query: {seen}"
+        );
+        assert!(seen.contains("https://acme.test/jobs/1"));
+    }
+
+    #[test]
+    fn never_writes_credential_bearing_tables() {
+        let dir = temp();
+        let store = store(dir.path());
+        let out = dir.path().join("out");
+        fs::create_dir(&out).expect("out");
+        seed_source(&store);
+        seed_posting(
+            &store,
+            "pst_1",
+            "Data Scientist",
+            "Acme",
+            "acme-data-scientist",
+        );
+        exec(
+            &store,
+            "INSERT INTO email_account (id, provider, address, mode, client_id, \
+             client_id_kind, scopes, secret_ref, connected_at, updated_at) \
+             VALUES ('em_1', 'imap_smtp', 'secret@example.com', 'read_send', 'cid', 'byo', \
+             'read', 'keychain://boba/email/em_1', '2026-10-01T00:00:00Z', \
+             '2026-10-01T00:00:00Z'); \
+             INSERT INTO setting (key, value, updated_at) \
+             VALUES ('email.token', 'tok_super_secret', '2026-10-01T00:00:00Z');",
+        );
+
+        export(&store, &out).expect("export");
+
+        let text = all_text(&out);
+        assert!(!text.contains("secret@example.com"), "no mailbox address");
+        assert!(!text.contains("tok_super_secret"), "no token value");
+        assert!(!text.contains("keychain://"), "no keychain reference");
+    }
+
+    /// Every exported file, decoded as text (PDF/DOCX blobs are not text; the
+    /// search strings here only matter in the text files).
+    fn all_text(root: &Path) -> String {
+        let mut out = String::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).expect("read dir") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    out.push_str(&String::from_utf8_lossy(
+                        &fs::read(&path).expect("read file"),
+                    ));
+                    out.push('\n');
+                }
+            }
+        }
+        out
     }
 
     #[test]
