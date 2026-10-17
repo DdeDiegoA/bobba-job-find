@@ -473,6 +473,14 @@ mod tests {
             Ok(())
         }
 
+        fn recent_runs(
+            &self,
+            _source_id: &str,
+            _limit: usize,
+        ) -> Result<Vec<SourceRunRecord>, SourcesRepoError> {
+            Ok(Vec::new())
+        }
+
         fn finish_run(
             &self,
             _id: &str,

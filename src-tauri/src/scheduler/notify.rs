@@ -47,6 +47,14 @@ pub const SESSION_CHALLENGE_TITLE: Entry = Entry {
 pub const SESSION_CHALLENGE_BODY: Entry = Entry {
     message_key: "jobs:session_challenge.body",
 };
+/// The Source health notice (S4.8 AC3, FR-31): three failures in a row, one
+/// notification.
+pub const SOURCE_FAILING_TITLE: Entry = Entry {
+    message_key: "jobs:source_failing.title",
+};
+pub const SOURCE_FAILING_BODY: Entry = Entry {
+    message_key: "jobs:source_failing.body",
+};
 
 /// The `jobs.json` message for `locale`, by its `jobs:<key>` (or bare `<key>`) key.
 pub fn message(locale: Locale, key: &str) -> Option<&'static str> {
@@ -104,6 +112,10 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
                 text(locale, &SESSION_CHALLENGE_TITLE),
                 text(locale, &SESSION_CHALLENGE_BODY),
             ),
+            Notification::SourceFailing => (
+                text(locale, &SOURCE_FAILING_TITLE),
+                text(locale, &SOURCE_FAILING_BODY),
+            ),
         };
         // A host without the notification plugin panics inside Tauri's accessor
         // rather than returning an error; a missing toast never kills the tick.
@@ -153,6 +165,8 @@ mod tests {
             LOCKED_BODY,
             SESSION_CHALLENGE_TITLE,
             SESSION_CHALLENGE_BODY,
+            SOURCE_FAILING_TITLE,
+            SOURCE_FAILING_BODY,
         ] {
             assert!(
                 message(Locale::En, entry.message_key).is_some(),
