@@ -16,6 +16,26 @@ vi.mock("@/lib/ipc/bindings", () => ({
     studioGenerate: vi.fn(),
     studioRegenerate: vi.fn(),
     studioExportDocx: vi.fn(),
+    // The apply bar (S9.2) mounts at the bottom of this screen.
+    applyView: vi.fn(() =>
+      Promise.resolve({
+        status: "ok" as const,
+        data: {
+          application_id: "app_1",
+          posting_id: "pst_1",
+          title: "Backend Engineer",
+          company: "Nimbus",
+          status: "drafted",
+          channels: [{ kind: "manual" as const, url: "https://nimbus.example/jobs/1" }],
+          documents: [],
+          answers: [],
+          pending: [],
+          ready: true,
+        },
+      }),
+    ),
+    applyMarkApplied: vi.fn(),
+    applyExportPdfs: vi.fn(),
   },
 }));
 

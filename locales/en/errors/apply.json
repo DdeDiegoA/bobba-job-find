@@ -1,0 +1,10 @@
+{
+  "errors.apply.store": "Boba could not read that application. Try again.",
+  "errors.apply.unknown_application": "That application is no longer in the Tracker.",
+  "errors.apply.unknown_offer": "The Offer this application points to is gone.",
+  "errors.apply.missing_id": "No application was named.",
+  "errors.apply.invalid_id": "That application id does not look right.",
+  "errors.apply.export_path": "Boba could not find a folder for the kit.",
+  "errors.apply.export_write": "Boba could not write the PDFs. Check the disk and try again.",
+  "errors.apply.not_ready": "Some documents are not verified yet. Open the Studio, fix the checks and render them before applying."
+}
