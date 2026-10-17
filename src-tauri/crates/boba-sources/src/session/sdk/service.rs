@@ -35,8 +35,9 @@ pub const SIGN_OUT_ACTION: &str = "session.signed_out";
 pub const CHALLENGE_ACTION: &str = "session.challenge_paused";
 /// The audit action clearing a challenge pause writes.
 pub const RESUME_ACTION: &str = "session.resumed";
-/// The audit action one page load of a session run writes (S11.1b).
-pub const PAGE_LOAD_ACTION: &str = "session.run";
+/// The audit action one page load of a session run writes (S11.1b). Defined in
+/// the domain: a review-mode apply start spends the same budget and writes it.
+pub const PAGE_LOAD_ACTION: &str = boba_domain::session::PAGE_LOAD_ACTION;
 
 /// What a page load did to the Source's daily budget (S11.1b).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

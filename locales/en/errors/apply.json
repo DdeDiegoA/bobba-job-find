@@ -43,5 +43,6 @@
   "errors.apply.session_off_board": "That apply link does not point at the job board, so Boba will not open your signed-in session there.",
   "errors.apply.session_unknown_attempt": "That Session Board attempt is no longer waiting.",
   "errors.apply.session_kill_switch": "The Kill Switch is on, so Boba is not filling any form.",
-  "errors.apply.session_browser": "Boba could not drive your browser session. Check that Chrome or Chromium is installed and try again."
+  "errors.apply.session_browser": "Boba could not drive your browser session. Check that Chrome or Chromium is installed and try again.",
+  "errors.apply.session_cap_reached": "This Session Board has used today's page budget. Try again tomorrow, or raise its limit in Connections."
 }

@@ -146,6 +146,9 @@ pub enum SessionApplyError {
     /// The apply URL is not an `https` page on the board's own domain.
     #[error("'{0}' is not a page on the board")]
     OffBoard(String),
+    /// Today's page budget for the Source is spent (FR-30, S11.2 M4 ruling).
+    #[error("source '{source_id}' already used its {cap} page loads today")]
+    CapReached { source_id: String, cap: u32 },
     /// A package draft is not Ready and verified (AD-14).
     #[error("not Ready and verified: {0:?}")]
     NotReady(Vec<String>),
@@ -181,6 +184,7 @@ impl SessionApplyError {
             SessionApplyError::OptInRequired(_) => "errors.apply.session_opt_in",
             SessionApplyError::Paused(_) => "errors.apply.session_paused",
             SessionApplyError::OffBoard(_) => "errors.apply.session_off_board",
+            SessionApplyError::CapReached { .. } => "errors.apply.session_cap_reached",
             SessionApplyError::NotReady(_) => "errors.apply.not_ready",
             SessionApplyError::UnknownAttempt(_) => "errors.apply.session_unknown_attempt",
             SessionApplyError::KillSwitch => "errors.apply.session_kill_switch",
@@ -336,7 +340,7 @@ impl SessionApplyService {
         application: &Application,
         offer: &Offer,
     ) -> Result<SessionApplyView, SessionApplyError> {
-        let board = self.gate(&offer.source_id)?;
+        let (board, cap) = self.gate(&offer.source_id)?;
         let url = offer.apply.url.trim();
         // The session profile is signed in: never drive it off the board.
         if !board.allows(url) {
@@ -350,6 +354,9 @@ impl SessionApplyService {
         let documents = self.documents(application)?;
         let answers = self.reusable_answers(&application.id)?;
         let identity = self.identity(application)?;
+
+        // M4 ruling: the click still spends one page from today's budget.
+        self.spend_page_load(&offer.source_id, url, cap)?;
 
         let page = self.browser.open(&offer.source_id, url)?;
         // H1 (review): the board's own apply button may lead anywhere. Boba
@@ -420,7 +427,7 @@ impl SessionApplyService {
         let intent = self.intent(attempt_id, application)?;
         let source_id = intent_source(&intent)
             .ok_or_else(|| SessionApplyError::UnknownAttempt(attempt_id.to_string()))?;
-        let board = self.gate(&source_id)?;
+        let (board, _cap) = self.gate(&source_id)?;
         let documents = self.documents(application)?;
         let answers = self.reusable_answers(&application.id)?;
         let identity = self.identity(application)?;
@@ -535,7 +542,7 @@ impl SessionApplyService {
     /// Fail closed on anything but a live opt-in on an enabled Session Board:
     /// no browser opens for a Source the user did not opt in, a Source a
     /// challenge paused, or a Source whose row names another capability.
-    fn gate(&self, source_id: &str) -> Result<SessionBoard, SessionApplyError> {
+    fn gate(&self, source_id: &str) -> Result<(SessionBoard, Option<u32>), SessionApplyError> {
         if self
             .kill_switch
             .as_ref()
@@ -567,7 +574,78 @@ impl SessionApplyService {
         {
             return Err(SessionApplyError::Paused(source_id.to_string()));
         }
-        Ok(board)
+        Ok((board, record.daily_cap))
+    }
+
+    /// Spend one page from the Source's daily budget for a review-mode start.
+    ///
+    /// S11.2 M4 ruling (Diego standing OK): the ban risk is per account, so a
+    /// user-clicked Apply spends the same `session.loads.<source>.<day>` total
+    /// the search run spends. Pacing is exempt — the click is the pace.
+    fn spend_page_load(
+        &self,
+        source_id: &str,
+        url: &str,
+        cap: Option<u32>,
+    ) -> Result<(), SessionApplyError> {
+        // A Source without a daily cap has no budget to spend.
+        let Some(cap) = cap else {
+            return Ok(());
+        };
+        if cap == 0 {
+            return Err(SessionApplyError::CapReached {
+                source_id: source_id.to_string(),
+                cap,
+            });
+        }
+        let now = self.clock.now_rfc3339();
+        let key = boba_domain::session::loads_key(source_id, &now);
+        // The same audit action the search run writes, so one log reads the
+        // day's budget in one place (AD-12).
+        let intent = self.system.audit_append_intent(&NewIntent {
+            action: boba_domain::session::PAGE_LOAD_ACTION.to_string(),
+            correlation_id: format!(
+                "{}_{source_id}_{}",
+                boba_domain::session::PAGE_LOAD_ACTION,
+                now.replace([':', '+', '.'], "-")
+            ),
+            actor: "user".to_string(),
+            target_kind: "source".to_string(),
+            target_id: Some(source_id.to_string()),
+            detail_json: serde_json::json!({
+                "source_id": source_id,
+                // Never the query or fragment (S11.1b R-b).
+                "url": page_url(url),
+                "cap": cap,
+                "while": "apply",
+            })
+            .to_string(),
+            payload_blake3: None,
+            created_at: now.clone(),
+        })?;
+        match self.system.setting_spend_below(&key, cap, &now)? {
+            Some(loads_today) => {
+                self.system.audit_append_outcome(
+                    &intent,
+                    AuditOutcome::Ok,
+                    &serde_json::json!({ "loads_today": loads_today }).to_string(),
+                    &now,
+                )?;
+                Ok(())
+            }
+            None => {
+                self.system.audit_append_outcome(
+                    &intent,
+                    AuditOutcome::Failed,
+                    &serde_json::json!({ "cap_reached": cap }).to_string(),
+                    &now,
+                )?;
+                Err(SessionApplyError::CapReached {
+                    source_id: source_id.to_string(),
+                    cap,
+                })
+            }
+        }
     }
 
     /// The unresolved attempt `attempt_id` names, if it is this application's.

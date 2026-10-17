@@ -716,8 +716,8 @@ fn a_confirmed_submission_records_the_evidence_and_applies_the_card() {
     );
     assert_eq!(
         h.system.audit_verify_chain().unwrap().rows,
-        2,
-        "the intent/outcome pair is chained"
+        4,
+        "the page-load pair and the attempt pair are chained"
     );
     let events = h.apply.events();
     assert_eq!(events.len(), 1);
@@ -738,7 +738,7 @@ fn a_page_without_confirmation_marks_needs_check_and_the_card_stays() {
         h.system.audit_unresolved_intents().unwrap().is_empty(),
         "the attempt is resolved as a failed outcome"
     );
-    assert_eq!(h.system.audit_verify_chain().unwrap().rows, 2);
+    assert_eq!(h.system.audit_verify_chain().unwrap().rows, 4);
     assert!(
         h.apply.events().is_empty(),
         "FR-88: no evidence means Needs check, and the card does not move"
@@ -966,8 +966,8 @@ fn a_challenge_pauses_the_source_and_stops_the_next_attempt() {
     );
     assert_eq!(
         h.system.audit_verify_chain().unwrap().rows,
-        3,
-        "the attempt pair plus the challenge pair"
+        5,
+        "the page-load pair, the attempt intent and the challenge pair"
     );
 
     let error = h.service.start(&application(), &offer()).unwrap_err();
@@ -993,4 +993,53 @@ fn a_step_is_not_filled_when_the_package_lost_its_verification() {
 
     let error = h.service.fill(&attempt, &application).unwrap_err();
     assert_eq!(error.message_key(), "errors.apply.not_ready");
+}
+
+// M4 ruling: a clicked start spends one page from the Source's daily budget.
+#[test]
+fn a_start_spends_one_page_of_the_daily_cap() {
+    let h = ready_harness(vec![]);
+    let key = boba_domain::session::loads_key("linkedin", NOW);
+    let view = h.service.start(&application(), &offer()).unwrap();
+
+    assert_eq!(
+        h.system.setting_get(&key).unwrap().as_deref(),
+        Some("1"),
+        "the start counts against today's session page budget"
+    );
+    let row = h
+        .system
+        .audit_unresolved_intents()
+        .unwrap()
+        .into_iter()
+        .find(|row| row.action == AUDIT_ACTION)
+        .expect("the attempt");
+    assert_eq!(row.correlation_id, view.attempt_id);
+
+    // A second start spends the next unit.
+    h.service.start(&application(), &offer()).unwrap();
+    assert_eq!(h.system.setting_get(&key).unwrap().as_deref(), Some("2"));
+}
+
+#[test]
+fn a_spent_page_budget_refuses_the_start() {
+    let h = ready_harness(vec![]);
+    let key = boba_domain::session::loads_key("linkedin", NOW);
+    h.system.setting_put(&key, "60", NOW).unwrap();
+
+    let error = h.service.start(&application(), &offer()).unwrap_err();
+    assert_eq!(error.message_key(), "errors.apply.session_cap_reached");
+    assert!(h.browser.opened.lock().unwrap().is_empty(), "no page loads");
+    assert_eq!(h.system.setting_get(&key).unwrap().as_deref(), Some("60"));
+}
+
+#[test]
+fn a_source_without_a_daily_cap_has_no_budget_to_spend() {
+    let h = ready_harness(vec![]);
+    h.sources.records.lock().unwrap()[0].daily_cap = None;
+
+    h.service.start(&application(), &offer()).unwrap();
+
+    let key = boba_domain::session::loads_key("linkedin", NOW);
+    assert_eq!(h.system.setting_get(&key).unwrap(), None);
 }

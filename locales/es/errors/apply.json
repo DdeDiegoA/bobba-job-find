@@ -43,5 +43,6 @@
   "errors.apply.session_off_board": "Ese enlace de postulación no apunta al tablero, así que Boba no abrirá allí tu sesión iniciada.",
   "errors.apply.session_unknown_attempt": "Ese intento del tablero de sesión ya no está pendiente.",
   "errors.apply.session_kill_switch": "El interruptor de emergencia está activo, así que Boba no está rellenando ningún formulario.",
-  "errors.apply.session_browser": "Boba no pudo controlar tu sesión del navegador. Comprueba que Chrome o Chromium esté instalado e inténtalo otra vez."
+  "errors.apply.session_browser": "Boba no pudo controlar tu sesión del navegador. Comprueba que Chrome o Chromium esté instalado e inténtalo otra vez.",
+  "errors.apply.session_cap_reached": "Este tablero de sesión ya usó el presupuesto de páginas de hoy. Inténtalo mañana o sube su límite en Conexiones."
 }
