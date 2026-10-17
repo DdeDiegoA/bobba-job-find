@@ -237,6 +237,25 @@ export const commands = {
    */
   agentModels: (cli: string) =>
     typedError<string[], AppError_Serialize>(__TAURI_INVOKE("agent_models", { cli })),
+  /**
+   *  The draft, the verified attachments and the approved answers the review
+   *  screen shows before Send (S9.3, AC1/AC3).
+   */
+  applyEmailReview: (applicationId: string) =>
+    typedError<EmailApplyView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_email_review", { applicationId }),
+    ),
+  /**
+   *  Send the reviewed email application (S9.3, AC1).
+   *
+   *  The core re-checks the package (AD-14), reads the attempts before sending
+   *  (AC2) and writes the audit `intent`/`outcome` around the send (AD-12); the
+   *  screen is never the gate.
+   */
+  applyEmailSend: (applicationId: string, request: SendRequest) =>
+    typedError<SendReceipt, AppError_Serialize>(
+      __TAURI_INVOKE("apply_email_send", { applicationId, request }),
+    ),
 };
 
 /** Events */
@@ -324,6 +343,26 @@ export type ApplicationDetail = {
   timeline: StatusEventView[];
   created_at: string;
   updated_at: string;
+};
+
+/**  One reviewed attachment, as the view shows it. */
+export type AttachmentView = {
+  file_name: string;
+  /**  `cv` or `cover_letter`. */
+  kind: string;
+  version: number;
+  /**  Size in bytes, so the review can show what is being sent. */
+  bytes: number;
+};
+
+/**  One attempt as the review screen shows it (AC2). */
+export type AttemptView = {
+  id: string;
+  /**  `pending`, `sent`, `failed` or `uncertain`. */
+  state: string;
+  message_id: string | null;
+  created_at: string;
+  sent_at: string | null;
 };
 
 /**
@@ -527,6 +566,31 @@ export type EditTarget =
   | { slot: "cv_item"; section: number; item: number }
   /**  Paragraph `index` of the cover letter. */
   | { slot: "cover_paragraph"; index: number };
+
+/**  What the review screen shows before one click sends (AC1). */
+export type EmailApplyView = {
+  application_id: string;
+  /**  The posting's apply address (already checked to be one mailbox). */
+  recipient: string;
+  subject: string;
+  body_text: string;
+  /**  The verified PDFs, ready to attach (AD-14). */
+  attachments: AttachmentView[];
+  /**
+   *  The approved screening answers, ready to fold into the body (FR-82,
+   *  S7.8): only answers the user approved are here.
+   */
+  answers: KitAnswerView[];
+  /**
+   *  Kinds whose newest draft is not Ready and verified, so nothing may be
+   *  sent until the Studio fixes them.
+   */
+  pending: string[];
+  /**  Whether every draft in the package passed the attachable check. */
+  ready: boolean;
+  /**  The newest attempt at sending this application, if any (AC2 evidence). */
+  last_attempt: AttemptView | null;
+};
 
 /**  Whether a connection may read the mailbox or only send (FR-37, AC3). */
 export type EmailMode =
@@ -982,6 +1046,33 @@ export type SalaryFloor = {
 export type SectionView = {
   heading: string;
   items: ClaimView[];
+};
+
+/**  What a successful send did (AC1). */
+export type SendReceipt = {
+  attempt_id: string;
+  /**
+   *  The id the audit outcome names. Boba assigns it: the provider's
+   *  `sendMail` returns none.
+   */
+  message_id: string;
+  /**  The application's status after the send (`applied`). */
+  status: string;
+};
+
+/**  What the user confirms on the review screen (AC1). */
+export type SendRequest = {
+  /**  The connected mailbox the message goes from. */
+  account_id: string;
+  /**  The subject, when the user edited it. Always forced onto one line. */
+  subject: string | null;
+  /**  The body, when the user edited it. */
+  body_text: string | null;
+  /**
+   *  The user's word that a resend after an unproven (transport) attempt is
+   *  intended (AC2).
+   */
+  confirm_resend?: boolean;
 };
 
 /**  Target seniority (FR-7). */
