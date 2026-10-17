@@ -23,12 +23,24 @@ export type Nudge = {
   days: number;
 };
 
-/** When the application last entered Applied, or null when it never did. */
+/**
+ * When the application last entered Applied, or null when it never did.
+ *
+ * Compared as instants, not as strings: the core's RFC 3339 writer drops
+ * trailing zeros in fractional seconds, so `…09:00:00.5Z` sorts before
+ * `…09:00:00Z` in lexicographic order although it is later (S9.5 F1).
+ */
 export function appliedAt(detail: ApplicationDetail): string | null {
   let latest: string | null = null;
+  let latestAt = Number.NEGATIVE_INFINITY;
   for (const event of detail.timeline) {
     if (event.to_status !== "applied") continue;
-    if (latest === null || event.created_at > latest) latest = event.created_at;
+    const at = Date.parse(event.created_at);
+    if (Number.isNaN(at)) continue;
+    if (at > latestAt) {
+      latestAt = at;
+      latest = event.created_at;
+    }
   }
   return latest;
 }

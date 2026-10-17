@@ -1285,7 +1285,7 @@ export type DryRunView = {
 export type DuplicateGuardView = {
   /**  The role of the application already sent, as it was stored. */
   role: string;
-  /**  Whole days since that application was created. */
+  /**  Whole UTC days since that application was created. */
   days_ago: number;
 };
 

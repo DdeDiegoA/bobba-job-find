@@ -21,7 +21,7 @@ use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 pub struct DuplicateGuardView {
     /// The role of the application already sent, as it was stored.
     pub role: String,
-    /// Whole days since that application was created.
+    /// Whole UTC days since that application was created.
     pub days_ago: u32,
 }
 
@@ -29,7 +29,7 @@ impl From<DuplicateMatch> for DuplicateGuardView {
     fn from(matched: DuplicateMatch) -> Self {
         Self {
             role: matched.role,
-            // Whole local days, never negative; a clock that says otherwise
+            // Whole UTC days, never negative; a clock that says otherwise
             // reads as the day it happened.
             days_ago: u32::try_from(matched.days_ago).unwrap_or(0),
         }

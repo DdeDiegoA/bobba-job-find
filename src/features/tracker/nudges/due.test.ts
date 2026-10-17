@@ -53,6 +53,15 @@ describe("appliedAt", () => {
   it("returns null when the timeline never entered Applied", () => {
     expect(appliedAt(detail("drafted", []))).toBeNull();
   });
+
+  it("orders entries by instant, not by string, when precision differs (F1)", () => {
+    // The core's RFC 3339 writer trims trailing zeros: ".5Z" is later in time
+    // but sorts before "Z" in lexicographic order.
+    const sooner = "2026-10-05T09:00:00Z";
+    const later = "2026-10-05T09:00:00.5Z";
+    const card = detail("applied", [event("applied", later), event("applied", sooner)]);
+    expect(appliedAt(card)).toBe(later);
+  });
 });
 
 describe("nudgeFor", () => {
