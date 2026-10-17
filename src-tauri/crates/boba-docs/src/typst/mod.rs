@@ -123,7 +123,7 @@ pub fn render_cover(
     render(template, &serde_json::to_string(document)?)
 }
 
-fn check(template: Template, kind: DocumentKind) -> Result<(), RenderError> {
+pub(crate) fn check(template: Template, kind: DocumentKind) -> Result<(), RenderError> {
     if template.kind() == kind {
         Ok(())
     } else {
@@ -134,7 +134,7 @@ fn check(template: Template, kind: DocumentKind) -> Result<(), RenderError> {
     }
 }
 
-fn check_schema(version: u32) -> Result<(), RenderError> {
+pub(crate) fn check_schema(version: u32) -> Result<(), RenderError> {
     if version == SCHEMA_VERSION {
         Ok(())
     } else {

@@ -87,9 +87,47 @@ pub(crate) mod fake {
 
     use super::{DocumentsRepo, DocumentsRepoError};
 
+    /// One in-memory row: the document plus what later writes attach to it.
+    #[derive(Clone)]
+    struct Row {
+        document: NewDocument,
+        version: i64,
+        pdf: Option<Vec<u8>>,
+        docx: Option<Vec<u8>>,
+        verification_json: Option<String>,
+        verified_at: Option<String>,
+        review_json: Option<String>,
+        updated_at: String,
+    }
+
+    impl Row {
+        fn record(&self) -> DocumentRecord {
+            let document = &self.document;
+            DocumentRecord {
+                id: document.id.clone(),
+                application_id: document.application_id.clone(),
+                kind: document.kind,
+                lang: document.lang,
+                template: document.template.clone(),
+                version: self.version,
+                model_json: document.model_json.clone(),
+                has_pdf: self.pdf.is_some(),
+                has_docx: self.docx.is_some(),
+                verification_json: self.verification_json.clone(),
+                verified_at: self.verified_at.clone(),
+                language_fallback_from: document.language_fallback_from.clone(),
+                review_json: self.review_json.clone(),
+                review_untrusted_origin: self.review_json.is_some(),
+                untrusted_origin: document.untrusted_origin,
+                created_at: document.created_at.clone(),
+                updated_at: self.updated_at.clone(),
+            }
+        }
+    }
+
     #[derive(Default)]
     pub(crate) struct FakeDocumentsRepo {
-        rows: Mutex<Vec<NewDocument>>,
+        rows: Mutex<Vec<Row>>,
         /// Every critique `set_review` was handed, with the application it judged.
         reviews: Mutex<Vec<(String, String)>>,
         /// When set, every write fails the way a full disk would.
@@ -99,7 +137,12 @@ pub(crate) mod fake {
     impl FakeDocumentsRepo {
         /// The documents written so far, in order.
         pub(crate) fn rows(&self) -> Vec<NewDocument> {
-            self.rows.lock().unwrap().clone()
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|row| row.document.clone())
+                .collect()
         }
 
         /// The critiques written so far, as `(application_id, json)`.
@@ -107,11 +150,44 @@ pub(crate) mod fake {
             self.reviews.lock().unwrap().clone()
         }
 
+        /// The stored PDF of one document, as a caller would read it back.
+        pub(crate) fn stored_pdf(&self, id: &str) -> Option<Vec<u8>> {
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|row| row.document.id == id)
+                .and_then(|row| row.pdf.clone())
+        }
+
+        /// The verification record one document carries, if any.
+        pub(crate) fn verification(&self, id: &str) -> Option<String> {
+            self.rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|row| row.document.id == id)
+                .and_then(|row| row.verification_json.clone())
+        }
+
         /// A fake whose writes fail, the way a full disk would.
         pub(crate) fn failing() -> Self {
             Self {
                 fail: true,
                 ..Self::default()
+            }
+        }
+
+        fn edit<F: FnOnce(&mut Row)>(&self, id: &str, updated_at: &str, apply: F) {
+            if let Some(row) = self
+                .rows
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|row| row.document.id == id)
+            {
+                apply(row);
+                row.updated_at = updated_at.to_string();
             }
         }
     }
@@ -125,41 +201,100 @@ pub(crate) mod fake {
             // Versions are per (application, kind), like the real store's.
             let version = rows
                 .iter()
-                .filter(|row| row.application_id == new.application_id && row.kind == new.kind)
+                .filter(|row| {
+                    row.document.application_id == new.application_id
+                        && row.document.kind == new.kind
+                })
                 .count() as i64
                 + 1;
-            rows.push(new.clone());
+            rows.push(Row {
+                document: new.clone(),
+                version,
+                pdf: None,
+                docx: None,
+                verification_json: None,
+                verified_at: None,
+                review_json: None,
+                updated_at: new.created_at.clone(),
+            });
             Ok(version)
         }
 
-        fn get(&self, _id: &str) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
+        fn get(&self, id: &str) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|row| row.document.id == id)
+                .map(Row::record))
         }
 
         fn list_for_application(
             &self,
-            _application_id: &str,
+            application_id: &str,
         ) -> Result<Vec<DocumentRecord>, DocumentsRepoError> {
-            Ok(vec![])
+            let rows = self.rows.lock().unwrap();
+            let mut records: Vec<DocumentRecord> = rows
+                .iter()
+                .filter(|row| row.document.application_id == application_id)
+                .map(Row::record)
+                .collect();
+            records.sort_by(|a, b| (a.kind.as_str(), a.version).cmp(&(b.kind.as_str(), b.version)));
+            Ok(records)
         }
 
         fn latest(
             &self,
-            _application_id: &str,
-            _kind: DocumentKind,
+            application_id: &str,
+            kind: DocumentKind,
         ) -> Result<Option<DocumentRecord>, DocumentsRepoError> {
-            Ok(None)
+            Ok(self
+                .list_for_application(application_id)?
+                .into_iter()
+                .rev()
+                .find(|record| record.kind == kind))
         }
 
-        fn set_pdf(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
+        fn set_pdf(
+            &self,
+            id: &str,
+            pdf: &[u8],
+            updated_at: &str,
+        ) -> Result<(), DocumentsRepoError> {
+            if self.fail {
+                return Err(DocumentsRepoError::new("disk gone"));
+            }
+            self.edit(id, updated_at, |row| row.pdf = Some(pdf.to_vec()));
             Ok(())
         }
 
-        fn set_docx(&self, _: &str, _: &[u8], _: &str) -> Result<(), DocumentsRepoError> {
+        fn set_docx(
+            &self,
+            id: &str,
+            docx: &[u8],
+            updated_at: &str,
+        ) -> Result<(), DocumentsRepoError> {
+            if self.fail {
+                return Err(DocumentsRepoError::new("disk gone"));
+            }
+            self.edit(id, updated_at, |row| row.docx = Some(docx.to_vec()));
             Ok(())
         }
 
-        fn mark_verified(&self, _: &str, _: &str, _: &str) -> Result<(), DocumentsRepoError> {
+        fn mark_verified(
+            &self,
+            id: &str,
+            verification_json: &str,
+            verified_at: &str,
+        ) -> Result<(), DocumentsRepoError> {
+            if self.fail {
+                return Err(DocumentsRepoError::new("disk gone"));
+            }
+            self.edit(id, verified_at, |row| {
+                row.verification_json = Some(verification_json.to_string());
+                row.verified_at = Some(verified_at.to_string());
+            });
             Ok(())
         }
 
@@ -167,38 +302,50 @@ pub(crate) mod fake {
             &self,
             application_id: &str,
             review_json: &str,
-            _updated_at: &str,
+            updated_at: &str,
         ) -> Result<u32, DocumentsRepoError> {
             if self.fail {
                 return Err(DocumentsRepoError::new("disk gone"));
             }
-            let annotated = {
-                let rows = self.rows.lock().unwrap();
-                [DocumentKind::Cv, DocumentKind::CoverLetter]
-                    .iter()
-                    .filter(|kind| {
-                        rows.iter()
-                            .any(|row| row.application_id == application_id && row.kind == **kind)
+            // Exactly like the real `UPDATE … WHERE application_id = …`: the
+            // newest version of each kind the application has is annotated, and
+            // an application with no drafts is a `0`, not an error.
+            let mut annotated = 0;
+            let mut rows = self.rows.lock().unwrap();
+            for kind in [DocumentKind::Cv, DocumentKind::CoverLetter] {
+                let newest = rows
+                    .iter_mut()
+                    .filter(|row| {
+                        row.document.application_id == application_id && row.document.kind == kind
                     })
-                    .count()
-            };
-            // No row matched: there is nothing to annotate and nothing is
-            // written, exactly like the real `UPDATE` (S7.4 refuses the critique).
+                    .max_by_key(|row| row.version);
+                if let Some(row) = newest {
+                    row.review_json = Some(review_json.to_string());
+                    row.updated_at = updated_at.to_string();
+                    annotated += 1;
+                }
+            }
             if annotated > 0 {
                 self.reviews
                     .lock()
                     .unwrap()
                     .push((application_id.to_string(), review_json.to_string()));
             }
-            Ok(annotated as u32)
+            Ok(annotated)
         }
 
-        fn pdf(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
+        fn pdf(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+            Ok(self.stored_pdf(id))
         }
 
-        fn docx(&self, _: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
-            Ok(None)
+        fn docx(&self, id: &str) -> Result<Option<Vec<u8>>, DocumentsRepoError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|row| row.document.id == id)
+                .and_then(|row| row.docx.clone()))
         }
     }
 }

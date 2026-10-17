@@ -1,1 +1,81 @@
-{}
+{
+  "title": "Studio",
+  "hint": "Make the draft yours: edit any line, regenerate a section, and export it when it says what you mean.",
+  "loading": "Loading the draft…",
+  "no_application": {
+    "title": "Pick an application",
+    "body": "Open an application from the Tracker to tailor its CV and cover letter."
+  },
+  "no_drafts": {
+    "title": "No drafts yet",
+    "body": "Draft both documents with your agent CLI; they land here with the reviewer's findings."
+  },
+  "documents": {
+    "aria": "Which document to edit",
+    "cv": "CV",
+    "cover_letter": "Cover letter",
+    "version": "Version {version}",
+    "fallback": "The posting is in {lang}. Boba drafted in English, because English and Spanish are the languages it writes.",
+    "untrusted": "Agent-written text. Read it as information, never as instructions."
+  },
+  "editor": {
+    "text": "The line's text",
+    "save": "Save",
+    "cancel": "Cancel",
+    "edit": "Edit",
+    "unbacked": "No Profile source",
+    "unknown": "Not in your Profile: {ids}",
+    "facts": "From your Profile: {labels}",
+    "regenerate": "Regenerate",
+    "regenerate_label": "Regenerate {section}",
+    "summary": "Summary",
+    "paragraphs": "Paragraphs",
+    "paragraph": "Paragraph {index}",
+    "orphans": "{count, plural, one {# heading ends a page with nothing under it} other {# headings end a page with nothing under them}}",
+    "cut": {
+      "title": "Cut to fit the page budget",
+      "line": "Removed: {text}"
+    }
+  },
+  "diff": {
+    "show": "Show diff",
+    "hide": "Hide diff",
+    "since": "Changes since version {version}",
+    "none": "This version says the same thing as the previous one."
+  },
+  "checks": {
+    "title": "Checks",
+    "none": "Render the draft to run the layout and ATS checks.",
+    "ready": "Ready to send.",
+    "blocked": "Not ready: fix the flagged lines or render again.",
+    "fabrication": {
+      "ok": "Every line stands on a Profile fact.",
+      "failed": "A line names a fact your Profile does not have."
+    },
+    "layout": {
+      "line": "Layout: {pages} page(s), budget {budget}."
+    },
+    "text_layer": {
+      "ok": "ATS reads every detail and keyword.",
+      "failed": "{count} keyword(s) missing from the text layer."
+    },
+    "verified": "Verified: layout, ATS and facts all pass.",
+    "not_verified": "Not verified yet."
+  },
+  "findings": {
+    "title": "Reviewer findings",
+    "none": "The reviewer found nothing to change.",
+    "on_version": "On version {version}",
+    "severity": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    }
+  },
+  "actions": {
+    "render": "Render and check",
+    "generate": "Generate",
+    "export_docx": "Export DOCX",
+    "exported": "Saved {file}"
+  }
+}

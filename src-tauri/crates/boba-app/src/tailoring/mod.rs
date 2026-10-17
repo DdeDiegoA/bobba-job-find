@@ -14,8 +14,8 @@
 //! drafting, reviewing and verifying around this step are S7.3–S7.7.
 
 use boba_domain::documents::{
-    CoverLetterDocument, CvDocument, DocumentKind, LanguageChoice, NewDocument, TemplateId,
-    new_document_id,
+    CoverLetterDocument, CvDocument, DocumentKind, Lang, LanguageChoice, NewDocument,
+    SCHEMA_VERSION, TemplateId, new_document_id,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -61,6 +61,16 @@ pub enum TailorError {
     /// the user or the agent can cause.
     #[error("document model could not be serialized: {0}")]
     Serialize(String),
+    /// A `save_document_draft` payload this build cannot store: not an object,
+    /// not a draft of either kind, a newer schema, or an unknown language. The
+    /// run is told, so a model that misreads the contract retries instead of
+    /// quietly storing nothing.
+    #[error("this draft is not one the core can store: {0}")]
+    Draft(String),
+    /// The run tried to store a draft for another application than the one it
+    /// was started for (ADR-010: a run disposes only of its own job).
+    #[error("this run was started for `{run}`, but its draft names `{payload}`")]
+    WrongApplication { run: String, payload: String },
 }
 
 /// Store both drafts as documents of `application_id` (AD-16).
@@ -116,6 +126,125 @@ pub fn save_drafts(
         cover_id,
         fallback_from: language.fallback_from.clone(),
     })
+}
+
+/// What one stored agent draft was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedDraft {
+    pub id: String,
+    pub kind: DocumentKind,
+    pub version: i64,
+    pub lang: Lang,
+}
+
+/// Store one `save_document_draft` call (S7.7): the tailor run writes the CV,
+/// then the cover letter, one call each.
+///
+/// The payload is refused whole unless it is a draft this build can store — an
+/// object naming this run's application, a known schema version and language,
+/// and one document shape. A claim-bearing item with no `fact_ids` fails to
+/// deserialize, so the no-fabrication rule is enforced here as well as in the
+/// validator: a run that invents a sentence without a fact stores nothing and
+/// reads the refusal back.
+///
+/// The stored row is `untrusted_origin = true` (ADR-010: agent text that read
+/// the posting). `offer_lang` is the Offer's content language, used for the same
+/// notice `Lang::for_offer` records: a draft in EN for a posting in another
+/// language explains itself in the studio (FR-70).
+pub fn save_agent_draft(
+    repo: &dyn DocumentsRepo,
+    application_id: &str,
+    args: &serde_json::Value,
+    offer_lang: Option<&str>,
+    created_at: &str,
+) -> Result<SavedDraft, TailorError> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| TailorError::Draft("the arguments must be an object".to_string()))?;
+    for key in object.keys() {
+        if key != "app_id" && key != "doc" {
+            return Err(TailorError::Draft(format!("unknown field `{key}`")));
+        }
+    }
+    let payload_app = object
+        .get("app_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| TailorError::Draft("`app_id` must be a non-empty string".to_string()))?;
+    if payload_app != application_id {
+        return Err(TailorError::WrongApplication {
+            run: application_id.to_string(),
+            payload: payload_app.to_string(),
+        });
+    }
+    let doc = object
+        .get("doc")
+        .ok_or_else(|| TailorError::Draft("`doc` is required".to_string()))?;
+
+    // The two shapes are told apart by the field only one of them has: a CV has
+    // `sections`, a cover letter `paragraphs`.
+    let (kind, lang, model_json) = if doc.get("paragraphs").is_some() {
+        let model: CoverLetterDocument = serde_json::from_value(doc.clone())
+            .map_err(|error| TailorError::Draft(error.to_string()))?;
+        let json = serialized(&model, model.schema_version, model.lang)?;
+        (DocumentKind::CoverLetter, model.lang, json)
+    } else {
+        let model: CvDocument = serde_json::from_value(doc.clone())
+            .map_err(|error| TailorError::Draft(error.to_string()))?;
+        let json = serialized(&model, model.schema_version, model.lang)?;
+        (DocumentKind::Cv, model.lang, json)
+    };
+
+    // The run writes in the language the core chose for this job (FR-70); a
+    // draft in the other language is a contract violation, not a preference.
+    let choice = Lang::for_offer(offer_lang.unwrap_or(lang.code()), None);
+    if choice.lang != lang {
+        return Err(TailorError::Draft(format!(
+            "this draft is {}, but the job's language is {}",
+            lang.code(),
+            choice.lang.code()
+        )));
+    }
+
+    let id = new_document_id();
+    let version = repo.insert(&NewDocument {
+        id: id.clone(),
+        application_id: application_id.to_string(),
+        kind,
+        lang,
+        // No preference for a template exists yet (S3.x): a run drafts into the
+        // default of its kind, which is what the studio offers first.
+        template: TemplateId::new(match kind {
+            DocumentKind::Cv => "cv-classic",
+            DocumentKind::CoverLetter => "cover-classic",
+        }),
+        model_json,
+        language_fallback_from: choice.fallback_from,
+        // Agent-written text that read the posting (ADR-010).
+        untrusted_origin: true,
+        created_at: created_at.to_string(),
+    })?;
+    Ok(SavedDraft {
+        id,
+        kind,
+        version,
+        lang,
+    })
+}
+
+/// The draft as it is stored, after the schema check: a build that cannot read
+/// the draft it was handed must not write it.
+fn serialized(
+    model: &impl serde::Serialize,
+    schema_version: u32,
+    _lang: Lang,
+) -> Result<String, TailorError> {
+    if schema_version != SCHEMA_VERSION {
+        return Err(TailorError::Draft(format!(
+            "schema version {schema_version} is not {SCHEMA_VERSION}"
+        )));
+    }
+    serde_json::to_string(model).map_err(|error| TailorError::Serialize(error.to_string()))
 }
 
 fn json(model: &impl serde::Serialize) -> Result<String, TailorError> {
@@ -300,6 +429,175 @@ mod tests {
                 .all(|row| row.language_fallback_from.as_deref() == Some("de")),
             "and the reason is stored with both documents"
         );
+    }
+
+    fn draft_call(app_id: &str, doc: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "app_id": app_id, "doc": doc })
+    }
+
+    fn cv_payload(lang: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "lang": lang,
+            "contact": {"full_name": "Ada Lovelace"},
+            "summary": {"text": "Backend developer.", "fact_ids": ["fact_1"]},
+            "sections": [{"heading": "Experience",
+                          "items": [{"text": "Shipped an API.", "fact_ids": ["fact_2"]}]}],
+            "declared_gaps": ["Kubernetes"]
+        })
+    }
+
+    fn cover_payload(lang: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": SCHEMA_VERSION,
+            "lang": lang,
+            "contact": {"full_name": "Ada Lovelace"},
+            "company": "Acme",
+            "paragraphs": [{"text": "I would like to apply.", "fact_ids": ["fact_1"]}],
+            "closing": "Sincerely, Ada"
+        })
+    }
+
+    // AC1 (S7.7): the two `save_document_draft` calls of a run are stored as the
+    // application's next CV and cover-letter versions, untrusted (ADR-010).
+    #[test]
+    fn an_agent_draft_is_stored_as_the_next_version_and_is_untrusted() {
+        let repo = FakeDocumentsRepo::default();
+        save_drafts(
+            &repo,
+            "app_1",
+            &Lang::for_offer("en", None),
+            &templates(),
+            &drafts(Lang::En),
+            "t1",
+        )
+        .expect("the run's first pass");
+
+        let cv = save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_1", cv_payload("en")),
+            Some("en"),
+            "t2",
+        )
+        .expect("the CV");
+        assert_eq!(cv.kind, DocumentKind::Cv);
+        assert_eq!(cv.version, 2, "a regeneration is the next version");
+        let cover = save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_1", cover_payload("en")),
+            Some("en"),
+            "t2",
+        )
+        .expect("the cover letter");
+        assert_eq!(cover.kind, DocumentKind::CoverLetter);
+        assert_eq!(cover.version, 2);
+
+        let rows = repo.rows();
+        assert_eq!(rows.len(), 4);
+        assert!(rows[2..].iter().all(|row| row.untrusted_origin));
+        let model: CvDocument = serde_json::from_str(&rows[2].model_json).expect("json");
+        assert_eq!(
+            model.sections[0].items[0].fact_ids,
+            vec!["fact_2".to_string()]
+        );
+    }
+
+    // AD-15: a draft whose claim names no fact is refused before it is stored,
+    // so a run reads the refusal back and retries instead of half-storing.
+    #[test]
+    fn a_draft_whose_claim_names_no_fact_is_refused_whole() {
+        let repo = FakeDocumentsRepo::default();
+        let mut payload = cv_payload("en");
+        payload["sections"][0]["items"][0]
+            .as_object_mut()
+            .expect("the item")
+            .remove("fact_ids");
+
+        let error = save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_1", payload),
+            Some("en"),
+            "t",
+        )
+        .expect_err("no fact, no draft");
+        assert!(matches!(error, TailorError::Draft(_)), "{error:?}");
+        assert!(repo.rows().is_empty(), "nothing was stored");
+    }
+
+    // ADR-010: a run disposes only of its own job.
+    #[test]
+    fn a_draft_for_another_application_is_refused() {
+        let repo = FakeDocumentsRepo::default();
+        let error = save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_2", cv_payload("en")),
+            Some("en"),
+            "t",
+        )
+        .expect_err("not this run's application");
+        assert_eq!(
+            error,
+            TailorError::WrongApplication {
+                run: "app_1".to_string(),
+                payload: "app_2".to_string()
+            }
+        );
+        assert!(repo.rows().is_empty());
+    }
+
+    // A newer schema, or a language this build does not write, is refused.
+    #[test]
+    fn a_newer_schema_or_unknown_language_is_refused() {
+        let repo = FakeDocumentsRepo::default();
+        let mut newer = cv_payload("en");
+        newer["schema_version"] = serde_json::json!(SCHEMA_VERSION + 1);
+        assert!(matches!(
+            save_agent_draft(&repo, "app_1", &draft_call("app_1", newer), Some("en"), "t"),
+            Err(TailorError::Draft(_))
+        ));
+        let mut unknown = cv_payload("de");
+        unknown["lang"] = serde_json::json!("de");
+        assert!(matches!(
+            save_agent_draft(
+                &repo,
+                "app_1",
+                &draft_call("app_1", unknown),
+                Some("de"),
+                "t"
+            ),
+            Err(TailorError::Draft(_))
+        ));
+        assert!(repo.rows().is_empty());
+    }
+
+    // FR-70: an EN draft of a German posting carries the reason the studio shows.
+    #[test]
+    fn a_fallback_language_is_recorded_with_the_draft() {
+        let repo = FakeDocumentsRepo::default();
+        save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_1", cv_payload("en")),
+            Some("de"),
+            "t",
+        )
+        .expect("the CV");
+        assert_eq!(repo.rows()[0].language_fallback_from.as_deref(), Some("de"));
+
+        // A posting in the draft's own language has nothing to explain.
+        save_agent_draft(
+            &repo,
+            "app_1",
+            &draft_call("app_1", cover_payload("en")),
+            Some("en"),
+            "t",
+        )
+        .expect("the cover letter");
+        assert_eq!(repo.rows()[1].language_fallback_from, None);
     }
 
     #[test]

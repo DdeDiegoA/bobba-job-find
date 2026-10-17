@@ -11,9 +11,12 @@
 use std::sync::Arc;
 
 use boba_app::ports::agent::AgentPort;
+use boba_app::ports::cli::CliInstallsPort;
 use boba_app::ports::mail::MailPort;
+use boba_app::ports::render::RenderPort;
 use boba_app::ports::repo::agent::AgentRepo;
 use boba_app::ports::repo::apply::ApplyRepo;
+use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
@@ -21,6 +24,8 @@ use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::secret::SecretPort;
+use boba_app::ports::verify::VerifyPort;
+use boba_docs::TypstRenderer;
 use boba_mail::graph::GraphMail;
 use boba_store::db::Store;
 use boba_store::keys::SecretStore;
@@ -72,5 +77,14 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         Ok(http) => mount_port(app, Arc::new(http)),
         Err(error) => tracing::error!(?error, "http client left unmounted"),
     }
+    // The studio (S7.7): the document owner, the Typst renderer for both export
+    // formats, the layout/ATS verification S7.5/S7.6 read, and the detected
+    // CLIs a generation run picks its engine from.
+    mount_port::<dyn DocumentsRepo>(app, store.clone());
+    let render: Arc<dyn RenderPort> = Arc::new(TypstRenderer);
+    mount_port::<dyn RenderPort>(app, render);
+    let verify: Arc<dyn VerifyPort> = Arc::new(TypstRenderer);
+    mount_port::<dyn VerifyPort>(app, verify);
+    mount_port::<dyn CliInstallsPort>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }

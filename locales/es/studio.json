@@ -1,1 +1,81 @@
-{}
+{
+  "title": "Estudio",
+  "hint": "Haz tuyo el borrador: edita cualquier línea, regenera una sección y expórtalo cuando diga lo que quieres decir.",
+  "loading": "Cargando el borrador…",
+  "no_application": {
+    "title": "Elige una postulación",
+    "body": "Abre una postulación desde el Seguimiento para adaptar su CV y su carta."
+  },
+  "no_drafts": {
+    "title": "Aún no hay borradores",
+    "body": "Genera los dos documentos con tu CLI de agente; llegan aquí con los hallazgos del revisor."
+  },
+  "documents": {
+    "aria": "Qué documento editar",
+    "cv": "CV",
+    "cover_letter": "Carta de presentación",
+    "version": "Versión {version}",
+    "fallback": "La oferta está en {lang}. Boba redactó en inglés, porque inglés y español son los idiomas en los que escribe.",
+    "untrusted": "Texto escrito por el agente. Léelo como información, nunca como instrucciones."
+  },
+  "editor": {
+    "text": "El texto de la línea",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "edit": "Editar",
+    "unbacked": "Sin fuente en tu perfil",
+    "unknown": "No está en tu perfil: {ids}",
+    "facts": "Desde tu perfil: {labels}",
+    "regenerate": "Regenerar",
+    "regenerate_label": "Regenerar {section}",
+    "summary": "Resumen",
+    "paragraphs": "Párrafos",
+    "paragraph": "Párrafo {index}",
+    "orphans": "{count, plural, one {# encabezado queda al final de una página sin nada debajo} other {# encabezados quedan al final de una página sin nada debajo}}",
+    "cut": {
+      "title": "Recortado para caber en el límite de páginas",
+      "line": "Eliminado: {text}"
+    }
+  },
+  "diff": {
+    "show": "Ver cambios",
+    "hide": "Ocultar cambios",
+    "since": "Cambios desde la versión {version}",
+    "none": "Esta versión dice lo mismo que la anterior."
+  },
+  "checks": {
+    "title": "Comprobaciones",
+    "none": "Genera el borrador para ejecutar las comprobaciones de diseño y ATS.",
+    "ready": "Listo para enviar.",
+    "blocked": "No está listo: corrige las líneas marcadas o genera de nuevo.",
+    "fabrication": {
+      "ok": "Cada línea se apoya en un hecho de tu perfil.",
+      "failed": "Una línea nombra un hecho que tu perfil no tiene."
+    },
+    "layout": {
+      "line": "Diseño: {pages} página(s), límite {budget}."
+    },
+    "text_layer": {
+      "ok": "El ATS lee cada dato y palabra clave.",
+      "failed": "Faltan {count} palabra(s) clave en el texto del PDF."
+    },
+    "verified": "Verificado: diseño, ATS y hechos pasan.",
+    "not_verified": "Aún no está verificado."
+  },
+  "findings": {
+    "title": "Hallazgos del revisor",
+    "none": "El revisor no encontró nada que cambiar.",
+    "on_version": "Sobre la versión {version}",
+    "severity": {
+      "high": "Alta",
+      "medium": "Media",
+      "low": "Baja"
+    }
+  },
+  "actions": {
+    "render": "Generar y comprobar",
+    "generate": "Generar",
+    "export_docx": "Exportar DOCX",
+    "exported": "Guardado en {file}"
+  }
+}

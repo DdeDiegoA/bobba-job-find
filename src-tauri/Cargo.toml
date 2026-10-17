@@ -30,6 +30,11 @@ specta = { workspace = true, features = ["derive", "serde_json"] }
 specta-typescript = { workspace = true }
 # Hexagonal core (use cases + the AppError model).
 boba-app = { path = "crates/boba-app" }
+# Port types that cross into the commands (S7.7): the studio reads an
+# application, its Offer and the Profile, and hands them to `boba-app`.
+boba-domain = { path = "crates/boba-domain" }
+# The renderers behind `RenderPort`/`VerifyPort` (S7.7 mounts them).
+boba-docs = { path = "crates/boba-docs" }
 # Composition root (ADR-012): the store adapter wiring opens and mounts.
 boba-store = { path = "crates/boba-store" }
 # Composition root (CH5, ADR-012): the agent runtime is built and mounted here.

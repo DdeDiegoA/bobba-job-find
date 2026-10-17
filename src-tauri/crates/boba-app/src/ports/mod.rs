@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod browser;
+pub mod cli;
 pub mod clock;
 pub mod embedding;
 pub mod mail;
