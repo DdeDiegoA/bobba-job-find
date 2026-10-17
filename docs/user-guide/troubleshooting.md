@@ -4,7 +4,7 @@ Most hiccups here have a short fix.
 
 ## macOS says it can't check the app (Gatekeeper)
 
-Boba is signed with the project's own certificate but not notarised by Apple. Once:
+On macOS, Boba is signed with the project's own certificate but not notarised by Apple (Windows and Linux builds are unsigned). Once:
 
 1. Open the app and dismiss the warning.
 2. **System Settings → Privacy & Security → Open Anyway**, then **Open**.

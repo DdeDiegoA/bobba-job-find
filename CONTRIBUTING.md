@@ -3,8 +3,7 @@
 Thanks for helping. Boba is a local-first Tauri v2 app: a Rust core with a React UI. Small,
 focused pull requests that map to one idea are the easiest to review.
 
-Detailed contributor guides live in [docs/contributing/](docs/contributing/). This page is the
-short version.
+This page is the short version; deeper guides are in the [docs index](docs/README.md).
 
 ## Setup
 
@@ -78,7 +77,6 @@ security decision: explain it in the PR.
 [Architecture spine](docs/architecture/ARCHITECTURE-SPINE.md) ·
 [Tech stack](docs/architecture/tech-stack.md) ·
 [ADRs](docs/architecture/adr/README.md) ·
-[Backlog and ownership rules](docs/product/backlog.md) ·
-[docs/contributing/](docs/contributing/)
+[Backlog and ownership rules](docs/product/backlog.md)
 
 Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).

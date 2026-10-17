@@ -4,9 +4,9 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
-## [1.0.0] - 2026-10
+## [Unreleased] - targeting 1.0.0
 
-First release. Boba Job Find is a local-first, free and open-source desktop app (Windows,
+Planned first release (not yet tagged). Boba Job Find is a local-first, free and open-source desktop app (Windows,
 macOS, Linux) that searches, ranks, tailors and applies, with you in control. Grouped by epic.
 
 ### Foundations
@@ -100,4 +100,3 @@ macOS, Linux) that searches, ranks, tailors and applies, with you in control. Gr
   (see [docs/install/](docs/install/README.md)).
 - InfoJobs and further sources, and coaching extras, are planned for v1.1.
 
-[1.0.0]: https://github.com/diegoarenas/boba-job-find/releases/tag/v1.0.0

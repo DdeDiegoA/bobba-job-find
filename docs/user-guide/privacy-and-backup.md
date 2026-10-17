@@ -9,8 +9,9 @@ Boba keeps your job search on your computer.
 - **Keys and secrets.** Your OS keychain holds the database key and your tokens. If there's no
   keychain, Boba asks for a **passphrase** instead (see [Locked state](troubleshooting.md#boba-is-locked)).
 - **No cloud, no account, no telemetry.**
-- **Network.** Boba only contacts the Sources you enabled, your mailbox provider, and (if you
-  turn it on) GitHub for update checks. **Settings → Privacy → Network activity** lists every
+- **Network.** Boba only contacts the Sources you enabled, your mailbox provider, and the optional
+  extras you switch on: GitHub for update checks, a Hugging Face download for the on-device
+  model, and api.frankfurter.dev for salary exchange rates. **Settings → Privacy → Network activity** lists every
   contact, so you can check.
 - **AI.** Your agent CLI talks to its own provider under its own terms. Boba gives it the
   Offers and Profile facts needed for a task and nothing else, and doesn't send anything on its

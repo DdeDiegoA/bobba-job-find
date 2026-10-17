@@ -28,7 +28,7 @@ left off**.
    things you want to avoid. Ranking follows these.
 5. **Gap interview.** A short Q&A for things your CV doesn't say yet, drafted in English or
    Spanish.
-6. **Sources.** Safe Sources are already on for your markets. Add your own RSS or Atom feed if
+6. **Sources.** Safe Sources are already on for the markets you picked (the list is on the card; **Connections** shows it later). Add your own RSS or Atom feed if
    you like. Session boards (LinkedIn, Indeed) stay off until you opt in; see
    [Sources and connections](sources-and-connections.md).
 7. **Email (optional).** Connect the mailbox Boba sends from, or skip and do it later.

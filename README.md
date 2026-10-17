@@ -35,7 +35,8 @@ It is a productized, cross-platform take on the manual workflow in
 - No account, no cloud, no telemetry, no billing.
 - Your data lives in one encrypted local database (SQLCipher). The key is held in your OS
   keychain. If no keychain is available, Boba asks for a passphrase instead.
-- Update checks are **off** until you turn them on, and every network contact appears in
+- Update checks are **off** until you turn them on, as are the optional extras (on-device model
+  download, salary exchange rates). Every network contact appears in
   **Settings → Privacy → Network activity**.
 - Export your data in open formats, make a passphrase-encrypted backup, restore it, or
   **Reset everything** at any time.
@@ -105,7 +106,7 @@ data. The checks CI runs are listed in [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | Use the app | [docs/user-guide/](docs/user-guide/getting-started.md) |
 | Install or update it | [docs/install/](docs/install/README.md) |
-| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md), [docs/contributing/](docs/contributing/) |
+| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Report a security issue | [SECURITY.md](SECURITY.md), [docs/security/](docs/security/) |
 | Understand the design | [docs/architecture/](docs/architecture/ARCHITECTURE-SPINE.md), [docs/design/](docs/design/DESIGN.md) |
 | See what the product promises | [docs/product/PRD.md](docs/product/PRD.md) |

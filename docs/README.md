@@ -14,7 +14,6 @@ Start with the section that matches what you are doing.
 | Doc | What's in it |
 |---|---|
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Setup, the CI gate, conventions |
-| [contributing/](contributing/) | Detailed contributor guides |
 | [install/RELEASING.md](install/RELEASING.md) | Release process (maintainers) |
 | [qa/](qa/) | Manual QA notes |
 
