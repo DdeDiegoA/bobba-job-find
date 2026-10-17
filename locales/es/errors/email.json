@@ -16,6 +16,7 @@
   "errors.email.unknown_connection": "Esa conexión ya no existe.",
   "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar».",
   "errors.email.client_secret": "Tu propio client ID también necesita su client secret. Google lo pide cuando Boba renueva el acceso.",
+  "errors.email.gmail_read_needs_byo": "Leer Gmail necesita tu propio client ID de Google. Añádelo en «Avanzado» o conecta solo para enviar.",
   "errors.email.probe_credentials": "El servidor de correo no aceptó esa contraseña o token.",
   "errors.email.probe_unreachable": "Boba no pudo alcanzar ese servidor de correo. Revisa el host y el puerto.",
   "errors.email.probe_refused": "Ese servidor de correo rechazó la prueba de conexión. Revisa el cifrado y el puerto.",

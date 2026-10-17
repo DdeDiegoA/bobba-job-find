@@ -138,19 +138,20 @@ describe("connecting Gmail (AC1)", () => {
       ...over,
     });
 
-  it("asks for gmail.send only and says what it will not do", async () => {
+  it("starts send-only and asks for gmail.send only", async () => {
     renderScreen();
     const form = await gmailForm();
 
     // AC1: the one scope, in plain language, before consent.
     expect(within(form).getByText(/Send mail as you/)).toBeTruthy();
-    // No reading scope is asked for, and there is no mode switch to fake one.
     expect(within(form).queryByText(/Read your mail/)).toBeNull();
-    expect(within(form).queryByText(/Read and send/)).toBeNull();
     expect(within(form).getByText(/Boba never reads your Gmail/)).toBeTruthy();
+    expect(
+      (within(form).getByRole("radio", { name: /Send only/ }) as HTMLInputElement).checked,
+    ).toBe(true);
   });
 
-  it("connects with the address and an optional own client id and secret", async () => {
+  it("connects send-only with the address and an optional own client id and secret", async () => {
     vi.mocked(commands.emailConnectGmail).mockReturnValue(ok(gmailAccount()));
     renderScreen();
     const form = await gmailForm();
@@ -169,6 +170,7 @@ describe("connecting Gmail (AC1)", () => {
     await waitFor(() =>
       expect(commands.emailConnectGmail).toHaveBeenCalledWith({
         address: "me@gmail.com",
+        mode: "send_only",
         client_id: "my-client-id.apps.googleusercontent.com",
         client_secret: "GOCSPX-public",
       }),
@@ -177,6 +179,45 @@ describe("connecting Gmail (AC1)", () => {
     // The connection lands in the list as a Gmail, send-only mailbox.
     const row = (await screen.findByText("me@gmail.com")).closest("li") as HTMLElement;
     expect(within(row).getByText(/Send mail as you/)).toBeTruthy();
+  });
+
+  it("offers reading only with your own client, and asks for the read scope then", async () => {
+    vi.mocked(commands.emailConnectGmail).mockReturnValue(ok(gmailAccount({ mode: "read_send" })));
+    renderScreen();
+    const form = await gmailForm();
+
+    // Reading is opt-in and says what it needs before it is chosen.
+    fireEvent.click(within(form).getByRole("radio", { name: /Read and send/ }));
+
+    // Without a client id the form says what is missing and refuses to submit.
+    expect(within(form).getByText(/needs your own Google client ID/)).toBeTruthy();
+    expect(
+      within(form).getByRole("button", { name: "Connect Gmail" }).hasAttribute("disabled"),
+    ).toBe(true);
+    expect(within(form).queryByText(/Read your mail/)).toBeNull();
+
+    fireEvent.change(within(form).getByLabelText(/Mailbox address/), {
+      target: { value: "me@gmail.com" },
+    });
+    fireEvent.change(within(form).getByLabelText(/your own client ID/), {
+      target: { value: "my-client-id.apps.googleusercontent.com" },
+    });
+    fireEvent.change(within(form).getByLabelText(/your client secret/), {
+      target: { value: "GOCSPX-public" },
+    });
+
+    // The read scope appears, in plain language, only once it can be asked for.
+    expect(within(form).getByText(/Read your mail/)).toBeTruthy();
+
+    fireEvent.click(within(form).getByRole("button", { name: "Connect Gmail" }));
+    await waitFor(() =>
+      expect(commands.emailConnectGmail).toHaveBeenCalledWith({
+        address: "me@gmail.com",
+        mode: "read_send",
+        client_id: "my-client-id.apps.googleusercontent.com",
+        client_secret: "GOCSPX-public",
+      }),
+    );
   });
 });
 

@@ -54,10 +54,10 @@ export const commands = {
    *  Connect Gmail with delegated OAuth (AC1).
    *
    *  Same loopback flow as Outlook (PKCE `S256`, single-use `state`, loopback-only),
-   *  with one deliberate difference: the requested scope is `gmail.send` and nothing
-   *  else. Boba's bundled client cannot read Gmail — reading is IMAP (S8.3), a BYO
-   *  client (S8.5) or a `.eml` import — so the connection is stored send-only and
-   *  `covers(ReadSend)` stays false.
+   *  with one deliberate difference: the requested scopes follow the mode. Send-only
+   *  asks for `gmail.send` and nothing else. Read+send adds `gmail.readonly` and is
+   *  only offered with the user's own client (S8.5, AC1) — Boba's bundled client
+   *  cannot read Gmail until CASA, so it stays send-only.
    */
   emailConnectGmail: (input: ConnectGmailInput) =>
     typedError<ConnectionView, AppError_Serialize>(
@@ -1124,8 +1124,8 @@ export type ClientIdKind =
   | "byo";
 
 /**
- *  The Connect Gmail form: the address, and an optional BYO client id with its
- *  public installed-app secret (AC1).
+ *  The Connect Gmail form: the address, the mode, and an optional BYO client id
+ *  with its public installed-app secret (AC1).
  */
 export type ConnectGmailInput = {
   /**
@@ -1133,6 +1133,12 @@ export type ConnectGmailInput = {
    *  `gmail.readonly` scope to guess it (NFR-5).
    */
   address: string;
+  /**
+   *  Send-only (the default) or read+send. Read+send asks for
+   *  `gmail.readonly` and is only available with the user's own client
+   *  (S8.5, AC1).
+   */
+  mode?: EmailMode | null;
   /**  The user's own Google client id, when they have one ("advanced"). */
   client_id: string | null;
   /**

@@ -22,9 +22,8 @@ use boba_app::ports::repo::outbox::OutboxRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::secret::SecretPort;
 use boba_app::system::SystemClock;
-use boba_mail::gmail::{
-    self, BUNDLED_GMAIL_CLIENT_ID, BUNDLED_GMAIL_CLIENT_SECRET, GMAIL_SEND_SCOPE, GmailSecret,
-};
+use boba_mail::gmail::{self, BUNDLED_GMAIL_CLIENT_ID, BUNDLED_GMAIL_CLIENT_SECRET, GmailSecret};
+use boba_mail::gmail_read::{self, GmailReader};
 use boba_mail::graph::GraphMail;
 use boba_mail::imap::{self, Auth, ImapError, ImapSettings};
 use boba_mail::oauth::{
@@ -120,6 +119,11 @@ enum EmailFailure {
     /// this is refused before the browser opens, not after.
     #[error("the client secret is missing")]
     ClientSecret,
+    /// Read+send was asked for with Boba's bundled Google client. Reading Gmail
+    /// needs the user's own client until CASA (S8.5, AC1), so this is refused
+    /// before the browser opens.
+    #[error("reading Gmail needs the user's own client")]
+    GmailReadNeedsByo,
     /// The connection test before saving failed (AC2), for one of three reasons.
     #[error("the connection test failed: {0:?}")]
     Probe(ProbeOutcome),
@@ -138,7 +142,10 @@ impl EmailFailure {
     /// The machine-readable category.
     fn code(&self) -> ErrorCode {
         match self {
-            Self::Address | Self::NoBundledClient | Self::ClientSecret => ErrorCode::InvalidInput,
+            Self::Address
+            | Self::NoBundledClient
+            | Self::ClientSecret
+            | Self::GmailReadNeedsByo => ErrorCode::InvalidInput,
             Self::Browser => ErrorCode::Unavailable,
             Self::UnknownConnection => ErrorCode::NotFound,
             Self::NeedsReconsent => ErrorCode::Conflict,
@@ -167,6 +174,7 @@ impl EmailFailure {
             Self::Address => "errors.email.address",
             Self::NoBundledClient => "errors.email.no_bundled_client",
             Self::ClientSecret => "errors.email.client_secret",
+            Self::GmailReadNeedsByo => "errors.email.gmail_read_needs_byo",
             Self::Browser => "errors.email.browser",
             Self::UnknownConnection => "errors.email.unknown_connection",
             Self::NeedsReconsent => "errors.email.needs_reconsent",
@@ -274,13 +282,18 @@ pub async fn email_connect_outlook(
     Ok(ConnectionView::from(account))
 }
 
-/// The Connect Gmail form: the address, and an optional BYO client id with its
-/// public installed-app secret (AC1).
+/// The Connect Gmail form: the address, the mode, and an optional BYO client id
+/// with its public installed-app secret (AC1).
 #[derive(Debug, Clone, Deserialize, Type)]
 pub struct ConnectGmailInput {
     /// The mailbox address, as typed by the user. Boba never asks for a
     /// `gmail.readonly` scope to guess it (NFR-5).
     pub address: String,
+    /// Send-only (the default) or read+send. Read+send asks for
+    /// `gmail.readonly` and is only available with the user's own client
+    /// (S8.5, AC1).
+    #[serde(default)]
+    pub mode: Option<EmailMode>,
     /// The user's own Google client id, when they have one ("advanced").
     pub client_id: Option<String>,
     /// The public value Google prints next to that client id. Not confidential by
@@ -291,10 +304,10 @@ pub struct ConnectGmailInput {
 /// Connect Gmail with delegated OAuth (AC1).
 ///
 /// Same loopback flow as Outlook (PKCE `S256`, single-use `state`, loopback-only),
-/// with one deliberate difference: the requested scope is `gmail.send` and nothing
-/// else. Boba's bundled client cannot read Gmail — reading is IMAP (S8.3), a BYO
-/// client (S8.5) or a `.eml` import — so the connection is stored send-only and
-/// `covers(ReadSend)` stays false.
+/// with one deliberate difference: the requested scopes follow the mode. Send-only
+/// asks for `gmail.send` and nothing else. Read+send adds `gmail.readonly` and is
+/// only offered with the user's own client (S8.5, AC1) — Boba's bundled client
+/// cannot read Gmail until CASA, so it stays send-only.
 #[tauri::command]
 #[specta::specta]
 pub async fn email_connect_gmail(
@@ -314,13 +327,15 @@ pub async fn email_connect_gmail(
         BUNDLED_GMAIL_CLIENT_ID,
         BUNDLED_GMAIL_CLIENT_SECRET,
     )?;
+    // S8.5, AC1: reading is the user's own client or nothing.
+    let mode = gmail_mode(input.mode, client_id_kind)?;
 
     let (listener, redirect_uri) = loopback::bind().map_err(EmailFailure::from)?;
     let mut flow = PendingFlow::new(
         gmail::endpoints(),
         client_id.clone(),
         redirect_uri,
-        &[GMAIL_SEND_SCOPE],
+        &gmail_read::requested_scopes(mode),
     )
     .map_err(EmailFailure::from)?;
     if let Some(secret) = &client_secret {
@@ -332,7 +347,7 @@ pub async fn email_connect_gmail(
         accounts.as_ref(),
         MailProvider::Gmail,
         address,
-        EmailMode::SendOnly,
+        mode,
         client_id,
         client_id_kind,
         tokens.scopes.clone(),
@@ -401,6 +416,23 @@ fn gmail_client(
     match (clean(bundled_id), clean(bundled_secret)) {
         (Some(id), Some(secret)) => Ok((id, ClientIdKind::Bundled, Some(secret))),
         _ => Err(EmailFailure::NoBundledClient),
+    }
+}
+
+/// The mode a Gmail connection is authorised for (S8.5, AC1).
+///
+/// A form that says nothing connects send-only, as it did before reading
+/// existed. Read+send is only ever granted to the user's own client: Boba's
+/// bundled client must not ask Google for `gmail.readonly` until the CASA
+/// assessment exists, so the request is refused before the browser opens.
+fn gmail_mode(
+    requested: Option<EmailMode>,
+    client_id_kind: ClientIdKind,
+) -> Result<EmailMode, EmailFailure> {
+    match (requested, client_id_kind) {
+        (None, _) | (Some(EmailMode::SendOnly), _) => Ok(EmailMode::SendOnly),
+        (Some(EmailMode::ReadSend), ClientIdKind::Byo) => Ok(EmailMode::ReadSend),
+        (Some(EmailMode::ReadSend), ClientIdKind::Bundled) => Err(EmailFailure::GmailReadNeedsByo),
     }
 }
 
@@ -895,6 +927,8 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
         let now = i64::try_from(oauth::now_unix()).unwrap_or(i64::MAX);
         let graph = GraphMail::new(Arc::clone(&secrets), Arc::clone(&accounts))
             .map_err(|error| error.to_string())?;
+        let gmail_reader = GmailReader::new(Arc::clone(&secrets), Arc::clone(&accounts))
+            .map_err(|error| error.to_string())?;
 
         // S8.4 follow-up (orquestador): one connection's failure must not abort
         // the others. Each account runs its own pass; the errors are collected
@@ -904,6 +938,7 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
             if let Err(error) = sync_account(
                 &account,
                 &graph,
+                &gmail_reader,
                 secrets.as_ref(),
                 &scope,
                 now,
@@ -927,6 +962,7 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
 fn sync_account(
     account: &EmailAccount,
     graph: &GraphMail,
+    gmail: &GmailReader,
     secrets: &dyn SecretPort,
     scope: &MessageScope,
     now: i64,
@@ -958,9 +994,16 @@ fn sync_account(
             ))
             .map_err(|error| error.to_string())?
         }
-        // Gmail's bundled client has no read scope; the BYO read lands with
-        // S8.5.
-        MailProvider::Gmail => return Ok(()),
+        // S8.5: the Gmail API read, for a BYO read+send connection. The reader
+        // refuses a bundled or send-only row, and that refusal is this
+        // connection's failure, not a read that silently returns nothing.
+        MailProvider::Gmail => tauri::async_runtime::block_on(gmail.fetch_inbox(
+            &account.id,
+            since,
+            now,
+            SYNC_READ_LIMIT,
+        ))
+        .map_err(|error| error.to_string())?,
     };
     sync_pass(&account.id, messages, scope, now, after, sink, system)?;
     Ok(())
@@ -1501,6 +1544,42 @@ mod tests {
             gmail_client(None, None, None, None),
             Err(EmailFailure::NoBundledClient)
         ));
+    }
+
+    // --- Gmail read+send (S8.5, AC1) ---
+
+    /// AC1: reading Gmail needs the user's own Google client. The bundled client
+    /// stays send-only until CASA, whatever the form asked for.
+    #[test]
+    fn gmail_read_send_needs_the_users_own_client() {
+        assert!(
+            matches!(
+                gmail_mode(None, ClientIdKind::Bundled),
+                Ok(EmailMode::SendOnly)
+            ),
+            "a form that says nothing connects send-only"
+        );
+        assert!(matches!(
+            gmail_mode(Some(EmailMode::SendOnly), ClientIdKind::Byo),
+            Ok(EmailMode::SendOnly)
+        ));
+        assert!(matches!(
+            gmail_mode(Some(EmailMode::ReadSend), ClientIdKind::Byo),
+            Ok(EmailMode::ReadSend)
+        ));
+        assert!(matches!(
+            gmail_mode(Some(EmailMode::ReadSend), ClientIdKind::Bundled),
+            Err(EmailFailure::GmailReadNeedsByo)
+        ));
+    }
+
+    /// The refusal is a form error with its own key, so the UI can point the
+    /// user at "Advanced" instead of a generic failure (AD-3).
+    #[test]
+    fn the_gmail_read_refusal_is_a_form_error_with_its_own_key() {
+        let error = AppError::from(EmailFailure::GmailReadNeedsByo);
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(error.message_key, "errors.email.gmail_read_needs_byo");
     }
 
     /// An unknown id is a typed NotFound, never a panic (AD-3).
