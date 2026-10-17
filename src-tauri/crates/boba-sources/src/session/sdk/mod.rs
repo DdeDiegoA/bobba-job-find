@@ -14,10 +14,12 @@
 //! * "Sign out / clear session" deletes that Source's profile and cookies, and
 //!   is audited; cookies live until that action (or Reset everything).
 
+pub mod run;
 pub mod service;
 
 use serde::{Deserialize, Serialize};
 
+pub use run::{RunError, SessionRun, check};
 pub use service::{BoardView, SessionBoardError, SessionBoardService, SessionSnapshot};
 
 /// The warning copy version the UI shows and the opt-in records (FR-30).

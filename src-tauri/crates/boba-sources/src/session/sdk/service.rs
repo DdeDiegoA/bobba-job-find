@@ -67,6 +67,9 @@ impl SessionBoardError {
             Self::NotSessionBoard(_) => "errors.session.not_session_board",
             Self::WarningChanged { .. } => "errors.session.warning_changed",
             Self::WeakAckRequired => "errors.session.weak_ack",
+            // A profile a browser still holds open is a state conflict, not a
+            // store failure (S11.1b R2).
+            Self::Sessions(SessionError::InUse { .. }) => "errors.session.in_use",
             Self::Sources(_) | Self::System(_) | Self::Sessions(_) => "errors.session.store",
         }
     }

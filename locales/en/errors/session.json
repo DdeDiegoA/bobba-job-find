@@ -3,5 +3,6 @@
   "errors.session.not_session_board": "That source is not browsed in your session.",
   "errors.session.warning_changed": "The warning changed. Read it again before turning this source on.",
   "errors.session.weak_ack": "Tick the separate cookie acknowledgement before turning this source on.",
-  "errors.session.store": "The session settings could not be saved."
+  "errors.session.store": "The session settings could not be saved.",
+  "errors.session.in_use": "Close the browser window using this session, then sign out again."
 }

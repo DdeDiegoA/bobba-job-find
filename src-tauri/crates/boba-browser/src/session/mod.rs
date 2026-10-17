@@ -106,15 +106,73 @@ pub fn launch_plan(app_data: &Path, source_id: &str) -> Result<LaunchPlan, Sessi
     Ok(session_plan(profile, executable))
 }
 
+/// The file Chrome creates in a profile while it has it open (S11.1b R2).
+pub const LOCK_FILE: &str = "SingletonLock";
+
+/// The process Chrome recorded in its lock file, if the profile has one.
+///
+/// Chrome writes `<hostname>-<pid>`: on macOS and Linux `SingletonLock` is a
+/// symlink whose target is that string, on Windows it is a file holding it.
+/// A lock that does not parse is treated as absent — the profile then clears
+/// as it always did.
+pub fn lock_holder(profile: &Path) -> Option<u32> {
+    let path = profile.join(LOCK_FILE);
+    let target = match std::fs::read_link(&path) {
+        Ok(target) => target.to_string_lossy().into_owned(),
+        Err(_) => std::fs::read_to_string(&path).ok()?,
+    };
+    let (_, pid) = target.trim().rsplit_once('-')?;
+    let pid: u32 = pid.trim().parse().ok()?;
+    (pid > 0).then_some(pid)
+}
+
+/// Whether `pid` is a live process. An unknown answer counts as alive, so a
+/// sign-out is refused rather than deleting a profile a browser may hold.
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+        .output()
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(&pid.to_string()))
+        .unwrap_or(true)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_alive(_pid: u32) -> bool {
+    true
+}
+
 /// Plain-filesystem [`SessionStore`]: one profile folder per Source.
 pub struct ProfileSessions {
     app_data: PathBuf,
+    /// The liveness probe; a function so the clear rules are unit-tested
+    /// without a browser (the test hook below).
+    alive: fn(u32) -> bool,
 }
 
 impl ProfileSessions {
     pub fn new(app_data: impl Into<PathBuf>) -> Self {
         Self {
             app_data: app_data.into(),
+            alive: process_alive,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_probe(app_data: impl Into<PathBuf>, alive: fn(u32) -> bool) -> Self {
+        Self {
+            app_data: app_data.into(),
+            alive,
         }
     }
 }
@@ -122,6 +180,15 @@ impl ProfileSessions {
 impl SessionStore for ProfileSessions {
     fn clear(&self, source_id: &str) -> Result<ClearReport, SessionError> {
         let dir = profile_dir(&self.app_data, source_id)?;
+        // S11.1b R2: deleting a profile Chrome has open would race Chrome's own
+        // exit-time writes to the cookie store. Refuse; the user closes the
+        // window and asks again. A lock left by a crashed run is stale.
+        if let Some(pid) = lock_holder(&dir).filter(|pid| (self.alive)(*pid)) {
+            return Err(SessionError::InUse {
+                source_id: source_id.to_string(),
+                pid,
+            });
+        }
         let removed = match std::fs::symlink_metadata(&dir) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
             Err(error) => return Err(SessionError::Io(error.to_string())),
@@ -253,6 +320,73 @@ mod tests {
         let store = ProfileSessions::new(&root);
         assert!(!store.clear("linkedin").unwrap().removed);
         assert!(!store.clear("linkedin").unwrap().removed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn signing_out_refuses_while_a_live_browser_holds_the_profile() {
+        let root = scratch("clear-in-use");
+        let dir = root.join("browser-sessions").join("linkedin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cookies"), b"k=v").unwrap();
+        std::fs::write(dir.join(LOCK_FILE), "boba-host-4242").unwrap();
+        let store = ProfileSessions::with_probe(&root, |pid| pid == 4242);
+        assert_eq!(
+            store.clear("linkedin").unwrap_err(),
+            SessionError::InUse {
+                source_id: "linkedin".to_string(),
+                pid: 4242,
+            }
+        );
+        assert!(
+            dir.join("Cookies").exists(),
+            "a live session is never deleted"
+        );
+        // One Source being open never blocks signing out of another.
+        let indeed = root.join("browser-sessions").join("indeed");
+        std::fs::create_dir_all(&indeed).unwrap();
+        assert!(store.clear("indeed").unwrap().removed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_lock_left_by_a_crashed_browser_does_not_block_signing_out() {
+        let root = scratch("clear-stale");
+        let dir = root.join("browser-sessions").join("linkedin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Cookies"), b"k=v").unwrap();
+        std::fs::write(dir.join(LOCK_FILE), "boba-host-4242").unwrap();
+        let store = ProfileSessions::with_probe(&root, |_| false);
+        assert!(store.clear("linkedin").unwrap().removed);
+        assert!(!dir.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_lock_names_the_process_chrome_recorded() {
+        let root = scratch("lock-parse");
+        let dir = root.join("browser-sessions").join("linkedin");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(lock_holder(&dir), None, "no lock, no holder");
+        std::fs::write(dir.join(LOCK_FILE), "boba-host-1234").unwrap();
+        assert_eq!(lock_holder(&dir), Some(1234));
+        std::fs::write(dir.join(LOCK_FILE), "garbage").unwrap();
+        assert_eq!(
+            lock_holder(&dir),
+            None,
+            "an unreadable lock reads as absent"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_macos_and_linux_lock_is_a_symlink() {
+        let root = scratch("lock-link");
+        let dir = root.join("browser-sessions").join("linkedin");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink("boba-host-777", dir.join(LOCK_FILE)).unwrap();
+        assert_eq!(lock_holder(&dir), Some(777));
         let _ = std::fs::remove_dir_all(&root);
     }
 

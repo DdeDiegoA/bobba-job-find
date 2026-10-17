@@ -1,0 +1,10 @@
+{
+  "url": "https://www.linkedin.com/jobs/search/?keywords=rust",
+  "title": "Security check | LinkedIn",
+  "text": "Please verify you are human before continuing.",
+  "captcha": true,
+  "loginWall": false,
+  "unusualActivity": false,
+  "rateLimited": false,
+  "cards": []
+}

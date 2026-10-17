@@ -91,6 +91,8 @@ fn to_app(error: SessionBoardError) -> AppError {
         | SessionBoardError::WarningChanged { .. }
         | SessionBoardError::WeakAckRequired => ErrorCode::InvalidInput,
         SessionBoardError::Sessions(SessionError::NoBrowser) => ErrorCode::Unsupported,
+        // The browser still has that profile open (S11.1b R2).
+        SessionBoardError::Sessions(SessionError::InUse { .. }) => ErrorCode::Conflict,
         SessionBoardError::Sources(_)
         | SessionBoardError::System(_)
         | SessionBoardError::Sessions(_) => ErrorCode::Internal,
@@ -208,6 +210,14 @@ mod tests {
         let mapped = to_app(SessionBoardError::Sessions(SessionError::NoBrowser));
         assert_eq!(mapped.code, ErrorCode::Unsupported);
         assert_eq!(mapped.message_key, "errors.session.store");
+
+        // S11.1b R2: a live browser holds the profile; ask the user to close it.
+        let mapped = to_app(SessionBoardError::Sessions(SessionError::InUse {
+            source_id: "linkedin".into(),
+            pid: 4242,
+        }));
+        assert_eq!(mapped.code, ErrorCode::Conflict);
+        assert_eq!(mapped.message_key, "errors.session.in_use");
 
         let mapped = to_app(SessionBoardError::Sources(SourcesRepoError::Invalid(
             "linkedin".into(),
