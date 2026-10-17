@@ -9,7 +9,9 @@
 //!
 //! * **Running** — a `daily_search` `job_run` is executing right now (FR-47).
 //! * **Paused** — the user paused the schedule from the tray; the flag is
-//!   persisted (`schedule.paused`), so a restart keeps it.
+//!   persisted (`schedule.paused`), so a restart keeps it. It is read back on
+//!   the first repaint whose store answers: a passphrase unlock mounts the ports
+//!   after `install` has already run.
 //! * **Needs attention** — the store is locked (the user must unlock) or the
 //!   last daily search failed or was skipped while locked.
 //! * **Idle** — none of the above.
@@ -25,6 +27,7 @@
 //! core's event names are dotted, which Tauri refuses, so a listener would panic.
 //! The pulse is also what catches a run that failed before it could report.)
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -186,16 +189,19 @@ pub fn icon_rgba(status: TrayStatus) -> Vec<u8> {
 #[derive(Debug, Default)]
 struct Painted {
     last: Mutex<Option<&'static str>>,
+    /// Whether the stored pause flag has been read back. The store may still be
+    /// locked at install (passphrase mode), so the restore retries on every
+    /// repaint until the ports are there (F1).
+    restored: AtomicBool,
 }
 
-/// Wire the run controls once per process: restore the pause flag, paint the
-/// icon and start the pulse (NFR-10).
+/// Wire the run controls once per process: paint the icon (which restores the
+/// pause flag as soon as the store answers) and start the pulse (NFR-10).
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if app.try_state::<Painted>().is_some() {
         return;
     }
     let _ = app.manage(Painted::default());
-    restore_paused(app);
     paint_current(app);
     spawn_pulse(app.clone());
 }
@@ -243,23 +249,41 @@ fn persist_paused<R: Runtime>(app: &AppHandle<R>, paused: bool) {
     }
 }
 
-/// Bring back the pause the last launch left (AC2).
-fn restore_paused<R: Runtime>(app: &AppHandle<R>) {
+/// Bring the pause the last launch left back into the tray flag (AC2).
+///
+/// `false` means "could not read it yet" (the store is still locked at launch in
+/// passphrase mode), so the caller retries on the next repaint; `true` means the
+/// flag now matches the store, whether it had to change or not.
+fn restore_paused<R: Runtime>(app: &AppHandle<R>) -> bool {
     use boba_app::ports::repo::system::SystemRepo;
 
     let Ok(repo) = wiring::port::<dyn SystemRepo>(app) else {
-        return;
+        return false;
     };
-    let stored = repo
-        .setting_get(PAUSED_KEY)
-        .ok()
-        .flatten()
-        .is_some_and(|value| value == "true");
+    let Ok(stored) = repo.setting_get(PAUSED_KEY) else {
+        return false;
+    };
+    let stored = stored.is_some_and(|value| value == "true");
     let Some(state) = app.try_state::<tray::TrayState>() else {
-        return;
+        return false;
     };
     if stored != state.schedule_paused() {
         state.toggle_schedule();
+    }
+    true
+}
+
+/// Restore once per process, as soon as the store can answer (F1: after a
+/// passphrase unlock the ports mount long after `install` ran).
+fn try_restore<R: Runtime>(app: &AppHandle<R>) {
+    let Some(painted) = app.try_state::<Painted>() else {
+        return;
+    };
+    if painted.restored.load(Ordering::SeqCst) {
+        return;
+    }
+    if restore_paused(app) {
+        painted.restored.store(true, Ordering::SeqCst);
     }
 }
 
@@ -280,8 +304,16 @@ fn spawn_pulse<R: Runtime>(app: AppHandle<R>) {
 
 /// Paint the icon from the live state (AC2).
 fn paint_current<R: Runtime>(app: &AppHandle<R>) {
+    // The store may have opened since the last paint (the unlock flow mounts the
+    // ports); restoring here is what gets a paused schedule back after a restart.
+    try_restore(app);
     let status = current_status(app);
     let Some(painted) = app.try_state::<Painted>() else {
+        return;
+    };
+    let Some(icon) = app.tray_by_id(TRAY_ID) else {
+        // No tray (a test app, or a Linux desktop without AppIndicator): the
+        // cache stays unset, so an icon that appears later still gets painted.
         return;
     };
     let mut last = painted
@@ -291,16 +323,13 @@ fn paint_current<R: Runtime>(app: &AppHandle<R>) {
     if *last == Some(status.as_str()) {
         return;
     }
-    *last = Some(status.as_str());
 
-    let Some(icon) = app.tray_by_id(TRAY_ID) else {
-        // No tray (a test app, or a Linux desktop without AppIndicator): the
-        // state is still tracked, so nothing is lost if an icon appears later.
-        return;
-    };
     let image = tauri::image::Image::new_owned(icon_rgba(status), ICON_SIZE, ICON_SIZE);
-    if let Err(error) = icon.set_icon(Some(image)) {
-        tracing::warn!(%error, status = status.as_str(), "tray icon not painted");
+    match icon.set_icon(Some(image)) {
+        Ok(()) => *last = Some(status.as_str()),
+        Err(error) => {
+            tracing::warn!(%error, status = status.as_str(), "tray icon not painted");
+        }
     }
     // A coloured icon must not be treated as a monochrome template on macOS.
     #[cfg(target_os = "macos")]
@@ -436,6 +465,52 @@ mod tests {
         assert_eq!(current_status(app.handle()), TrayStatus::Paused);
         toggle_schedule(app.handle());
         assert!(!tray::schedule_paused(app.handle()));
+    }
+
+    /// F1: in passphrase mode the store is still locked when `install` runs, so
+    /// the pause must come back on the first repaint after the unlock mounts the
+    /// ports. Nothing here touches the keychain or real app data: the store is a
+    /// temp-dir file under a fixed key.
+    #[test]
+    fn the_pause_comes_back_after_a_late_unlock() {
+        use boba_app::ports::repo::system::SystemRepo;
+        use boba_store::db::{Store, StoreConfig};
+        use boba_store::keys::DbKey;
+        use boba_store::repos::audit::SqliteSystemRepo;
+
+        let app = mock_app();
+        let _ = app.manage(tray::TrayState::default());
+
+        // Locked at install: there is nothing to read yet, so the flag is off.
+        install(app.handle());
+        assert!(!tray::schedule_paused(app.handle()));
+
+        // The unlock mounts the ports on an open store that holds a pause.
+        let dir = std::env::temp_dir().join(format!("boba-s54-pause-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let key =
+            DbKey::from_hex("00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+                .expect("test key");
+        let config = StoreConfig::new(dir.join("boba.db"), dir.join("snapshots"));
+        let store = Arc::new(Store::open_with_key(config, key).expect("store opens"));
+        let system: Arc<dyn SystemRepo> = Arc::new(SqliteSystemRepo::new(
+            store,
+            crate::wiring::keychain_service(),
+        ));
+        crate::wiring::mount_port(app.handle(), system);
+        crate::wiring::port::<dyn SystemRepo>(app.handle())
+            .expect("system port")
+            .setting_put(PAUSED_KEY, "true", "seed")
+            .expect("seed the pause");
+
+        // The next repaint (the pulse, or any tray action) restores it.
+        refresh(app.handle());
+
+        assert!(
+            tray::schedule_paused(app.handle()),
+            "a paused schedule must come back after the unlock"
+        );
     }
 
     /// NFR-10: the idle tick is a slow pulse, not a busy loop.
