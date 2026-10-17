@@ -48,6 +48,8 @@ macro_rules! boba_commands {
             crate::commands::agent::agent_engine_choose,
             crate::commands::agent::agent_test_call,
             crate::commands::agent::agent_models,
+            crate::commands::apply::apply_email_review,
+            crate::commands::apply::apply_email_send,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

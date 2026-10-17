@@ -6,5 +6,14 @@
   "errors.apply.invalid_id": "Ese id de postulación no parece válido.",
   "errors.apply.export_path": "Boba no encontró una carpeta para el kit.",
   "errors.apply.export_write": "Boba no pudo escribir los PDF. Revisa el disco e inténtalo otra vez.",
-  "errors.apply.not_ready": "Algunos documentos aún no están verificados. Abre el Studio, corrige las comprobaciones y vuelve a renderizarlos antes de postular."
+  "errors.apply.not_ready": "Algunos documentos aún no están verificados. Abre el Studio, corrige las comprobaciones y vuelve a renderizarlos antes de postular.",
+  "errors.apply.no_email_channel": "Esta oferta no tiene dirección de postulación, así que no hay correo que enviar.",
+  "errors.apply.already_sent": "Esta postulación ya se envió. Boba nunca envía dos veces la misma postulación.",
+  "errors.apply.needs_check": "Un envío anterior no respondió. Revisa tu carpeta de Enviados antes de volver a enviar.",
+  "errors.apply.confirm_resend": "Un envío anterior pudo haberse realizado. Confirma antes de enviarlo otra vez.",
+  "errors.apply.empty_subject": "Ponle un asunto al correo primero.",
+  "errors.apply.send_unreachable": "No se pudo alcanzar tu proveedor de correo, así que el correo no se envió. Revisa tu conexión e inténtalo de nuevo.",
+  "errors.apply.send_rejected": "Tu proveedor de correo rechazó el mensaje. Revisa la dirección y tu cuenta, y vuelve a intentarlo.",
+  "errors.apply.reauthorize": "Tu conexión de correo necesita autorizarse otra vez. Reconéctala e inténtalo de nuevo.",
+  "errors.apply.unknown_account": "Elige un buzón conectado para enviar."
 }

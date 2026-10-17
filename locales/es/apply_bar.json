@@ -26,6 +26,22 @@
     "copy": "Copiar",
     "copied": "Copiado"
   },
+  "email": {
+    "title": "Enviar por email",
+    "loading": "Preparando el correo…",
+    "unavailable": "No se pudo preparar el borrador del correo.",
+    "to": "Para",
+    "from": "Enviar desde",
+    "no_account": "Conecta un buzón en Conexiones para enviar postulaciones.",
+    "subject": "Asunto",
+    "body": "Mensaje",
+    "attachments": "Adjuntos",
+    "no_attachments": "Aún no hay PDF verificados: envía después de renderizar tus documentos.",
+    "send": "Enviar postulación",
+    "send_anyway": "Enviar de todos modos",
+    "not_ready": "Corrige los documentos de abajo en el Studio antes de enviar.",
+    "sent": "Enviado. Tu postulación pasó a Postulada (mensaje {id})."
+  },
   "pending": "Sin verificar aún: {kinds}. Corrige las comprobaciones y renderiza en el Studio.",
   "kinds": {
     "cv": "CV",

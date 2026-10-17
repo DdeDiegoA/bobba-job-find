@@ -6,5 +6,14 @@
   "errors.apply.invalid_id": "That application id does not look right.",
   "errors.apply.export_path": "Boba could not find a folder for the kit.",
   "errors.apply.export_write": "Boba could not write the PDFs. Check the disk and try again.",
-  "errors.apply.not_ready": "Some documents are not verified yet. Open the Studio, fix the checks and render them before applying."
+  "errors.apply.not_ready": "Some documents are not verified yet. Open the Studio, fix the checks and render them before applying.",
+  "errors.apply.no_email_channel": "This posting has no apply address, so there is no email to send.",
+  "errors.apply.already_sent": "This application was already sent. Boba never sends the same application twice.",
+  "errors.apply.needs_check": "An earlier send never reported back. Check your Sent folder before sending again.",
+  "errors.apply.confirm_resend": "An earlier send may have gone through. Confirm before sending it again.",
+  "errors.apply.empty_subject": "Give the email a subject first.",
+  "errors.apply.send_unreachable": "Your mail provider could not be reached, so the email was not sent. Check your connection and try again.",
+  "errors.apply.send_rejected": "Your mail provider refused the message. Check the address and your account, then try again.",
+  "errors.apply.reauthorize": "Your mail connection needs to be authorised again. Reconnect it and try again.",
+  "errors.apply.unknown_account": "Choose a connected mailbox to send from."
 }

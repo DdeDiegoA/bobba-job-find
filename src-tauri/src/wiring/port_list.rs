@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use boba_app::apply::engine::outbox::OutboxRepo;
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::cli::CliInstallsPort;
 use boba_app::ports::mail::MailPort;
@@ -67,6 +68,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     }
     // The apply area owns `application` + `status_event` (S9.1).
     mount_port::<dyn ApplyRepo>(app, store.clone());
+    // The apply outbox owns `apply_attempt` (S9.3): the evidence an Email Apply
+    // retry reads before it sends again.
+    mount_port::<dyn OutboxRepo>(app, store.clone());
     // The scoring owner reads `score_card` (S6.4 is its first reader: the Inbox
     // shows the newest card per Offer; the run slices write them).
     mount_port::<dyn ScoringRepo>(app, store.clone());

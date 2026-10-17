@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { ChannelView, KitAnswerView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
+import EmailApplyPanel from "./email-apply";
 import { useApplyView, useExportPdfs, useMarkApplied } from "./use-apply-bar";
 
 /**
@@ -93,6 +94,10 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
           ))}
         </ul>
       </div>
+
+      {bar.channels.some((channel) => channel.kind === "email_apply") ? (
+        <EmailApplyPanel applicationId={applicationId} />
+      ) : null}
 
       {kinds.length > 0 ? (
         <p role="alert" className="text-xs text-warning" data-pending={bar.pending.join(",")}>

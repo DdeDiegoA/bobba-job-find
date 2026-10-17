@@ -1,7 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commands, type ManualView } from "@/lib/ipc/bindings";
+import {
+  type AppError,
+  type ConnectionView,
+  commands,
+  type EmailApplyView,
+  type ManualView,
+  type SendReceipt,
+} from "@/lib/ipc/bindings";
 import "@/lib/i18n";
 import StudioApplyBar from "./index";
 
@@ -16,10 +23,14 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyView: vi.fn(),
     applyMarkApplied: vi.fn(),
     applyExportPdfs: vi.fn(),
+    applyEmailReview: vi.fn(),
+    applyEmailSend: vi.fn(),
+    emailAccounts: vi.fn(),
   },
 }));
 
 const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
+const failed = (error: AppError) => Promise.resolve({ status: "error" as const, error });
 
 function view(overrides: Partial<ManualView> = {}): ManualView {
   return {
@@ -43,6 +54,45 @@ function view(overrides: Partial<ManualView> = {}): ManualView {
   };
 }
 
+const account = (over: Partial<ConnectionView> = {}): ConnectionView => ({
+  id: "eml_1",
+  provider: "microsoft_graph",
+  address: "me@example.com",
+  mode: "send_only",
+  client_id_kind: "bundled",
+  scopes: ["Mail.Send"],
+  connected_at: "2026-10-16T00:00:00Z",
+  ...over,
+});
+
+function emailView(overrides: Partial<EmailApplyView> = {}): EmailApplyView {
+  return {
+    application_id: "app_1",
+    recipient: "jobs@nimbus.example",
+    subject: "Application: Backend Engineer",
+    body_text: "Dear Nimbus team,",
+    attachments: [{ file_name: "cv-v2.pdf", kind: "cv", version: 2, bytes: 2048 }],
+    answers: [],
+    pending: [],
+    ready: true,
+    last_attempt: null,
+    ...overrides,
+  };
+}
+
+const receipt: SendReceipt = {
+  attempt_id: "att_01",
+  message_id: "<att_01@boba.local>",
+  status: "applied",
+};
+
+/** The Send button, once the mailbox list has loaded and it is clickable. */
+async function sendButton(name = "Send application"): Promise<HTMLButtonElement> {
+  const button = (await screen.findByRole("button", { name })) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
+}
+
 function renderBar() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -54,6 +104,8 @@ function renderBar() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(commands.emailAccounts).mockReturnValue(ok([account()]) as never);
+  vi.mocked(commands.applyEmailReview).mockReturnValue(ok(emailView()) as never);
 });
 
 describe("StudioApplyBar", () => {
@@ -120,5 +172,85 @@ describe("StudioApplyBar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save PDFs" }));
 
     expect(await screen.findByText("Saved cv-v2.pdf")).toBeTruthy();
+  });
+
+  it("sends the reviewed email from the chosen mailbox", async () => {
+    vi.mocked(commands.applyView).mockReturnValue(ok(view()) as never);
+    vi.mocked(commands.applyEmailSend).mockReturnValue(ok(receipt) as never);
+    renderBar();
+
+    expect(await screen.findByText(/cv-v2\.pdf/)).toBeTruthy();
+    expect(document.querySelector("[data-email-recipient]")?.textContent).toContain(
+      "jobs@nimbus.example",
+    );
+
+    fireEvent.click(await sendButton());
+
+    await waitFor(() =>
+      expect(commands.applyEmailSend).toHaveBeenCalledWith("app_1", {
+        account_id: "eml_1",
+        subject: null,
+        body_text: null,
+        confirm_resend: false,
+      }),
+    );
+    expect(await screen.findByText(/Sent\./)).toBeTruthy();
+  });
+
+  it("sends the user's edits when they change the subject or body", async () => {
+    vi.mocked(commands.applyView).mockReturnValue(ok(view()) as never);
+    vi.mocked(commands.applyEmailSend).mockReturnValue(ok(receipt) as never);
+    renderBar();
+
+    const subject = (await screen.findByLabelText("Subject")) as HTMLInputElement;
+    fireEvent.change(subject, { target: { value: "Hello Nimbus" } });
+    fireEvent.click(await sendButton());
+
+    await waitFor(() =>
+      expect(commands.applyEmailSend).toHaveBeenCalledWith(
+        "app_1",
+        expect.objectContaining({ subject: "Hello Nimbus" }),
+      ),
+    );
+  });
+
+  it("asks for the user's word before a resend after an unanswered attempt", async () => {
+    const confirm: AppError = {
+      code: "conflict",
+      message_key: "errors.apply.confirm_resend",
+    };
+    vi.mocked(commands.applyView).mockReturnValue(ok(view()) as never);
+    vi.mocked(commands.applyEmailSend)
+      .mockReturnValueOnce(failed(confirm) as never)
+      .mockReturnValue(ok(receipt) as never);
+    renderBar();
+
+    fireEvent.click(await sendButton());
+
+    const again = await sendButton("Send anyway");
+    expect(screen.getByText(/may have gone through/)).toBeTruthy();
+
+    fireEvent.click(again);
+
+    await waitFor(() =>
+      expect(commands.applyEmailSend).toHaveBeenLastCalledWith(
+        "app_1",
+        expect.objectContaining({ confirm_resend: true }),
+      ),
+    );
+  });
+
+  it("blocks Send while a document in the package is not verified", async () => {
+    vi.mocked(commands.applyView).mockReturnValue(ok(view()) as never);
+    vi.mocked(commands.applyEmailReview).mockReturnValue(
+      ok(emailView({ ready: false, attachments: [], pending: ["cv"] })) as never,
+    );
+    renderBar();
+
+    const send = (await screen.findByRole("button", {
+      name: "Send application",
+    })) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(screen.getByText(/Fix the documents below/)).toBeTruthy();
   });
 });
