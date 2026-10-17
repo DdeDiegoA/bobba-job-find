@@ -43,6 +43,7 @@ use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;
 use boba_domain::application::Application;
+use boba_domain::apply::outbox::OutboxState;
 use boba_domain::apply::policy::{self, PolicyCandidate, RuleChannel};
 use boba_domain::posting::Offer;
 use boba_domain::scoring::gates::{Confidence, Verdict as GateVerdict};
@@ -644,49 +645,170 @@ pub fn spawn_outbox_sweep<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     });
 }
 
+/// One release sweep at a time, process-wide (review B-3): the scheduler tick
+/// and the Today button can overlap, and only one may read a Source's spacing
+/// window. A second sweep returns at once instead of blocking the tick.
+#[derive(Debug)]
+struct SweepLock(std::sync::atomic::AtomicBool);
+
+impl SweepLock {
+    fn try_enter(&self) -> Option<SweepGuard<'_>> {
+        self.0
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .ok()
+            .map(|_| SweepGuard(self))
+    }
+}
+
+/// Releases the sweep lock when the sweep ends, however it ends.
+struct SweepGuard<'a>(&'a SweepLock);
+
+impl Drop for SweepGuard<'_> {
+    fn drop(&mut self) {
+        self.0.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+static SWEEP: SweepLock = SweepLock(std::sync::atomic::AtomicBool::new(false));
+
 /// One release sweep. A hold that ended is re-checked against the policy, and a
 /// send that dies here leaves the attempt evidence the review screen reads.
 async fn release_due<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> AppResult<Vec<OutboxItemView>> {
+    let Some(_running) = SWEEP.try_enter() else {
+        return Ok(Vec::new());
+    };
     let service = outbox_service(app)?;
-    let mut touched = Vec::new();
-    for item in service.due().map_err(outbox_error)? {
-        // Only Email Apply has an automatic channel in this build: an ATS form
-        // waits for the user (S9.4) and the Session Board is S11.3's. The item
-        // goes to the review queue rather than pretending to send.
-        if item.channel != "email" {
-            touched.push(
-                service
-                    .park(&item.id, "channel_unavailable")
-                    .map_err(outbox_error)?,
-            );
-            continue;
-        }
-        let channel = RuleChannel::parse(&item.channel)
-            .ok_or_else(|| AppError::invalid_input("errors.apply.rule_invalid"))?;
-        let candidate = candidate_for(app, &item.application_id, channel, None, None)?;
-        match service
-            .release(&item.id, &candidate, spacing_sample())
-            .map_err(outbox_error)?
-        {
-            Release::Review(_) => touched.push(service.item_view(&item.id).map_err(outbox_error)?),
-            // The Source's anti-ban gap is not over: the item stays held and the
-            // next tick tries again (FR-91).
-            Release::Deferred { .. } => {}
-            Release::Sending(stored) => {
-                touched.push(send_email(app, &service, &stored, &candidate).await?)
+    let due = service.due().map_err(outbox_error)?;
+    Ok(sweep_all(
+        due,
+        |item| sweep_item(app, &service, item),
+        |item, error| {
+            // One broken item never stalls the rest (review B-1). It leaves the
+            // automatic path for good: the user reviews it by hand.
+            tracing::warn!(outbox = %item.id, %error, "outbox: due item left for review");
+            // A held item lost its context before the claim; a `releasing` one
+            // failed after it (`send_email` already tried to park it).
+            let note = if item.state == OutboxState::Held {
+                "context_missing"
+            } else {
+                "send_failed"
+            };
+            if let Err(error) = service.park(&item.id, note) {
+                tracing::warn!(outbox = %item.id, %error, "outbox: item could not be parked");
             }
-        }
-    }
-    Ok(touched)
+        },
+    )
+    .await)
 }
 
-/// Send one released Email Apply and record how it ended.
+/// Run the per-item sweep, isolating failures: an item whose context is gone is
+/// parked and every later due item still gets its turn (review B-1).
+async fn sweep_all<T, F, Fut, E>(
+    items: Vec<boba_domain::apply::outbox::OutboxItem>,
+    mut sweep: F,
+    mut on_error: impl FnMut(&boba_domain::apply::outbox::OutboxItem, &E),
+) -> Vec<T>
+where
+    F: FnMut(boba_domain::apply::outbox::OutboxItem) -> Fut,
+    Fut: std::future::Future<Output = Result<Option<T>, E>>,
+{
+    let mut touched = Vec::new();
+    for item in items {
+        match sweep(item.clone()).await {
+            Ok(Some(value)) => touched.push(value),
+            Ok(None) => {}
+            Err(error) => on_error(&item, &error),
+        }
+    }
+    touched
+}
+
+/// Release one due item, if it still may go; `None` when the Source's spacing
+/// (or the clock) asked it to wait.
+async fn sweep_item<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    service: &OutboxService,
+    item: boba_domain::apply::outbox::OutboxItem,
+) -> AppResult<Option<OutboxItemView>> {
+    // Only Email Apply has an automatic channel in this build: an ATS form waits
+    // for the user (S9.4) and the Session Board is S11.3's. The item goes to the
+    // review queue rather than pretending to send.
+    if item.channel != "email" {
+        return Ok(Some(
+            service
+                .park(&item.id, "channel_unavailable")
+                .map_err(outbox_error)?,
+        ));
+    }
+    let channel = RuleChannel::parse(&item.channel)
+        .ok_or_else(|| AppError::invalid_input("errors.apply.rule_invalid"))?;
+    let candidate = candidate_for(app, &item.application_id, channel, None, None)?;
+    match service
+        .release(&item.id, &candidate, spacing_sample())
+        .map_err(outbox_error)?
+    {
+        Release::Review(_) => Ok(Some(service.item_view(&item.id).map_err(outbox_error)?)),
+        // The Source's anti-ban gap is not over: the item stays held and the
+        // next tick tries again (FR-91).
+        Release::Deferred { .. } => Ok(None),
+        Release::Sending {
+            item: stored,
+            rule_id,
+        } => Ok(Some(
+            send_email(app, service, &stored, &rule_id, &candidate).await?,
+        )),
+    }
+}
+
+/// Send one released Email Apply and record how it ended. An error here must
+/// never leave the claimed item `releasing` until the next launch (review B-2),
+/// so every error path parks it first.
 async fn send_email<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     service: &OutboxService,
     item: &boba_domain::apply::outbox::OutboxItem,
+    rule_id: &str,
+    candidate: &PolicyCandidate,
+) -> AppResult<OutboxItemView> {
+    with_cleanup(
+        || deliver_email(app, service, item, rule_id, candidate),
+        || {
+            if let Err(error) = service.finish(&item.id, Finish::NeedsReview) {
+                tracing::warn!(outbox = %item.id, %error, "outbox: could not park a failed send");
+            }
+        },
+    )
+    .await
+}
+
+/// Run one delivery, and on **any** error run the cleanup before returning it
+/// (review B-2): a claimed item never stays `releasing` until the next launch.
+async fn with_cleanup<T, F, Fut, C>(deliver: F, cleanup: C) -> AppResult<T>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = AppResult<T>>,
+    C: FnOnce(),
+{
+    let result = deliver().await;
+    if result.is_err() {
+        cleanup();
+    }
+    result
+}
+
+/// The send itself: mailbox, pre-submit check, cap entry, channel.
+async fn deliver_email<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    service: &OutboxService,
+    item: &boba_domain::apply::outbox::OutboxItem,
+    rule_id: &str,
     candidate: &PolicyCandidate,
 ) -> AppResult<OutboxItemView> {
     let account = wiring::port::<dyn EmailRepo>(app)?
@@ -695,7 +817,8 @@ async fn send_email<R: tauri::Runtime>(
         .into_iter()
         .next();
     let Some(account) = account else {
-        // No mailbox: the user connects one and sends by hand meanwhile.
+        // No mailbox: nothing is sent and nothing is counted; the user connects
+        // one and sends by hand meanwhile (review B-3).
         return service.park(&item.id, "no_mailbox").map_err(outbox_error);
     };
     // The last enforcement point (S9.6 AC2): the Kill Switch and `decide()` run
@@ -707,6 +830,11 @@ async fn send_email<R: tauri::Runtime>(
     {
         return service.item_view(&item.id).map_err(outbox_error);
     }
+    // The cap entry is written now: the mailbox exists and the policy said Go,
+    // so this send is on its way (S9.6 AC2).
+    service
+        .record_send(&item.id, rule_id)
+        .map_err(outbox_error)?;
     let (application, offer) = context(app, &item.application_id)?;
     let request = SendRequest {
         account_id: account.id,
@@ -780,7 +908,7 @@ fn kit_dir(app: &tauri::AppHandle, application_id: &str) -> AppResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boba_domain::apply::outbox::{DryRunViolation, HoldViolation};
+    use boba_domain::apply::outbox::{DryRunViolation, HoldViolation, OutboxItem};
 
     #[test]
     fn ats_errors_map_to_codes_and_i18n_keys() {
@@ -933,5 +1061,91 @@ mod tests {
             assert_eq!(mapped.code, code);
             assert_eq!(mapped.message_key, key);
         }
+    }
+
+    /// Poll a future to completion on one thread (the same helper the engine
+    /// tests use): the sweep's fakes answer immediately.
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        use std::task::{Context, Poll, Waker};
+
+        let mut context = Context::from_waker(Waker::noop());
+        let mut future = std::pin::pin!(future);
+        loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        }
+    }
+
+    fn due_item(id: &str) -> OutboxItem {
+        OutboxItem {
+            id: id.to_string(),
+            application_id: "app_01".to_string(),
+            rule_id: "rule_1".to_string(),
+            source_id: "remotive".to_string(),
+            channel: "email".to_string(),
+            company_key: "acme".to_string(),
+            title: "Backend Engineer".to_string(),
+            company: "Acme".to_string(),
+            state: OutboxState::Held,
+            hold_minutes: 30,
+            release_at: "2026-10-17T09:00:00Z".to_string(),
+            subject_override: None,
+            body_override: None,
+            note: None,
+            created_at: "2026-10-17T08:30:00Z".to_string(),
+            updated_at: "2026-10-17T08:30:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn one_broken_due_item_never_blocks_the_others() {
+        let items = vec![due_item("out_1"), due_item("out_2"), due_item("out_3")];
+        let mut parked = Vec::new();
+        let touched = block_on(sweep_all(
+            items,
+            |item| {
+                let id = item.id.clone();
+                async move {
+                    if id == "out_2" {
+                        Err("context missing")
+                    } else {
+                        Ok(Some(id))
+                    }
+                }
+            },
+            |item, error| parked.push(format!("{}:{error}", item.id)),
+        ));
+
+        assert_eq!(touched, vec!["out_1".to_string(), "out_3".to_string()]);
+        assert_eq!(parked, vec!["out_2:context missing".to_string()]);
+    }
+
+    #[test]
+    fn only_one_sweep_runs_at_a_time() {
+        let lock = SweepLock(std::sync::atomic::AtomicBool::new(false));
+        let first = lock.try_enter().expect("the first sweep enters");
+        assert!(lock.try_enter().is_none(), "a second sweep returns at once");
+        drop(first);
+        assert!(lock.try_enter().is_some(), "the lock is free again");
+    }
+
+    #[test]
+    fn an_error_after_the_claim_always_runs_the_cleanup() {
+        let cleaned = std::cell::Cell::new(0);
+        let failed = block_on(with_cleanup(
+            || async { Err::<(), AppError>(AppError::invalid_input("errors.apply.store")) },
+            || cleaned.set(cleaned.get() + 1),
+        ));
+        assert!(failed.is_err());
+        assert_eq!(cleaned.get(), 1, "the claimed item is parked (review B-2)");
+
+        let sent = block_on(with_cleanup(
+            || async { Ok::<_, AppError>(7) },
+            || cleaned.set(cleaned.get() + 1),
+        ));
+        assert_eq!(sent.unwrap(), 7);
+        assert_eq!(cleaned.get(), 1, "a successful send cleans nothing");
     }
 }

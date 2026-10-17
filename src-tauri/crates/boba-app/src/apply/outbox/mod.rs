@@ -116,9 +116,14 @@ pub enum Enqueued {
 /// What [`OutboxService::release`] decided when a hold ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Release {
-    /// The policy still says Auto and the ledger has the entry: the channel may
-    /// send. The item is `releasing` until [`OutboxService::finish`].
-    Sending(Box<OutboxItem>),
+    /// The policy still says Auto: the item is claimed (`releasing`) and the
+    /// caller decides whether the send is certain. [`OutboxService::record_send`]
+    /// writes the cap entry only once it is.
+    Sending {
+        item: Box<OutboxItem>,
+        /// The rule whose decision allowed this send (the cap row names it).
+        rule_id: String,
+    },
     /// The policy no longer says Auto: the item moved to the review queue.
     Review(Box<OutboxItem>),
     /// The previous automatic send to this Source was too recent (FR-91): the
@@ -564,8 +569,6 @@ impl OutboxService {
             )?;
             return Ok(Release::Review(Box::new(stored)));
         };
-        let channel = RuleChannel::parse(&item.channel)
-            .ok_or_else(|| OutboxError::UnknownChannel(item.channel.clone()))?;
         // FR-91's anti-ban spacing: one Source never takes two automatic sends
         // back to back. The item stays held for the next sweep.
         let gap = outbox::min_source_gap_minutes(&item.channel);
@@ -585,26 +588,51 @@ impl OutboxService {
         if !self.items.outbox_claim(&item.id, &format_time(now))? {
             return Err(OutboxError::NotWaiting(item.id));
         }
-        // The cap entry is written before the channel starts, so a send that
-        // dies mid-flight still counts (S9.6 AC2). A ledger write that fails
-        // gives the item back to the hold instead of stranding it.
+        // No cap entry yet: the caller still has to prove a mailbox exists and
+        // pass the pre-submit check. `record_send` writes it only then, so a
+        // send that never leaves does not consume a cap slot (review B-3).
+        let stored = self
+            .items
+            .outbox_get(&item.id)?
+            .ok_or_else(|| OutboxError::UnknownItem(item.id.clone()))?;
+        Ok(Release::Sending {
+            item: Box::new(stored),
+            rule_id,
+        })
+    }
+
+    /// Write the cap entry for a send that is certain (S9.6 AC2, review B-3).
+    ///
+    /// It runs **after** the mailbox check and the pre-submit check, and
+    /// **before** the channel starts, so the entry counts a send that really is
+    /// on its way. A ledger write that fails gives the item back to the hold
+    /// instead of stranding it in `releasing`.
+    pub fn record_send(&self, id: &str, rule_id: &str) -> Result<OutboxItem, OutboxError> {
+        let item = self
+            .items
+            .outbox_get(id)?
+            .ok_or_else(|| OutboxError::UnknownItem(id.to_string()))?;
+        if item.state != OutboxState::Releasing {
+            return Err(OutboxError::NotWaiting(id.to_string()));
+        }
+        let channel = RuleChannel::parse(&item.channel)
+            .ok_or_else(|| OutboxError::UnknownChannel(item.channel.clone()))?;
+        let now = format_time(self.now()?);
         if let Err(error) = self.rules.record_auto_send(
-            &rule_id,
+            rule_id,
             &item.application_id,
             &item.source_id,
             channel,
             &item.company_key,
         ) {
-            let _ =
-                self.items
-                    .outbox_set_state(&item.id, OutboxState::Held, None, &format_time(now));
+            let _ = self
+                .items
+                .outbox_set_state(&item.id, OutboxState::Held, None, &now);
             return Err(OutboxError::Rules(error));
         }
-        let stored = self
-            .items
+        self.items
             .outbox_get(&item.id)?
-            .ok_or_else(|| OutboxError::UnknownItem(item.id.clone()))?;
-        Ok(Release::Sending(Box::new(stored)))
+            .ok_or_else(|| OutboxError::UnknownItem(item.id.clone()))
     }
 
     /// The check that runs **just before the channel submits** (S9.6 AC2): the
@@ -1572,7 +1600,7 @@ mod tests {
     }
 
     #[test]
-    fn a_release_records_the_send_before_the_channel_starts() {
+    fn the_cap_entry_waits_until_the_send_is_certain() {
         let items = Arc::new(FakeOutbox::default());
         items.seed_dry(activated("rule_1"));
         let rules = Arc::new(FakeAutoRules::with_rules(vec![rule("rule_1")]));
@@ -1585,15 +1613,45 @@ mod tests {
         };
 
         let released = service.release(&item.id, &candidate(), 0).unwrap();
-        let Release::Sending(stored) = released else {
+        let Release::Sending {
+            item: stored,
+            rule_id,
+        } = released
+        else {
             panic!("the policy still says Auto");
         };
         assert_eq!(stored.state, OutboxState::Releasing);
+        assert!(
+            rules.ledger().is_empty(),
+            "nothing is counted before the send is certain (review B-3)"
+        );
+
+        service.record_send(&stored.id, &rule_id).unwrap();
         let ledger = rules.ledger();
-        assert_eq!(ledger.len(), 1);
+        assert_eq!(ledger.len(), 1, "the send is counted before it leaves");
         assert_eq!(ledger[0].rule_id, "rule_1");
         assert_eq!(ledger[0].application_id, "app_01");
         assert_eq!(ledger[0].channel, RuleChannel::Email);
+    }
+
+    #[test]
+    fn a_send_is_recorded_only_once_and_only_while_releasing() {
+        let items = Arc::new(FakeOutbox::default());
+        items.seed_dry(activated("rule_1"));
+        let rules = Arc::new(FakeAutoRules::with_rules(vec![rule("rule_1")]));
+        let service = service(items.clone(), rules.clone(), system(), None);
+        let Enqueued::Held { item } = service
+            .enqueue("app_01", &candidate(), "Backend Engineer", "Acme", 0)
+            .unwrap()
+        else {
+            panic!("held");
+        };
+        // Still `held`: the caller has not claimed it, so nothing is counted.
+        assert!(matches!(
+            service.record_send(&item.id, "rule_1"),
+            Err(OutboxError::NotWaiting(_))
+        ));
+        assert!(rules.ledger().is_empty());
     }
 
     #[test]
@@ -1839,6 +1897,10 @@ mod tests {
             Submit::Stop
         );
         assert_eq!(items.items()[0].state, OutboxState::NeedsReview);
+        assert!(
+            rules.ledger().is_empty(),
+            "a stopped submit never counts as a send (review B-3)"
+        );
     }
 
     #[test]

@@ -48,5 +48,6 @@
   "note.review": "La política lo detuvo. Revísalo y envíalo tú si todavía encaja.",
   "note.channel_unavailable": "Boba aún no envía por este canal de forma automática. Revísalo y envíalo tú.",
   "note.no_mailbox": "Conecta un buzón para enviar esto. Mientras tanto, revísalo.",
-  "note.kill_switch": "El interruptor de emergencia detuvo este envío. Revísalo y envíalo tú cuando lo desactives."
+  "note.kill_switch": "El interruptor de emergencia detuvo este envío. Revísalo y envíalo tú cuando lo desactives.",
+  "note.context_missing": "Boba ya no encuentra esta postulación, así que salió de la bandeja de salida. No se envió nada."
 }

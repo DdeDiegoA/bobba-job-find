@@ -48,5 +48,6 @@
   "note.review": "The policy held it back. Review and send it yourself if it still fits.",
   "note.channel_unavailable": "Boba does not send on this channel automatically yet. Review it and send it yourself.",
   "note.no_mailbox": "Connect a mailbox to send this. Review it meanwhile.",
-  "note.kill_switch": "The Kill Switch stopped this send. Review it and send it yourself when you turn the switch off."
+  "note.kill_switch": "The Kill Switch stopped this send. Review it and send it yourself when you turn the switch off.",
+  "note.context_missing": "Boba could not find this application any more, so it left the Outbox. Nothing was sent."
 }
