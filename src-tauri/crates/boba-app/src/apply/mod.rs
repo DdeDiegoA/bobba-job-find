@@ -10,3 +10,4 @@ pub mod nudges;
 pub mod outbox;
 pub mod rules;
 pub mod session;
+pub mod session_auto;

@@ -21,6 +21,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyRulesSetGlobalCap: vi.fn(),
     applyRulesExplain: vi.fn(),
     trackerBoard: vi.fn(),
+    sessionAutoSnapshot: vi.fn(),
   },
 }));
 
@@ -87,6 +88,8 @@ beforeEach(() => {
   vi.mocked(commands.applyRulesSetGlobalCap).mockReset();
   vi.mocked(commands.applyRulesExplain).mockReset();
   vi.mocked(commands.trackerBoard).mockReset();
+  vi.mocked(commands.sessionAutoSnapshot).mockReset();
+  vi.mocked(commands.sessionAutoSnapshot).mockImplementation(() => ok([]));
 
   stored = snapshot();
   vi.mocked(commands.applyRulesSnapshot).mockImplementation(() => ok(stored));

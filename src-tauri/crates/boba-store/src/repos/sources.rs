@@ -9,6 +9,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use boba_app::ports::repo::sources::{SourcesRepo, SourcesRepoError};
+use boba_domain::apply::session_policy::SessionAutoOptIn;
 use boba_domain::source::{OptInRecord, RunStatus, SourceRecord, SourceRunRecord};
 
 use crate::db::{Store, StoreError};
@@ -141,6 +142,85 @@ pub fn opted_in_ids(conn: &Connection) -> Result<Vec<String>, StoreError> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// The separate Auto opt-in for one Source (S11.3, FR-91).
+pub fn auto_opt_in(
+    conn: &Connection,
+    source_id: &str,
+) -> Result<Option<SessionAutoOptIn>, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT source_id, confirmed_name, warning_version, accepted_at \
+             FROM source_auto_optin WHERE source_id = ?1",
+            params![source_id],
+            |r| {
+                Ok(SessionAutoOptIn {
+                    source_id: r.get(0)?,
+                    confirmed_name: r.get(1)?,
+                    warning_version: r.get(2)?,
+                    accepted_at: r.get(3)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// Record (or re-confirm) the Auto opt-in; the row replaces by Source.
+pub fn record_auto_opt_in(conn: &Connection, optin: &SessionAutoOptIn) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO source_auto_optin (source_id, confirmed_name, warning_version, accepted_at) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(source_id) DO UPDATE SET \
+             confirmed_name = excluded.confirmed_name, \
+             warning_version = excluded.warning_version, \
+             accepted_at = excluded.accepted_at",
+        params![
+            optin.source_id,
+            optin.confirmed_name,
+            optin.warning_version,
+            optin.accepted_at
+        ],
+    )?;
+    Ok(())
+}
+
+/// Revoke the Auto opt-in (idempotent); the reading opt-in is not touched.
+pub fn remove_auto_opt_in(conn: &Connection, source_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM source_auto_optin WHERE source_id = ?1",
+        params![source_id],
+    )?;
+    Ok(())
+}
+
+/// The deadline a challenge set for Auto (`source.paused_until`).
+pub fn auto_paused_until(conn: &Connection, source_id: &str) -> Result<Option<String>, StoreError> {
+    Ok(conn
+        .query_row(
+            "SELECT paused_until FROM source WHERE id = ?1",
+            params![source_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Set (or clear) the Auto pause deadline on the Source row.
+pub fn set_auto_paused_until(
+    conn: &Connection,
+    source_id: &str,
+    until: Option<&str>,
+    updated_at: &str,
+) -> Result<(), StoreError> {
+    let changed = conn.execute(
+        "UPDATE source SET paused_until = ?2, updated_at = ?3 WHERE id = ?1",
+        params![source_id, until, updated_at],
+    )?;
+    if changed == 0 {
+        return Err(StoreError::Sqlite(format!("unknown source '{source_id}'")));
+    }
+    Ok(())
+}
+
 pub fn start_run(conn: &Connection, run: &SourceRunRecord) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO source_run (id, source_id, status, started_at, finished_at, postings_found, error) \
@@ -255,6 +335,45 @@ impl SourcesRepo for Store {
 
     fn opted_in_ids(&self) -> Result<Vec<String>, SourcesRepoError> {
         self.read(opted_in_ids).map_err(map_err)
+    }
+
+    fn auto_opt_in(&self, source_id: &str) -> Result<Option<SessionAutoOptIn>, SourcesRepoError> {
+        let source_id = source_id.to_string();
+        self.read(move |conn| auto_opt_in(conn, &source_id))
+            .map_err(map_err)
+    }
+
+    fn record_auto_opt_in(&self, optin: &SessionAutoOptIn) -> Result<(), SourcesRepoError> {
+        let optin = optin.clone();
+        self.execute(move |conn| record_auto_opt_in(conn, &optin))
+            .map_err(map_err)
+    }
+
+    fn remove_auto_opt_in(&self, source_id: &str) -> Result<(), SourcesRepoError> {
+        let source_id = source_id.to_string();
+        self.execute(move |conn| remove_auto_opt_in(conn, &source_id))
+            .map_err(map_err)
+    }
+
+    fn auto_paused_until(&self, source_id: &str) -> Result<Option<String>, SourcesRepoError> {
+        let source_id = source_id.to_string();
+        self.read(move |conn| auto_paused_until(conn, &source_id))
+            .map_err(map_err)
+    }
+
+    fn set_auto_paused_until(
+        &self,
+        source_id: &str,
+        until: Option<&str>,
+        updated_at: &str,
+    ) -> Result<(), SourcesRepoError> {
+        let source_id = source_id.to_string();
+        let until = until.map(str::to_string);
+        let updated_at = updated_at.to_string();
+        self.execute(move |conn| {
+            set_auto_paused_until(conn, &source_id, until.as_deref(), &updated_at)
+        })
+        .map_err(map_err)
     }
 
     fn start_run(&self, run: &SourceRunRecord) -> Result<(), SourcesRepoError> {
@@ -392,6 +511,85 @@ mod tests {
             accepted_at: "2026-10-05T00:00:00Z".into(),
         };
         assert!(record_optin(&conn, &optin).is_err(), "FK must reject");
+    }
+
+    #[test]
+    fn auto_opt_in_is_separate_and_round_trips() {
+        let conn = connection();
+        upsert_source(&conn, &source("linkedin", AccessClass::SessionBrowser)).unwrap();
+
+        assert!(auto_opt_in(&conn, "linkedin").unwrap().is_none());
+        assert!(
+            get_optin(&conn, "linkedin").unwrap().is_none(),
+            "the Auto opt-in is not the reading one"
+        );
+
+        let optin = SessionAutoOptIn {
+            source_id: "linkedin".into(),
+            confirmed_name: "linkedin".into(),
+            warning_version: "v1".into(),
+            accepted_at: "2026-10-17T09:00:00Z".into(),
+        };
+        record_auto_opt_in(&conn, &optin).unwrap();
+        assert_eq!(auto_opt_in(&conn, "linkedin").unwrap().unwrap(), optin);
+        assert!(
+            get_optin(&conn, "linkedin").unwrap().is_none(),
+            "recording Auto does not record reading"
+        );
+
+        let re_confirmed = SessionAutoOptIn {
+            accepted_at: "2026-10-18T09:00:00Z".into(),
+            ..optin.clone()
+        };
+        record_auto_opt_in(&conn, &re_confirmed).unwrap();
+        assert_eq!(
+            auto_opt_in(&conn, "linkedin").unwrap().unwrap(),
+            re_confirmed,
+            "a re-confirmation replaces the row"
+        );
+
+        remove_auto_opt_in(&conn, "linkedin").unwrap();
+        assert!(auto_opt_in(&conn, "linkedin").unwrap().is_none());
+        remove_auto_opt_in(&conn, "linkedin").unwrap();
+    }
+
+    #[test]
+    fn auto_opt_in_requires_a_known_source() {
+        let conn = connection();
+        let optin = SessionAutoOptIn {
+            source_id: "ghost".into(),
+            confirmed_name: "ghost".into(),
+            warning_version: "v1".into(),
+            accepted_at: "2026-10-17T09:00:00Z".into(),
+        };
+        assert!(record_auto_opt_in(&conn, &optin).is_err(), "FK must reject");
+    }
+
+    #[test]
+    fn the_auto_pause_deadline_lives_on_the_source_row() {
+        let conn = connection();
+        upsert_source(&conn, &source("linkedin", AccessClass::SessionBrowser)).unwrap();
+        assert_eq!(auto_paused_until(&conn, "linkedin").unwrap(), None);
+
+        set_auto_paused_until(
+            &conn,
+            "linkedin",
+            Some("2026-10-24T09:00:00Z"),
+            "2026-10-17T09:00:00Z",
+        )
+        .unwrap();
+        assert_eq!(
+            auto_paused_until(&conn, "linkedin").unwrap().as_deref(),
+            Some("2026-10-24T09:00:00Z")
+        );
+
+        set_auto_paused_until(&conn, "linkedin", None, "2026-10-25T09:00:00Z").unwrap();
+        assert_eq!(auto_paused_until(&conn, "linkedin").unwrap(), None);
+
+        assert!(
+            set_auto_paused_until(&conn, "ghost", None, "2026-10-25T09:00:00Z").is_err(),
+            "an unknown source is refused, not created"
+        );
     }
 
     #[test]

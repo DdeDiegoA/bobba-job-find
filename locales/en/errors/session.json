@@ -4,5 +4,9 @@
   "errors.session.warning_changed": "The warning changed. Read it again before turning this source on.",
   "errors.session.weak_ack": "Tick the separate cookie acknowledgement before turning this source on.",
   "errors.session.store": "The session settings could not be saved.",
-  "errors.session.in_use": "Close the browser window using this session, then sign out again."
+  "errors.session.in_use": "Close the browser window using this session, then sign out again.",
+  "errors.session.auto_needs_reading": "Turn on this source's session first: Auto builds on it.",
+  "errors.session.auto_name_mismatch": "Type the source's name exactly as it appears.",
+  "errors.session.auto_warning_changed": "The Auto warning changed. Read it again before confirming.",
+  "errors.session.auto_cap_invalid": "The daily cap must be between 1 and 10."
 }

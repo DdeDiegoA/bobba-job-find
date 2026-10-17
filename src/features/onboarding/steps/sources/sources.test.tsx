@@ -17,6 +17,7 @@ const tile = (over: Partial<SourceTileView> = {}): SourceTileView => ({
   source_type: "feed",
   markets: ["Global remote"],
   risk_tier: "safe",
+  auto_opt_in: false,
   custom: false,
   enabled: true,
   status: "ok",
@@ -36,6 +37,7 @@ const catalogue = (): SourceTileView[] => [
     source_type: "api",
     markets: ["Europe"],
     risk_tier: "safe",
+    auto_opt_in: false,
   }),
   tile({
     id: "linkedin",
@@ -43,6 +45,7 @@ const catalogue = (): SourceTileView[] => [
     source_type: "session_board",
     markets: ["Global remote"],
     risk_tier: "prohibited_automation",
+    auto_opt_in: false,
   }),
 ];
 

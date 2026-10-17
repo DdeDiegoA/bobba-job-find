@@ -223,6 +223,22 @@ pub fn count_company_since(
     )
 }
 
+/// One Source's automatic submissions on one channel at or after `since`
+/// (S11.3: the Session Board cap is per Source, stricter than any rule).
+pub fn count_source_since(
+    conn: &Connection,
+    source_id: &str,
+    channel: &str,
+    since: &str,
+) -> Result<u32, AutoRulesRepoError> {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM auto_rule_attempt \
+         WHERE source_id = ?1 AND channel = ?2 AND created_at >= ?3",
+        params![source_id, channel, since],
+    )
+}
+
 /// The newest ledger row's `created_at`, `None` when Auto never sent.
 pub fn last_attempt_at(conn: &Connection) -> Result<Option<String>, AutoRulesRepoError> {
     conn.query_row(
@@ -285,6 +301,21 @@ impl AutoRulesRepo for Store {
 
     fn ledger_last_at(&self) -> Result<Option<String>, AutoRulesRepoError> {
         self.read(|conn| Ok(last_attempt_at(conn)))
+            .map_err(|e| AutoRulesRepoError::new(e.to_string()))?
+    }
+
+    fn ledger_source_since(
+        &self,
+        source_id: &str,
+        channel: &str,
+        since: &str,
+    ) -> Result<u32, AutoRulesRepoError> {
+        let (source_id, channel, since) = (
+            source_id.to_string(),
+            channel.to_string(),
+            since.to_string(),
+        );
+        self.read(move |conn| Ok(count_source_since(conn, &source_id, &channel, &since)))
             .map_err(|e| AutoRulesRepoError::new(e.to_string()))?
     }
 
@@ -443,6 +474,80 @@ mod tests {
         assert_eq!(last_attempt_at(&conn).unwrap(), None);
         assert_eq!(
             count_global_since(&conn, "2026-10-17T00:00:00Z").unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn the_session_cap_counts_one_source_one_channel_and_the_local_day() {
+        let conn = connection();
+        upsert_rule(&conn, &rule("rule_1")).unwrap();
+        let attempt = |id: &str, source: &str, channel: RuleChannel, at: &str| AutoAttemptEntry {
+            id: id.into(),
+            rule_id: "rule_1".into(),
+            application_id: "app_1".into(),
+            source_id: source.into(),
+            channel,
+            company_key: "acme".into(),
+            created_at: at.into(),
+        };
+        insert_attempt(
+            &conn,
+            &attempt(
+                "aut_1",
+                "linkedin",
+                RuleChannel::SessionBoard,
+                "2026-10-17T09:00:00Z",
+            ),
+        )
+        .unwrap();
+        insert_attempt(
+            &conn,
+            &attempt(
+                "aut_2",
+                "linkedin",
+                RuleChannel::SessionBoard,
+                "2026-10-17T10:00:00Z",
+            ),
+        )
+        .unwrap();
+        insert_attempt(
+            &conn,
+            &attempt(
+                "aut_3",
+                "linkedin",
+                RuleChannel::Email,
+                "2026-10-17T11:00:00Z",
+            ),
+        )
+        .unwrap();
+        insert_attempt(
+            &conn,
+            &attempt(
+                "aut_4",
+                "indeed",
+                RuleChannel::SessionBoard,
+                "2026-10-17T12:00:00Z",
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(
+            count_source_since(&conn, "linkedin", "session_board", "2026-10-17T00:00:00Z").unwrap(),
+            2,
+            "one Source, one channel, today"
+        );
+        assert_eq!(
+            count_source_since(&conn, "linkedin", "session_board", "2026-10-17T09:30:00Z").unwrap(),
+            1,
+            "the local-day window is honoured"
+        );
+        assert_eq!(
+            count_source_since(&conn, "indeed", "session_board", "2026-10-17T00:00:00Z").unwrap(),
+            1
+        );
+        assert_eq!(
+            count_source_since(&conn, "linkedin", "session_board", "2026-10-18T00:00:00Z").unwrap(),
             0
         );
     }

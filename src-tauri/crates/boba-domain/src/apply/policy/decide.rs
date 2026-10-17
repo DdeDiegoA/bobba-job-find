@@ -39,12 +39,31 @@ pub struct PolicyCandidate {
     /// The Source's own Auto opt-in is active (FR-91). Only a Session Board
     /// candidate needs it; the rule is the opt-in for every other channel.
     pub source_auto_opt_in: bool,
+    /// The Session Board Auto facts (S11.3, FR-91): `Some` exactly for a
+    /// `SessionBoard` candidate, counted by the caller from the ledger.
+    pub session_auto: Option<SessionAutoFacts>,
     /// Minute of the user's local day, for the active hours (FR-83).
     pub local_minute: u16,
     /// The user's offset from UTC in minutes (east positive). The caps count
     /// the local day, so the ledger window starts at their local midnight —
     /// the same clock the active hours use (S9.6 review F1).
     pub utc_offset_minutes: i32,
+}
+
+/// The per-Source Session Board limits, read by the caller (S11.3, FR-91).
+///
+/// They are stricter than any rule's: a default of three a day (hard maximum
+/// ten) and at least ten minutes between submissions on the same Source. The
+/// caller counts them, so `decide` stays a pure function of its arguments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionAutoFacts {
+    /// The Source's daily cap: three unless the user raised it, never above 10.
+    pub daily_cap: u8,
+    /// Automatic submissions to this Source today (the local day).
+    pub today: u32,
+    /// Whole minutes since the newest automatic submission there, `None` when
+    /// the Source never took one.
+    pub minutes_since_last: Option<u32>,
 }
 
 /// What already went out, as the caps read it.
@@ -83,13 +102,27 @@ pub enum Reason {
     AutoOff,
     AutoNotConfirmed,
     NoRuleForSource,
-    NoRuleForChannel { channel: RuleChannel },
+    NoRuleForChannel {
+        channel: RuleChannel,
+    },
     RankMissing,
-    RankBelow { found: f32, min: f32 },
+    RankBelow {
+        found: f32,
+        min: f32,
+    },
     FitMissing,
-    FitBelow { found: f32, min: f32 },
-    ConfidenceBelow { found: Confidence, min: Confidence },
-    VerdictBelow { found: Verdict, min: Verdict },
+    FitBelow {
+        found: f32,
+        min: f32,
+    },
+    ConfidenceBelow {
+        found: Confidence,
+        min: Confidence,
+    },
+    VerdictBelow {
+        found: Verdict,
+        min: Verdict,
+    },
     FlagNotAllowed,
     Vetoed,
     FraudBadge,
@@ -98,11 +131,31 @@ pub enum Reason {
     Duplicate,
     CliWithoutLockdown,
     SourceWithoutOptIn,
-    GlobalCapReached { cap: u8 },
-    RuleDailyCapReached { cap: u8 },
-    CompanyCapReached { cap: u8, days: u16 },
-    OutsideActiveHours { start_minute: u16, end_minute: u16 },
-    SpacingNotElapsed { wait_minutes: u32 },
+    GlobalCapReached {
+        cap: u8,
+    },
+    RuleDailyCapReached {
+        cap: u8,
+    },
+    CompanyCapReached {
+        cap: u8,
+        days: u16,
+    },
+    OutsideActiveHours {
+        start_minute: u16,
+        end_minute: u16,
+    },
+    SpacingNotElapsed {
+        wait_minutes: u32,
+    },
+    /// The Session Board Source's own cap is spent (S11.3, FR-91).
+    SessionCapReached {
+        cap: u8,
+    },
+    /// The ten-minute floor between two sends on that Source (S11.3, FR-91).
+    SessionSpacingNotElapsed {
+        wait_minutes: u32,
+    },
 }
 
 impl Reason {
@@ -132,6 +185,8 @@ impl Reason {
             Reason::CompanyCapReached { .. } => "company_cap_reached",
             Reason::OutsideActiveHours { .. } => "outside_active_hours",
             Reason::SpacingNotElapsed { .. } => "spacing_not_elapsed",
+            Reason::SessionCapReached { .. } => "session_cap_reached",
+            Reason::SessionSpacingNotElapsed { .. } => "session_spacing_not_elapsed",
         }
     }
 
@@ -177,6 +232,10 @@ impl Reason {
                 ("end_minute", end_minute.to_string()),
             ],
             Reason::SpacingNotElapsed { wait_minutes } => {
+                vec![("wait_minutes", wait_minutes.to_string())]
+            }
+            Reason::SessionCapReached { cap } => vec![("cap", cap.to_string())],
+            Reason::SessionSpacingNotElapsed { wait_minutes } => {
                 vec![("wait_minutes", wait_minutes.to_string())]
             }
         }
@@ -375,6 +434,26 @@ fn rule_reasons(
             days: rule.per_company_days,
         });
     }
+    // S11.3 (FR-91): a Session Board Source keeps its own, stricter limits on
+    // top of the rule. `decide` runs at every send point, so a spent cap or a
+    // too-short gap stops the send there too.
+    if candidate.channel == RuleChannel::SessionBoard
+        && let Some(session) = &candidate.session_auto
+    {
+        if session.today >= u32::from(session.daily_cap) {
+            reasons.push(Reason::SessionCapReached {
+                cap: session.daily_cap,
+            });
+        }
+        if let Some(minutes) = session.minutes_since_last {
+            let gap = super::super::session_policy::MIN_SUBMISSION_GAP_MINUTES;
+            if minutes < gap {
+                reasons.push(Reason::SessionSpacingNotElapsed {
+                    wait_minutes: gap - minutes,
+                });
+            }
+        }
+    }
     if let Some(minutes) = counts.minutes_since_last_auto {
         let gap = super::pace::gap_minutes(counts.spacing_sample);
         if minutes < gap {
@@ -433,6 +512,7 @@ mod tests {
             agent_used: false,
             cli_tool_lockdown: true,
             source_auto_opt_in: true,
+            session_auto: None,
             local_minute: 10 * 60,
             utc_offset_minutes: 0,
         }
@@ -561,6 +641,75 @@ mod tests {
             Decision::Auto {
                 rule_id: "rule_1".into()
             }
+        );
+    }
+
+    #[test]
+    fn a_session_board_send_keeps_its_own_cap_and_ten_minute_gap() {
+        let mut session_rule = rule();
+        session_rule.channels = vec![RuleChannel::SessionBoard];
+        session_rule.source_ids = vec!["linkedin".into()];
+        // The rule itself allows ten; the Source's own cap is stricter.
+        session_rule.daily_cap = 10;
+
+        let mut c = candidate();
+        c.source_id = "linkedin".into();
+        c.channel = RuleChannel::SessionBoard;
+
+        let facts = |cap: u8, today: u32, since: Option<u32>| SessionAutoFacts {
+            daily_cap: cap,
+            today,
+            minutes_since_last: since,
+        };
+
+        c.session_auto = Some(facts(3, 2, Some(10)));
+        assert!(
+            matches!(
+                decide(&settings_on(), &[session_rule.clone()], &c, &counts()),
+                Decision::Auto { .. }
+            ),
+            "two today, ten minutes ago: the send may go"
+        );
+
+        c.session_auto = Some(facts(3, 3, Some(10)));
+        assert_eq!(
+            decide(&settings_on(), &[session_rule.clone()], &c, &counts()),
+            Decision::Review {
+                reasons: vec![Reason::SessionCapReached { cap: 3 }]
+            },
+            "FR-91: three a day by default, whatever the rule allows"
+        );
+
+        c.session_auto = Some(facts(10, 9, Some(10)));
+        assert!(matches!(
+            decide(&settings_on(), &[session_rule.clone()], &c, &counts()),
+            Decision::Auto { .. }
+        ));
+
+        c.session_auto = Some(facts(3, 1, Some(4)));
+        assert_eq!(
+            decide(&settings_on(), &[session_rule.clone()], &c, &counts()),
+            Decision::Review {
+                reasons: vec![Reason::SessionSpacingNotElapsed { wait_minutes: 6 }]
+            },
+            "FR-91: at least ten minutes between two submissions on a Source"
+        );
+
+        c.session_auto = Some(facts(3, 0, None));
+        assert!(matches!(
+            decide(&settings_on(), &[session_rule.clone()], &c, &counts()),
+            Decision::Auto { .. }
+        ));
+
+        let mut email = candidate();
+        email.session_auto = Some(facts(1, 99, Some(0)));
+        let email_rule = rule();
+        assert!(
+            matches!(
+                decide(&settings_on(), &[email_rule], &email, &counts()),
+                Decision::Auto { .. }
+            ),
+            "the session facts never gate another channel"
         );
     }
 

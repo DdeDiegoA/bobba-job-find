@@ -2,12 +2,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { RuleInput, RuleView } from "@/lib/ipc/bindings";
+import { useSessionAuto } from "../session/use-session-auto";
 import { minuteClock } from "./reasons";
 
 const fieldClass = "rounded-xl border border-border bg-surface-muted px-3 py-2 text-fg";
 const labelClass = "flex flex-col gap-1 text-sm text-fg-muted";
 
-/** The channels a rule may target (FR-83). Session Board is not selectable yet. */
+/** The channels a rule may target (FR-83). Session Board unlocks with S11.3. */
 const CHANNELS = [
   { value: "email", labelKey: "applying:form.channel.email" },
   { value: "ats_form", labelKey: "applying:form.channel.ats_form" },
@@ -130,10 +131,13 @@ export function RuleForm({
     });
   };
 
-  // Session Board only becomes selectable once that Source's Auto opt-in
-  // lands (S11.3); a rule that already targets it keeps it, so an edit cannot
-  // silently widen Auto to a channel the user chose earlier.
+  // Session Board only becomes selectable once a Source's Auto opt-in is on
+  // (S11.3, FR-91); a rule that already targets it keeps it, so an edit cannot
+  // silently drop a channel the user chose earlier.
+  const sessionAuto = useSessionAuto();
+  const hasAutoSession = (sessionAuto.data ?? []).some((board) => board.state === "active");
   const sessionBoardFixed = initial?.channels.includes("session_board") ?? false;
+  const sessionSelected = draft.channels.includes("session_board");
 
   return (
     <form
@@ -175,7 +179,7 @@ export function RuleForm({
               <input
                 type="checkbox"
                 checked={draft.channels.includes(channel.value)}
-                disabled={fixed && !sessionBoardFixed}
+                disabled={fixed && !sessionBoardFixed && !hasAutoSession}
                 onChange={() => toggleChannel(channel.value)}
               />
               {t(channel.labelKey)}
@@ -183,6 +187,11 @@ export function RuleForm({
           );
         })}
         <span className="w-full text-xs text-fg-muted">{t("form.session_board_hint")}</span>
+        {sessionSelected ? (
+          <span className="w-full text-xs text-danger" data-tos-risk="">
+            {t("session_auto:rule.tos_risk")}
+          </span>
+        ) : null}
       </fieldset>
 
       <div className="flex flex-wrap gap-4">
@@ -253,7 +262,7 @@ export function RuleForm({
             className={fieldClass}
             type="number"
             min={1}
-            max={25}
+            max={sessionSelected ? 10 : 25}
             value={draft.dailyCap}
             onChange={(event) => set("dailyCap", event.target.value)}
           />

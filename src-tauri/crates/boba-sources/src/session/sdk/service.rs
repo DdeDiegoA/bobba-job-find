@@ -270,6 +270,13 @@ impl<C: ClockPort> SessionBoardService<C> {
                 let now = self.clock.now_rfc3339();
                 self.system
                     .setting_put(&pause_key(source_id), &pause.to_json(), &now)?;
+                // S11.3 (FR-91): Auto on that Source stops too, for seven days,
+                // on the Source row the policy reads. Resuming the reading
+                // session after a solved CAPTCHA does not shorten it.
+                let until = boba_domain::apply::session_policy::parse_time(&now)
+                    .map(boba_domain::apply::session_policy::pause_until_after_challenge);
+                self.sources
+                    .set_auto_paused_until(source_id, until.as_deref(), &now)?;
                 // AD-10: the Source stops; the user acts, never Boba.
                 self.sources.set_source_enabled(source_id, false, &now)?;
                 Ok(())
@@ -527,6 +534,43 @@ mod tests {
 
         fn opted_in_ids(&self) -> Result<Vec<String>, SourcesRepoError> {
             Ok(self.optins.lock().unwrap().keys().cloned().collect())
+        }
+
+        fn auto_opt_in(
+            &self,
+
+            _source_id: &str,
+        ) -> Result<Option<boba_domain::apply::session_policy::SessionAutoOptIn>, SourcesRepoError>
+        {
+            Ok(None)
+        }
+
+        fn record_auto_opt_in(
+            &self,
+
+            _optin: &boba_domain::apply::session_policy::SessionAutoOptIn,
+        ) -> Result<(), SourcesRepoError> {
+            Ok(())
+        }
+
+        fn remove_auto_opt_in(&self, _source_id: &str) -> Result<(), SourcesRepoError> {
+            Ok(())
+        }
+
+        fn auto_paused_until(&self, _source_id: &str) -> Result<Option<String>, SourcesRepoError> {
+            Ok(None)
+        }
+
+        fn set_auto_paused_until(
+            &self,
+
+            _source_id: &str,
+
+            _until: Option<&str>,
+
+            _updated_at: &str,
+        ) -> Result<(), SourcesRepoError> {
+            Ok(())
         }
 
         fn start_run(&self, _run: &SourceRunRecord) -> Result<(), SourcesRepoError> {

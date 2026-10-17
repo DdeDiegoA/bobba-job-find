@@ -16,6 +16,7 @@ use crate::applications::testing::FakeApplyRepo;
 use crate::ports::browser::{
     BrowserError, Confirmation, PageField, PageFieldKind, Screenshot, Upload,
 };
+use crate::ports::notifier::{Notification, NotifierError, NotifierPort};
 use crate::ports::repo::documents::fake::FakeDocumentsRepo;
 use crate::ports::repo::sources::{SourcesRepo, SourcesRepoError};
 use crate::profile::testing::FakeProfileRepo;
@@ -113,6 +114,8 @@ impl SessionFormPort for FakeSessionBrowser {
 struct FakeSources {
     records: Mutex<Vec<SourceRecord>>,
     optins: Mutex<Vec<OptInRecord>>,
+    /// `source.paused_until`, as the challenge writes it (S11.3, FR-91).
+    auto_pauses: Mutex<Vec<(String, String)>>,
 }
 
 impl FakeSources {
@@ -195,6 +198,44 @@ impl SourcesRepo for FakeSources {
             .iter()
             .map(|row| row.source_id.clone())
             .collect())
+    }
+    fn auto_opt_in(
+        &self,
+        _source_id: &str,
+    ) -> Result<Option<boba_domain::apply::session_policy::SessionAutoOptIn>, SourcesRepoError>
+    {
+        Ok(None)
+    }
+    fn record_auto_opt_in(
+        &self,
+        _optin: &boba_domain::apply::session_policy::SessionAutoOptIn,
+    ) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+    fn remove_auto_opt_in(&self, _source_id: &str) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+    fn auto_paused_until(&self, source_id: &str) -> Result<Option<String>, SourcesRepoError> {
+        Ok(self
+            .auto_pauses
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(id, _)| id == source_id)
+            .map(|(_, until)| until.clone()))
+    }
+    fn set_auto_paused_until(
+        &self,
+        source_id: &str,
+        until: Option<&str>,
+        _updated_at: &str,
+    ) -> Result<(), SourcesRepoError> {
+        let mut rows = self.auto_pauses.lock().unwrap();
+        rows.retain(|(id, _)| id != source_id);
+        if let Some(until) = until {
+            rows.push((source_id.to_string(), until.to_string()));
+        }
+        Ok(())
     }
     fn start_run(&self, _run: &SourceRunRecord) -> Result<(), SourcesRepoError> {
         Ok(())
@@ -377,11 +418,25 @@ fn seed_answer(
 
 struct Harness {
     apply: Arc<FakeApplyRepo>,
+    notifier: Arc<CountingNotifier>,
     documents: Arc<FakeDocumentsRepo>,
     system: Arc<FakeSystemRepo>,
     browser: Arc<FakeSessionBrowser>,
     sources: Arc<FakeSources>,
     service: SessionApplyService,
+}
+
+/// The notifications a challenge raised (S11.3 F1, AC3).
+#[derive(Default)]
+struct CountingNotifier {
+    sent: Mutex<Vec<Notification>>,
+}
+
+impl NotifierPort for CountingNotifier {
+    fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
+        self.sent.lock().unwrap().push(notification);
+        Ok(())
+    }
 }
 
 fn harness(fields: Vec<PageField>) -> Harness {
@@ -394,6 +449,7 @@ fn build_harness(fields: Vec<PageField>, opted_in: bool, kill_switch: Option<boo
     let system = Arc::new(FakeSystemRepo::default());
     let sources = Arc::new(FakeSources::with_board("linkedin", opted_in));
     let browser = Arc::new(FakeSessionBrowser::with_page(page(fields)));
+    let notifier = Arc::new(CountingNotifier::default());
     let service = SessionApplyService::new(
         apply.clone(),
         documents.clone(),
@@ -405,9 +461,11 @@ fn build_harness(fields: Vec<PageField>, opted_in: bool, kill_switch: Option<boo
     )
     .with_kill_switch(
         kill_switch.map(|engaged| Arc::new(FakeKillSwitch(engaged)) as Arc<dyn KillSwitchPort>),
-    );
+    )
+    .with_notifier(Some(notifier.clone()));
     Harness {
         apply,
+        notifier,
         documents,
         system,
         browser,
@@ -759,22 +817,43 @@ fn a_confirmed_submission_records_the_evidence_and_applies_the_card() {
 }
 
 #[test]
-fn a_page_without_confirmation_marks_needs_check_and_the_card_stays() {
+fn a_premature_confirm_keeps_the_attempt_open_and_the_window_up() {
     let h = ready_harness(vec![]);
     let application = application();
     let attempt = started(&h, &application);
 
     let outcome = h.service.confirm(&attempt, &application).unwrap();
 
-    assert!(matches!(outcome, SessionOutcome::NeedsCheck { .. }));
     assert!(
-        h.system.audit_unresolved_intents().unwrap().is_empty(),
-        "the attempt is resolved as a failed outcome"
+        matches!(outcome, SessionOutcome::NotSubmitted),
+        "S11.3 L1: no confirmation yet is not a failed submission"
     );
-    assert_eq!(h.system.audit_verify_chain().unwrap().rows, 4);
+    assert_eq!(
+        h.system.audit_unresolved_intents().unwrap().len(),
+        1,
+        "the attempt is still open, so a second Confirm resolves it"
+    );
+    assert_eq!(
+        *h.browser.closes.lock().unwrap(),
+        0,
+        "the window stays open for the user's submit"
+    );
     assert!(
         h.apply.events().is_empty(),
-        "FR-88: no evidence means Needs check, and the card does not move"
+        "FR-88: no evidence means the card does not move"
+    );
+
+    // The user submits, then confirms again under the same attempt.
+    h.apply.seed_application(application.clone());
+    let mut confirmed = h.browser.page.lock().unwrap().clone();
+    confirmed.confirmation = Some(crate::ports::browser::Confirmation {
+        text: "Your application was sent to Nimbus.".to_string(),
+    });
+    h.browser.set(confirmed);
+    let outcome = h.service.confirm(&attempt, &application).unwrap();
+    assert!(
+        matches!(outcome, SessionOutcome::Applied { .. }),
+        "the same attempt resolves once the page confirms"
     );
 }
 
@@ -792,7 +871,10 @@ fn a_confirmation_on_another_host_is_not_evidence() {
     h.browser.set(elsewhere);
 
     let outcome = h.service.confirm(&attempt, &application).unwrap();
-    assert!(matches!(outcome, SessionOutcome::NeedsCheck { .. }));
+    assert!(
+        matches!(outcome, SessionOutcome::NotSubmitted),
+        "another site's thank-you page is not evidence (S11.3 L1 keeps it open)"
+    );
 }
 
 #[test]
@@ -1003,8 +1085,33 @@ fn a_challenge_pauses_the_source_and_stops_the_next_attempt() {
         "the page-load pair, the attempt intent and the challenge pair"
     );
 
+    // S11.3 (FR-91): the wall pauses Auto for seven days on the Source row.
+    let until = h
+        .sources
+        .auto_paused_until("linkedin")
+        .unwrap()
+        .expect("Auto is paused too");
+    let since = boba_domain::apply::session_policy::parse_time(NOW).expect("fixture");
+    assert_eq!(
+        until,
+        boba_domain::apply::session_policy::pause_until_after_challenge(since),
+        "seven full days from the challenge"
+    );
+
+    // AC3 (S11.3 F1): the user is told Auto stopped on this Source, once.
+    assert_eq!(
+        *h.notifier.sent.lock().unwrap(),
+        vec![Notification::SessionChallengePaused],
+        "a challenge notifies exactly once"
+    );
+
     let error = h.service.start(&application(), &offer()).unwrap_err();
     assert_eq!(error.message_key(), "errors.apply.session_paused");
+    assert_eq!(
+        h.notifier.sent.lock().unwrap().len(),
+        1,
+        "a blocked retry adds no second notice"
+    );
 }
 
 // M4: a package that stopped being Ready between steps stops the next fill.

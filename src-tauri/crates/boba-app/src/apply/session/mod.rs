@@ -37,6 +37,7 @@ use crate::apply::manual::{ManualError, ManualService, PdfExport};
 use crate::ports::browser::{BrowserError, Upload};
 use crate::ports::clock::ClockPort;
 use crate::ports::kill_switch::KillSwitchPort;
+use crate::ports::notifier::{Notification, NotifierPort};
 use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
@@ -268,6 +269,10 @@ pub enum SessionOutcome {
     /// No confirmation was found: the attempt is recorded and the card stays,
     /// marked Needs check from that outcome.
     NeedsCheck { screenshot_blake3: String },
+    /// The page does not say the form went through yet (S11.3 L1). Nothing is
+    /// resolved and nothing is closed: the user submits (or advances a step)
+    /// and confirms again under the same attempt.
+    NotSubmitted,
 }
 
 /// What one fill of the visible step produced.
@@ -305,6 +310,9 @@ pub struct SessionApplyService {
     /// The Kill Switch (S9.8). Unmounted means not engaged, the same seam
     /// S9.7 uses, so the feature ships before S9.8's adapter is mounted.
     kill_switch: Option<Arc<dyn KillSwitchPort>>,
+    /// The one notice a challenge raises (S11.3 F1, FR-91). Optional like the
+    /// Kill Switch: a host without a notifier still records the pause.
+    notifier: Option<Arc<dyn NotifierPort>>,
 }
 
 impl SessionApplyService {
@@ -327,12 +335,19 @@ impl SessionApplyService {
             browser,
             clock,
             kill_switch: None,
+            notifier: None,
         }
     }
 
     /// Attach the Kill Switch once S9.8's adapter is mounted.
     pub fn with_kill_switch(mut self, kill_switch: Option<Arc<dyn KillSwitchPort>>) -> Self {
         self.kill_switch = kill_switch;
+        self
+    }
+
+    /// Attach the notifier a challenge raises its pause through (S11.3 F1).
+    pub fn with_notifier(mut self, notifier: Option<Arc<dyn NotifierPort>>) -> Self {
+        self.notifier = notifier;
         self
     }
 
@@ -488,10 +503,6 @@ impl SessionApplyService {
             return Err(SessionApplyError::OptInRequired(source_id));
         }
         let page = self.browser.snapshot()?;
-        let screenshot = self.browser.screenshot()?;
-        // The session is over: leave no browser running (§6.4). A failure to
-        // close must not cost the evidence, so it is not fatal.
-        let _ = self.browser.close();
         let now = self.clock.now_rfc3339();
 
         // A confirmation only counts on the page's own host: a redirect to
@@ -502,21 +513,17 @@ impl SessionApplyService {
         let confirmation = page.confirmation.filter(|_| on_form_host);
 
         let Some(confirmation) = confirmation else {
-            self.system.audit_append_outcome(
-                &intent,
-                AuditOutcome::Failed,
-                &serde_json::json!({
-                    "needs_check": true,
-                    "url": page_url(&page.url),
-                    "screenshot_blake3": screenshot.png_blake3,
-                })
-                .to_string(),
-                &now,
-            )?;
-            return Ok(SessionOutcome::NeedsCheck {
-                screenshot_blake3: screenshot.png_blake3,
-            });
+            // S11.3 L1: a premature Confirm is not a failure. Resolving the
+            // attempt here would forfeit it — the user's real submit would
+            // then be `UnknownAttempt`. The attempt stays open, the window
+            // stays up and nothing is written: submit (or advance a step) and
+            // confirm again.
+            return Ok(SessionOutcome::NotSubmitted);
         };
+        let screenshot = self.browser.screenshot()?;
+        // The session is over: leave no browser running (§6.4). A failure to
+        // close must not cost the evidence, so it is not fatal.
+        let _ = self.browser.close();
 
         // Evidence first: the Application moves to Applied only because it
         // exists (FR-88). The screenshot is kept as its hash (AD-12).
@@ -715,8 +722,20 @@ impl SessionApplyService {
             &serde_json::json!({ "kind": challenge.as_str(), "since": now }).to_string(),
             &now,
         )?;
+        // S11.3 (FR-91): the same wall pauses Auto for seven days, on the
+        // Source row every decide() call reads. Only the reading pause is
+        // cleared by "resume"; Auto waits its week.
+        let until = boba_domain::apply::session_policy::parse_time(&now)
+            .map(boba_domain::apply::session_policy::pause_until_after_challenge);
+        self.sources
+            .set_auto_paused_until(source_id, until.as_deref(), &now)?;
         self.system
             .audit_append_outcome(&intent, AuditOutcome::Ok, "{}", &now)?;
+        // AC3 (S11.3 F1): the user is told Auto stopped on this Source. A
+        // missing toast never undoes the pause, which is already recorded.
+        if let Some(notifier) = &self.notifier {
+            let _ = notifier.notify(Notification::SessionChallengePaused);
+        }
         Ok(())
     }
 

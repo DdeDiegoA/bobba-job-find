@@ -71,6 +71,16 @@ function SourceTile({ tile, onRemove }: { tile: SourceTileView; onRemove: (id: s
         >
           {t(RISK_LABELS[risk] ?? risk)}
         </span>
+        {/* S11.3 (FR-91): Auto is on for this board, so the ToS risk persists. */}
+        {tile.auto_opt_in ? (
+          <span
+            className="rounded-xl bg-danger/15 px-2 py-1 text-danger"
+            data-tos-risk=""
+            data-auto-opt-in=""
+          >
+            {t("session_auto:badge.tos_risk")}
+          </span>
+        ) : null}
         {tile.markets.map((market) => (
           <span key={market} className="rounded-xl bg-surface-muted px-2 py-1 text-fg-subtle">
             {market}
