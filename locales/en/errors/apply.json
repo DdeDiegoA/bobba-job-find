@@ -21,5 +21,11 @@
   "errors.apply.ats_unknown_attempt": "That submission is no longer waiting for a check.",
   "errors.apply.ats_unknown_answer": "That answer is no longer in the bank.",
   "errors.apply.ats_answer_edit": "That edited answer cannot be saved. Keep it short and non-empty.",
-  "errors.apply.ats_browser": "Boba could not drive the browser. Check that Chrome or Chromium is installed and try again."
+  "errors.apply.ats_browser": "Boba could not drive the browser. Check that Chrome or Chromium is installed and try again.",
+  "errors.apply.rule_invalid": "That rule has a value out of range. Check the caps, the thresholds and the active hours.",
+  "errors.apply.settings_invalid": "That Apply setting is out of range.",
+  "errors.apply.rule_unconfirmed": "Turn Auto on through the confirmation dialog first.",
+  "errors.apply.rule_missing": "Add at least one enabled rule before turning Auto on.",
+  "errors.apply.unknown_rule": "That rule no longer exists.",
+  "errors.apply.rule_clock": "Boba cannot read its own clock, so it cannot decide this now."
 }

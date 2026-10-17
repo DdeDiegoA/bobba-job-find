@@ -18,6 +18,7 @@ use boba_app::ports::mail::MailPort;
 use boba_app::ports::render::RenderPort;
 use boba_app::ports::repo::agent::AgentRepo;
 use boba_app::ports::repo::apply::ApplyRepo;
+use boba_app::ports::repo::auto_rules::AutoRulesRepo;
 use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
@@ -71,6 +72,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     }
     // The apply area owns `application` + `status_event` (S9.1).
     mount_port::<dyn ApplyRepo>(app, store.clone());
+    // The apply policy engine owns `auto_rule` + `auto_rule_attempt` (S9.6): the
+    // rules the user writes and the ledger the three caps count.
+    mount_port::<dyn AutoRulesRepo>(app, store.clone());
     // The apply outbox owns `apply_attempt` (S9.3): the evidence an Email Apply
     // retry reads before it sends again.
     mount_port::<dyn OutboxRepo>(app, store.clone());
