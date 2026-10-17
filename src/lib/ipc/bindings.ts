@@ -555,6 +555,27 @@ export const commands = {
   /**  Engage or release it (AC1). Idempotent: the three controls can all call it. */
   killSwitchSet: (engaged: boolean) =>
     typedError<Engagement, AppError_Serialize>(__TAURI_INVOKE("kill_switch_set", { engaged })),
+  /**  The recovery-backup state the backup page and onboarding step read. */
+  backupStatus: () =>
+    typedError<BackupStatusView, AppError_Serialize>(__TAURI_INVOKE("backup_status")),
+  /**  Write one passphrase-encrypted backup at the path the user chose (AC1). */
+  backupCreate: (destination: string, passphrase: string) =>
+    typedError<BackupMetaView, AppError_Serialize>(
+      __TAURI_INVOKE("backup_create", { destination, passphrase }),
+    ),
+  /**  Validate a backup and replace the current data with it (AC3/AC4). */
+  backupRestore: (source: string, passphrase: string) =>
+    typedError<RestoreReportView, AppError_Serialize>(
+      __TAURI_INVOKE("backup_restore", { source, passphrase }),
+    ),
+  /**
+   *  Delete everything after the user typed the confirmation (AC5). The caller
+   *  relaunches the app: the open database file may be gone underneath it.
+   */
+  resetEverything: (confirmation: string) =>
+    typedError<ResetReportView, AppError_Serialize>(
+      __TAURI_INVOKE("reset_everything", { confirmation }),
+    ),
 };
 
 /** Events */
@@ -708,6 +729,31 @@ export type AttemptView = {
   message_id: string | null;
   created_at: string;
   sent_at: string | null;
+};
+
+/**  What a backup file says about itself. */
+export type BackupMetaView = {
+  format: string;
+  app_version: string;
+  schema_version: number;
+  created_at: string;
+};
+
+/**  The recovery-backup requirement and the confirmation token (AC1/AC2/AC5). */
+export type BackupStatusView = {
+  /**  When the last backup was written (UTC RFC 3339). */
+  recovery_created_at: string | null;
+  /**  Where it was written. */
+  recovery_path: string | null;
+  /**  Whether that file is still there. */
+  recovery_present: boolean;
+  /**
+   *  Whether a recovery backup is required and missing (always required on an
+   *  unsigned MVP build).
+   */
+  recovery_required: boolean;
+  /**  The word Reset everything asks the user to type. */
+  confirmation_token: string;
 };
 
 /**
@@ -1649,6 +1695,28 @@ export type RequirementView = {
   requirement: string;
   covered: string[];
   gaps: string[];
+};
+
+/**  What a reset deleted, and where the last files live (AC5 uninstall notes). */
+export type ResetReportView = {
+  db_removed: boolean;
+  removed: string[];
+  keychain_removed: string[];
+  remaining: string[];
+  data_dir: string;
+};
+
+/**  What a restore did. */
+export type RestoreReportView = {
+  /**  The backup's own marker. */
+  format: string;
+  app_version: string;
+  schema_version: number;
+  created_at: string;
+  /**  The pre-restore snapshot of this machine's data. */
+  snapshot: string;
+  /**  The schema the restored data now sits on. */
+  schema_to: number;
 };
 
 /**  The reviewer's findings and the version they judged (S7.4). */
