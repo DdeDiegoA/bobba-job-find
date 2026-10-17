@@ -38,6 +38,11 @@ impl FakeSystemRepo {
         *self.anchor.lock().unwrap() = Some(hash.to_string());
     }
 
+    /// Every audit row, in append order (a use case's own event inspection).
+    pub fn rows(&self) -> Vec<AuditRow> {
+        self.rows.lock().unwrap().clone()
+    }
+
     /// Drop the last row, simulating a tail truncation by an attacker.
     pub fn truncate_last(&self) {
         self.rows.lock().unwrap().pop();

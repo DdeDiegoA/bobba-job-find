@@ -52,8 +52,7 @@ pub struct Entry {
 }
 
 /// The tray menu, in the order FR-42 lists it (AC2). "Run now" stays disabled
-/// until the scheduler (S5.1) and the Kill Switch until S9.8 wire them: both are
-/// on the menu from day one, so its shape never changes under the user.
+/// until the scheduler (S5.1) wires it; the Kill Switch is live since S9.8.
 pub const ENTRIES: [Entry; 5] = [
     Entry {
         id: id::OPEN,
@@ -73,7 +72,7 @@ pub const ENTRIES: [Entry; 5] = [
     Entry {
         id: id::KILL_SWITCH,
         message_key: "tray:menu.killSwitch",
-        enabled: false,
+        enabled: true,
     },
     Entry {
         id: id::QUIT,
@@ -196,7 +195,7 @@ mod tests {
         );
     }
 
-    /// AC2: only the two items a later epic wires are disabled.
+    /// AC2: only "Run now" is still disabled; the Kill Switch is live (S9.8).
     #[test]
     fn only_the_unwired_items_are_disabled() {
         let enabled = |id: &str| {
@@ -209,11 +208,8 @@ mod tests {
         assert!(enabled(id::OPEN));
         assert!(enabled(id::PAUSE_SCHEDULE));
         assert!(enabled(id::QUIT));
+        assert!(enabled(id::KILL_SWITCH), "the Kill Switch is live (S9.8)");
         assert!(!enabled(id::RUN_NOW), "Run now waits for E5 (S5.1)");
-        assert!(
-            !enabled(id::KILL_SWITCH),
-            "Kill Switch is wired in E9 (S9.8)"
-        );
     }
 
     /// The labels the PRD keeps in English on purpose ("Kill Switch" is its

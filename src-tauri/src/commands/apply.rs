@@ -214,6 +214,8 @@ fn ats_service(app: &tauri::AppHandle) -> AppResult<AtsFormService> {
         wiring::port::<dyn BrowserPort>(app)?,
         wiring::port::<dyn SystemRepo>(app)?,
         std::sync::Arc::new(SystemClock),
+        // The Kill Switch (S9.8, FR-86): no page opens while it is engaged.
+        wiring::port::<dyn KillSwitchPort>(app).ok(),
     ))
 }
 
@@ -684,6 +686,13 @@ async fn release_due<R: tauri::Runtime>(
     let Some(_running) = SWEEP.try_enter() else {
         return Ok(Vec::new());
     };
+    // FR-86 (AC1): with the Kill Switch engaged the automatic path is paused —
+    // the sweep releases nothing (the items are already in the review queue)
+    // and the scheduler's auto runs do no work.
+    if wiring::port::<dyn KillSwitchPort>(app).is_ok_and(|switch| switch.engaged()) {
+        tracing::debug!("outbox: release sweep skipped, the Kill Switch is engaged");
+        return Ok(Vec::new());
+    }
     let service = outbox_service(app)?;
     let due = service.due().map_err(outbox_error)?;
     Ok(sweep_all(
@@ -869,8 +878,8 @@ fn outbox_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Out
         Some(Arc::new(crate::scheduler::notify::TauriNotifier::new(
             app.clone(),
         ))),
-        // The Kill Switch (S9.8) mounts its adapter next wave; until then the
-        // port is unmounted, which reads as "not engaged".
+        // The Kill Switch (S9.8): the check point every release and every
+        // pre-submit pass reads. Mounted with the other apply ports.
         wiring::port::<dyn KillSwitchPort>(app).ok(),
     ))
 }

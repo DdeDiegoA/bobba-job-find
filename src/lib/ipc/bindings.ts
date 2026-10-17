@@ -549,10 +549,17 @@ export const commands = {
     typedError<null, AppError_Serialize>(
       __TAURI_INVOKE("inbox_decide_suggestion", { id, accept, company }),
     ),
+  /**  Whether the switch is on, and since when (AC2's quiet chip). */
+  killSwitchStatus: () =>
+    typedError<KillSwitchView, AppError_Serialize>(__TAURI_INVOKE("kill_switch_status")),
+  /**  Engage or release it (AC1). Idempotent: the three controls can all call it. */
+  killSwitchSet: (engaged: boolean) =>
+    typedError<Engagement, AppError_Serialize>(__TAURI_INVOKE("kill_switch_set", { engaged })),
 };
 
 /** Events */
 export const events = {
+  killSwitchChanged: makeEvent<KillSwitchChanged>("kill_switch.changed"),
   runReportProgressed: makeEvent<RunReportProgressed>("run_report.progressed"),
   taskFinished: makeEvent<TaskFinished>("task.finished"),
   taskProgressed: makeEvent<TaskProgressed>("task.progressed"),
@@ -979,6 +986,23 @@ export type EmailMode =
   /**  Read and send. */
   | "read_send";
 
+/**  What one change did, for the command result and the audit detail. */
+export type Engagement = {
+  view: KillSwitchView;
+  /**
+   *  Outbox items moved to the review queue by this call (`u32`: specta does
+   *  not export machine-sized integers).
+   */
+  parked: number;
+  /**
+   *  Run handles asked to stop by this call. A run that already finished is
+   *  counted too: its token no longer reaches a process.
+   */
+  cancelled_runs: number;
+  /**  Whether a browser session was open and was closed by this call. */
+  browser_closed: boolean;
+};
+
 /**  One agent CLI the probe looked at (FR-2). */
 export type EngineCard = {
   /**  A `CliKind` id; the value the user picks. */
@@ -1234,6 +1258,23 @@ export type ImportOutcome = {
   dropped: number;
   /**  The files the run read, in merge order. */
   files: string[];
+};
+
+/**
+ *  The state changed (tray, shortcut or the header itself): the window listens
+ *  so the chip reflects a switch thrown from the tray while it is open.
+ */
+export type KillSwitchChanged = {
+  engaged: boolean;
+  /**  RFC 3339, when the user engaged it; `None` while it is off. */
+  since: string | null;
+};
+
+/**  Whether the switch is on, and since when (AD-1: never an undefined state). */
+export type KillSwitchView = {
+  engaged: boolean;
+  /**  RFC 3339, when the user engaged it; `None` while it is off. */
+  since: string | null;
 };
 
 /**  One screening answer the user approved, ready to copy (S7.8). */

@@ -1,1 +1,8 @@
-{}
+{
+  "engage": "Kill Switch",
+  "engage.hint": "Detén ahora todos los envíos automáticos",
+  "engaged": "Los envíos automáticos están detenidos",
+  "engaged.hint": "El Kill Switch está activo. Nada sale sin ti hasta que lo desactives.",
+  "turnOff": "Desactivar",
+  "error": "No se pudo cambiar el Kill Switch. Inténtalo de nuevo desde la bandeja."
+}

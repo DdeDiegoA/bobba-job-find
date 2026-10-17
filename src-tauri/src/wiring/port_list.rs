@@ -48,17 +48,23 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     mount_port::<dyn boba_app::jobs::JobsRepo>(app, store.clone());
     mount_port::<dyn AgentRepo>(app, store.clone());
     // The system repo also needs the keychain service for the audit anchor.
-    mount_port::<dyn SystemRepo>(
-        app,
-        Arc::new(SqliteSystemRepo::new(store.clone(), keychain_service())),
-    );
+    // Kept in hand: the Kill Switch (S9.8) writes its flag and its audit rows
+    // through the same adapter.
+    let system: Arc<dyn SystemRepo> =
+        Arc::new(SqliteSystemRepo::new(store.clone(), keychain_service()));
+    mount_port::<dyn SystemRepo>(app, Arc::clone(&system));
     mount_port::<dyn ProfileRepo>(app, store.clone());
     // The ingestion owner writes `posting` + `posting_source` (S4.2).
     mount_port::<dyn IngestionRepo>(app, store.clone());
     // The agent runtime is built by this slice (CH5): it needs the app handle
     // for the event sink and the app-data paths, so it cannot be a plain
-    // `store.clone()` line.
-    let agent: Arc<dyn AgentPort> = Arc::new(agent::agent_runtime(app, store));
+    // `store.clone()` line. Every run is wrapped so the Kill Switch (S9.8) can
+    // cancel it in flight (FR-86).
+    let runs = Arc::new(boba_app::apply::kill_switch::RunCancellations::default());
+    let agent: Arc<dyn AgentPort> = Arc::new(boba_app::apply::kill_switch::CancellingAgent::new(
+        Arc::new(agent::agent_runtime(app, store)),
+        Arc::clone(&runs),
+    ));
     mount_port::<dyn AgentPort>(app, agent);
     // Email connections (S8.1): the row owner, the keychain scope a slice may
     // address secrets through, and the Graph sender.
@@ -117,14 +123,20 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // of being released a second time.
     recover_outbox(app);
     // The ATS Form browser (S9.4, AD-10): the user's own Chrome over CDP, on
-    // the Boba profile, launched only when an apply session starts.
-    match app.path().app_data_dir() {
-        Ok(data) => mount_port::<dyn BrowserPort>(
-            app,
-            Arc::new(boba_browser::driver::ChromeDriver::new(data)),
-        ),
-        Err(error) => tracing::error!(?error, "browser port left unmounted"),
-    }
+    // the Boba profile, launched only when an apply session starts. Kept in
+    // hand: the Kill Switch closes it, which stops an in-flight fill (S9.8).
+    let browser: Option<Arc<dyn BrowserPort>> = match app.path().app_data_dir() {
+        Ok(data) => {
+            let browser: Arc<dyn BrowserPort> =
+                Arc::new(boba_browser::driver::ChromeDriver::new(data));
+            mount_port::<dyn BrowserPort>(app, Arc::clone(&browser));
+            Some(browser)
+        }
+        Err(error) => {
+            tracing::error!(?error, "browser port left unmounted");
+            None
+        }
+    };
     // The Session Board profiles (S11.1a, AD-10): one Chrome profile per
     // source, deleted by "Sign out / clear session".
     match app.path().app_data_dir() {
@@ -142,6 +154,26 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The triage owner keeps the Inbox decisions (S6.6): why an Offer was
     // dismissed, the VETOs the user overruled and the answers to suggestions.
     mount_port::<dyn TriageRepo>(app, store.clone());
+    // The Kill Switch (S9.8, FR-86): the one flag every automatic send
+    // re-checks before it queues, releases and submits; the runs in flight it
+    // cancels; the browser session it closes. Mounted twice on purpose — as the
+    // `KillSwitchPort` the Outbox asks, and as the concrete use case the tray,
+    // the shortcut and the header chip flip.
+    let kill_switch = Arc::new(boba_app::apply::kill_switch::KillSwitchService::new(
+        system,
+        store.clone(),
+        Arc::new(boba_app::system::SystemClock),
+        browser,
+        runs,
+    ));
+    mount_port::<dyn boba_app::ports::kill_switch::KillSwitchPort>(
+        app,
+        Arc::clone(&kill_switch) as Arc<dyn boba_app::ports::kill_switch::KillSwitchPort>,
+    );
+    assert!(
+        app.manage(kill_switch),
+        "duplicate kill switch state in port_list"
+    );
     // slices append ONE line above this comment; never reorder/remove
 }
 

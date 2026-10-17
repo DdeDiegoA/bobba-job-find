@@ -92,6 +92,8 @@ macro_rules! boba_commands {
             crate::commands::triage::inbox_undo_dismiss,
             crate::commands::triage::inbox_override_veto,
             crate::commands::triage::inbox_decide_suggestion,
+            crate::commands::kill_switch::kill_switch_status,
+            crate::commands::kill_switch::kill_switch_set,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
@@ -105,6 +107,7 @@ macro_rules! boba_events {
             crate::events::TaskProgressed,
             crate::events::TaskFinished,
             crate::commands::daily_search::RunReportProgressed,
+            crate::commands::kill_switch::KillSwitchChanged,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

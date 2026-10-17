@@ -1,1 +1,8 @@
-{}
+{
+  "engage": "Kill Switch",
+  "engage.hint": "Stop every automatic send right now",
+  "engaged": "Automatic sending is off",
+  "engaged.hint": "The Kill Switch is on. Nothing leaves without you until you turn it off.",
+  "turnOff": "Turn off",
+  "error": "The Kill Switch could not be changed. Try again from the tray."
+}
