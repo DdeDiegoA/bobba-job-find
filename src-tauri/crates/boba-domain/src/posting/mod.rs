@@ -12,6 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod lifecycle;
+
 /// A fresh ULID for a posting, prefixed by type (AD-17: `pst_…`).
 pub fn new_posting_id() -> String {
     format!("pst_{}", ulid::Ulid::generate())

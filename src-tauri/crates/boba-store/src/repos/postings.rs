@@ -13,6 +13,9 @@ use serde_json::Value;
 
 use boba_app::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use boba_domain::dedup::{DedupProbe, description_simhash, job_key_of, probe_matches};
+use boba_domain::posting::lifecycle::{
+    ClosedWarning, PostingLifecycle, is_past_deadline, is_repost,
+};
 use boba_domain::posting::{ApplyHints, Money, Offer, PayPeriod, Provenance, WorkMode};
 use boba_domain::posting_features::{
     AgentRunRef, Claim, FeatureKind, FeatureSource, PendingPosting, PostingFeatures,
@@ -24,7 +27,7 @@ use crate::db::{Store, StoreError};
 const SELECT: &str = "SELECT id, source_id, external_id, title, company, location_json, \
      work_mode, amount_minor, currency, pay_period, posted_at, deadline, first_seen, last_seen, \
      lang, description_html, description_text, requirements_json, apply_url, apply_email \
-     FROM posting";
+     FROM posting p";
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Offer> {
     let amount_minor: Option<i64> = r.get(7)?;
@@ -138,6 +141,14 @@ pub fn insert_offer(
         ],
     )?;
     insert_provenance(&tx, provenance)?;
+    // A posting is never stored without its lifecycle row (S4.4): the row is
+    // what the seen state, the staleness check and the run sweep read, and
+    // opening it here is what makes the signal exist from the first
+    // observation (FR-51, AC2).
+    insert_lifecycle(
+        &tx,
+        &PostingLifecycle::new(&offer.id, offer, &offer.first_seen),
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -181,6 +192,29 @@ pub fn merge_provenance(
         params![posting_id, now],
     )?;
     insert_provenance(&tx, provenance)?;
+    // Seeing it again is what ends a disappearance (S4.4): the posting is
+    // present, so a missing streak is over, and coming back inside the window
+    // records the repost Q4 reads (FR-51). Writing this in the same
+    // transaction keeps a re-sight and its lifecycle from disagreeing.
+    if let Some(posting) = get_offer(&tx, posting_id)? {
+        let mut row = lifecycle(&tx, posting_id)?
+            .unwrap_or_else(|| PostingLifecycle::new(posting_id, &posting, now));
+        if let Some(disappeared_at) = row.disappeared_at.clone()
+            && is_repost(&disappeared_at, now)
+        {
+            row.repost_at = Some(now.to_string());
+        }
+        row.missing_runs = 0;
+        row.disappeared_at = None;
+        // Back in its Source: open again — unless it is closed because its
+        // deadline passed. A re-sighting does not revise that date, so the
+        // closure (and the warning on saved Applications) stays put (FR-52).
+        if !is_past_deadline(&posting, now) {
+            row.possibly_closed_at = None;
+        }
+        row.updated_at = now.to_string();
+        upsert_lifecycle(&tx, &row)?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -255,6 +289,189 @@ pub fn provenance_for(conn: &Connection, posting_id: &str) -> Result<Vec<Provena
 
 fn map_err(error: StoreError) -> IngestionRepoError {
     IngestionRepoError::Store(error.to_string())
+}
+
+// --- lifecycle (S4.4, FR-50/51/52) ------------------------------------------
+
+const LIFECYCLE_SELECT: &str = "SELECT posting_id, content_hash, description_simhash, seen_at, \
+     dismissed_at, missing_runs, disappeared_at, repost_at, stale_at, possibly_closed_at, \
+     updated_at FROM posting_lifecycle";
+
+fn lifecycle_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<PostingLifecycle> {
+    Ok(PostingLifecycle {
+        posting_id: r.get(0)?,
+        content_hash: r.get(1)?,
+        description_simhash: r.get::<_, Option<i64>>(2)?.map(|hash| hash as u64),
+        seen_at: r.get(3)?,
+        dismissed_at: r.get(4)?,
+        missing_runs: r.get::<_, i64>(5)?.max(0) as u32,
+        disappeared_at: r.get(6)?,
+        repost_at: r.get(7)?,
+        stale_at: r.get(8)?,
+        possibly_closed_at: r.get(9)?,
+        updated_at: r.get(10)?,
+    })
+}
+
+/// One posting's lifecycle row (S4.4).
+pub fn lifecycle(
+    conn: &Connection,
+    posting_id: &str,
+) -> Result<Option<PostingLifecycle>, StoreError> {
+    Ok(conn
+        .query_row(
+            &format!("{LIFECYCLE_SELECT} WHERE posting_id = ?1"),
+            params![posting_id],
+            lifecycle_row,
+        )
+        .optional()?)
+}
+
+/// Write one posting's lifecycle row, replacing what was there (S4.4).
+pub fn save_lifecycle(conn: &Connection, row: &PostingLifecycle) -> Result<(), StoreError> {
+    upsert_lifecycle(conn, row)
+}
+
+fn insert_lifecycle(conn: &Connection, row: &PostingLifecycle) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO posting_lifecycle (posting_id, content_hash, description_simhash, seen_at, \
+         dismissed_at, missing_runs, disappeared_at, repost_at, stale_at, possibly_closed_at, \
+         updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            row.posting_id,
+            row.content_hash,
+            row.description_simhash.map(|hash| hash as i64),
+            row.seen_at,
+            row.dismissed_at,
+            i64::from(row.missing_runs),
+            row.disappeared_at,
+            row.repost_at,
+            row.stale_at,
+            row.possibly_closed_at,
+            row.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_lifecycle(conn: &Connection, row: &PostingLifecycle) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO posting_lifecycle (posting_id, content_hash, description_simhash, seen_at, \
+         dismissed_at, missing_runs, disappeared_at, repost_at, stale_at, possibly_closed_at, \
+         updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) \
+         ON CONFLICT(posting_id) DO UPDATE SET content_hash = excluded.content_hash, \
+             description_simhash = excluded.description_simhash, seen_at = excluded.seen_at, \
+             dismissed_at = excluded.dismissed_at, missing_runs = excluded.missing_runs, \
+             disappeared_at = excluded.disappeared_at, repost_at = excluded.repost_at, \
+             stale_at = excluded.stale_at, possibly_closed_at = excluded.possibly_closed_at, \
+             updated_at = excluded.updated_at",
+        params![
+            row.posting_id,
+            row.content_hash,
+            row.description_simhash.map(|hash| hash as i64),
+            row.seen_at,
+            row.dismissed_at,
+            i64::from(row.missing_runs),
+            row.disappeared_at,
+            row.repost_at,
+            row.stale_at,
+            row.possibly_closed_at,
+            row.updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Postings whose every observation in `source_ids` is older than
+/// `started_at`: the ones a run over those Sources that began then did not see
+/// (S4.4, FR-52). "Missing from its Source" is a question about the provenance
+/// rows — one posting can be listed by several Sources, and only the ones the
+/// run covered count. RFC 3339 UTC sorts as text, so the window is a string
+/// comparison.
+pub fn postings_missing_from_run(
+    conn: &Connection,
+    source_ids: &[String],
+    started_at: &str,
+) -> Result<Vec<Offer>, StoreError> {
+    postings_in_run(conn, source_ids, started_at, false)
+}
+
+/// Postings one of whose observations in `source_ids` is at or after
+/// `started_at`: the ones the run saw (S4.4, FR-52).
+pub fn postings_seen_by_run(
+    conn: &Connection,
+    source_ids: &[String],
+    started_at: &str,
+) -> Result<Vec<Offer>, StoreError> {
+    postings_in_run(conn, source_ids, started_at, true)
+}
+
+fn postings_in_run(
+    conn: &Connection,
+    source_ids: &[String],
+    started_at: &str,
+    seen: bool,
+) -> Result<Vec<Offer>, StoreError> {
+    if source_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; source_ids.len()].join(", ");
+    let observed = format!(
+        "EXISTS (SELECT 1 FROM posting_source s WHERE s.posting_id = p.id \
+         AND s.source_id IN ({placeholders}) AND s.fetched_at >= ?)"
+    );
+    let filter = if seen {
+        observed
+    } else {
+        format!("NOT {observed}")
+    };
+    let sql = format!(
+        "{SELECT} WHERE EXISTS (SELECT 1 FROM posting_source s WHERE s.posting_id = p.id \
+         AND s.source_id IN ({placeholders})) AND {filter}"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = source_ids
+        .iter()
+        .map(|source_id| source_id as &dyn rusqlite::ToSql)
+        .collect();
+    params.extend(
+        source_ids
+            .iter()
+            .map(|source_id| source_id as &dyn rusqlite::ToSql),
+    );
+    params.push(&started_at);
+    let rows = stmt.query_map(params.as_slice(), row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Every *Possibly closed* posting that has saved Applications, with their ids
+/// (S4.4, FR-52). The `application` table belongs to the apply owner; this is a
+/// read-only projection for the warning, never a write (AD-16).
+pub fn possibly_closed_with_applications(
+    conn: &Connection,
+) -> Result<Vec<ClosedWarning>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT l.posting_id, a.id FROM posting_lifecycle l \
+         JOIN application a ON a.posting_id = l.posting_id \
+         WHERE l.possibly_closed_at IS NOT NULL \
+         ORDER BY l.posting_id, a.created_at, a.id",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+
+    let mut warnings: Vec<ClosedWarning> = Vec::new();
+    for row in rows {
+        let (posting_id, application_id) = row?;
+        match warnings.last_mut() {
+            Some(warning) if warning.posting_id == posting_id => {
+                warning.application_ids.push(application_id);
+            }
+            _ => warnings.push(ClosedWarning {
+                posting_id,
+                application_ids: vec![application_id],
+            }),
+        }
+    }
+    Ok(warnings)
 }
 
 // --- features (S6.2, FR-55/FR-56 inputs, FR-61, AD-5) -------------------------
@@ -578,12 +795,52 @@ impl IngestionRepo for Store {
         self.read(move |conn| features_pending(conn, profile_version, limit))
             .map_err(map_err)
     }
+
+    fn lifecycle(&self, posting_id: &str) -> Result<Option<PostingLifecycle>, IngestionRepoError> {
+        let posting_id = posting_id.to_string();
+        self.read(move |conn| lifecycle(conn, &posting_id))
+            .map_err(map_err)
+    }
+
+    fn save_lifecycle(&self, lifecycle: &PostingLifecycle) -> Result<(), IngestionRepoError> {
+        let lifecycle = lifecycle.clone();
+        self.execute(move |conn| save_lifecycle(conn, &lifecycle))
+            .map_err(map_err)
+    }
+
+    fn postings_missing_from_run(
+        &self,
+        source_ids: &[String],
+        before: &str,
+    ) -> Result<Vec<Offer>, IngestionRepoError> {
+        let source_ids = source_ids.to_vec();
+        let before = before.to_string();
+        self.read(move |conn| postings_missing_from_run(conn, &source_ids, &before))
+            .map_err(map_err)
+    }
+
+    fn postings_seen_by_run(
+        &self,
+        source_ids: &[String],
+        since: &str,
+    ) -> Result<Vec<Offer>, IngestionRepoError> {
+        let source_ids = source_ids.to_vec();
+        let since = since.to_string();
+        self.read(move |conn| postings_seen_by_run(conn, &source_ids, &since))
+            .map_err(map_err)
+    }
+
+    fn possibly_closed_with_applications(&self) -> Result<Vec<ClosedWarning>, IngestionRepoError> {
+        self.read(possibly_closed_with_applications)
+            .map_err(map_err)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::migrate;
+    use boba_domain::posting::lifecycle::material_hash;
     use boba_domain::scoring::gates::{Confidence, Evidence, QuotedSpan};
 
     fn connection() -> Connection {
@@ -639,6 +896,15 @@ mod tests {
             url: format!("https://jobs.example.com/{external_id}"),
             raw: format!(r#"{{"id":"{external_id}"}}"#),
             fetched_at: "2026-10-16T00:00:00Z".into(),
+        }
+    }
+
+    /// A provenance row observed at a given instant: S4.4's run window reads
+    /// `fetched_at`, not the posting's `last_seen`.
+    fn observed(posting_id: &str, source_id: &str, external_id: &str, at: &str) -> Provenance {
+        Provenance {
+            fetched_at: at.into(),
+            ..provenance(posting_id, source_id, external_id)
         }
     }
 
@@ -1216,5 +1482,275 @@ mod tests {
             );
         }
         assert_eq!(features(&conn, "pst_1", 1).unwrap(), Some(set));
+    }
+
+    // --- lifecycle (S4.4, FR-50/51/52) ---------------------------------------
+
+    /// An insert opens the posting's lifecycle row in the same transaction, so
+    /// the staleness check has already run on the first observation (FR-51).
+    #[test]
+    fn an_insert_opens_a_lifecycle_row_and_checks_its_age() {
+        let conn = connection();
+        let mut old = offer("pst_1");
+        old.posted_at = Some("2026-07-01T00:00:00Z".into());
+        insert_offer(&conn, &old, &provenance("pst_1", "remotive", "abc-1")).unwrap();
+
+        let row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        assert_eq!(row.content_hash, material_hash(&old));
+        assert_eq!(
+            row.description_simhash,
+            description_simhash(&old.description_text)
+        );
+        assert_eq!(row.seen_at, None, "nobody has seen it yet");
+        assert_eq!(row.stale_at.as_deref(), Some("2026-10-16T00:00:00Z"));
+        assert!(!row.is_possibly_closed());
+    }
+
+    #[test]
+    fn a_postings_lifecycle_row_can_be_saved_and_read_back() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+
+        let mut row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        row.seen_at = Some("2026-10-16T00:00:00Z".into());
+        row.dismissed_at = Some("2026-10-16T00:00:00Z".into());
+        row.missing_runs = 2;
+        save_lifecycle(&conn, &row).unwrap();
+
+        assert_eq!(lifecycle(&conn, "pst_1").unwrap(), Some(row));
+        assert_eq!(lifecycle(&conn, "pst_nope").unwrap(), None);
+    }
+
+    /// FR-51: back inside the window is a repost, and the posting is open again.
+    #[test]
+    fn a_resighting_inside_the_repost_window_records_it() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        row.missing_runs = 2;
+        row.disappeared_at = Some("2026-10-10T00:00:00Z".into());
+        row.possibly_closed_at = Some("2026-10-12T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_1",
+            &provenance("pst_1", "himalayas", "x9"),
+            "2026-10-20T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_1").unwrap().expect("still tracked");
+        assert_eq!(row.repost_at.as_deref(), Some("2026-10-20T00:00:00Z"));
+        assert_eq!(row.missing_runs, 0, "seen again");
+        assert_eq!(row.disappeared_at, None);
+        assert!(!row.is_possibly_closed(), "a repost is not a closure");
+    }
+
+    #[test]
+    fn a_resighting_after_the_window_is_not_a_repost() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        row.disappeared_at = Some("2026-09-01T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_1",
+            &provenance("pst_1", "himalayas", "x9"),
+            "2026-10-20T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_1").unwrap().expect("still tracked");
+        assert_eq!(row.repost_at, None, "seven weeks is a new listing");
+    }
+
+    /// FR-52: a posting closed because its deadline passed stays closed when
+    /// its Source lists it again — the re-sight does not revise the date, so
+    /// the run cannot report it as newly closed a second time.
+    #[test]
+    fn a_deadline_closure_survives_a_resighting() {
+        let conn = connection();
+        let mut expired = offer("pst_expired");
+        expired.deadline = Some("2026-10-01T00:00:00Z".into());
+        expired.last_seen = "2026-10-16T00:00:00Z".into();
+        insert_offer(
+            &conn,
+            &expired,
+            &observed("pst_expired", "remotive", "abc-1", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_expired").unwrap().expect("opened");
+        row.possibly_closed_at = Some("2026-10-16T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_expired",
+            &observed("pst_expired", "remotive", "abc-1", "2026-10-17T00:00:00Z"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_expired")
+            .unwrap()
+            .expect("still tracked");
+        assert_eq!(
+            row.possibly_closed_at.as_deref(),
+            Some("2026-10-16T00:00:00Z"),
+            "the closure keeps its original instant"
+        );
+        assert_eq!(row.missing_runs, 0, "the posting is present again");
+    }
+
+    /// A posting not past its deadline is open again after a re-sighting: only
+    /// a deadline closure outlives the row being seen.
+    #[test]
+    fn a_missing_closure_is_reopened_by_a_resighting() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &observed("pst_1", "remotive", "abc-1", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        row.missing_runs = 2;
+        row.possibly_closed_at = Some("2026-10-16T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_1",
+            &observed("pst_1", "remotive", "abc-1", "2026-10-17T00:00:00Z"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_1").unwrap().expect("still tracked");
+        assert!(!row.is_possibly_closed());
+    }
+
+    /// The run sweep asks for the postings it did and did not see, of the
+    /// Sources it covered (FR-52).
+    #[test]
+    fn the_run_queries_split_postings_by_last_seen_and_source() {
+        let conn = connection();
+        let mut seen = offer("pst_seen");
+        seen.last_seen = "2026-10-16T00:00:00Z".into();
+        insert_offer(
+            &conn,
+            &seen,
+            &observed("pst_seen", "remotive", "a", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+
+        let mut gone = offer("pst_gone");
+        gone.last_seen = "2026-10-10T00:00:00Z".into();
+        insert_offer(
+            &conn,
+            &gone,
+            &observed("pst_gone", "remotive", "b", "2026-10-10T00:00:00Z"),
+        )
+        .unwrap();
+
+        // Still listed by a Source this run did not cover: nothing to say
+        // about the Source it did.
+        let mut elsewhere = other_source("pst_elsewhere", "himalayas", "https://himalayas.app/z");
+        elsewhere.last_seen = "2026-10-16T00:00:00Z".into();
+        insert_offer(
+            &conn,
+            &elsewhere,
+            &observed("pst_elsewhere", "himalayas", "z", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+
+        let sources = ["remotive".to_string()];
+        let missing: Vec<String> =
+            postings_missing_from_run(&conn, &sources, "2026-10-12T00:00:00Z")
+                .unwrap()
+                .into_iter()
+                .map(|offer| offer.id)
+                .collect();
+        let seen_by_run: Vec<String> =
+            postings_seen_by_run(&conn, &sources, "2026-10-12T00:00:00Z")
+                .unwrap()
+                .into_iter()
+                .map(|offer| offer.id)
+                .collect();
+
+        assert_eq!(missing, ["pst_gone"], "a run that only covered Remotive");
+        assert_eq!(seen_by_run, ["pst_seen"]);
+
+        // Seeing it again on the Source the run covers clears the miss.
+        merge_provenance(
+            &conn,
+            "pst_gone",
+            &observed("pst_gone", "remotive", "b", "2026-10-17T00:00:00Z"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+        assert!(
+            postings_missing_from_run(&conn, &sources, "2026-10-12T00:00:00Z")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// FR-52, AC3: only closed postings with saved Applications are warned.
+    #[test]
+    fn possibly_closed_postings_come_back_with_their_saved_applications() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "a"),
+        )
+        .unwrap();
+        insert_offer(
+            &conn,
+            &offer("pst_2"),
+            &provenance("pst_2", "remotive", "b"),
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO application (id, posting_id, status, offer_snapshot_json, created_at, \
+             updated_at) VALUES ('app_1', 'pst_1', 'applied', '{}', 't', 't')",
+            [],
+        )
+        .unwrap();
+
+        for (posting_id, closed) in [("pst_1", true), ("pst_2", false)] {
+            let mut row = lifecycle(&conn, posting_id).unwrap().expect("opened");
+            if closed {
+                row.possibly_closed_at = Some("2026-10-12T00:00:00Z".into());
+            }
+            save_lifecycle(&conn, &row).unwrap();
+        }
+
+        assert_eq!(
+            possibly_closed_with_applications(&conn).unwrap(),
+            vec![ClosedWarning {
+                posting_id: "pst_1".into(),
+                application_ids: vec!["app_1".into()],
+            }]
+        );
     }
 }

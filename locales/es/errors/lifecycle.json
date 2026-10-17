@@ -1,0 +1,4 @@
+{
+  "errors.lifecycle.missing_posting": "Boba no encontró esa oferta. Actualiza la bandeja e inténtalo de nuevo.",
+  "errors.lifecycle.store": "Boba no pudo actualizar el historial de esta oferta. Inténtalo de nuevo."
+}
