@@ -123,7 +123,7 @@ graph LR
 ### 4.1 Composition root (`src-tauri/src`)
 
 - **Commands.** One Rust module per feature area. Each command is a thin wrapper (validate, call a use case, map the error). All commands are registered through `tauri_specta::Builder`, which exports `src/lib/ipc/bindings.ts` in debug builds. CI checks that the file is up to date (AD-3).
-- **Events.** Typed `specta` events, `<area>.<thing>.<verb-ed>`. Examples: `ingest.run.progressed`, `posting.scored`, `agent.run.progressed`, `apply.attempt.finished`, `killswitch.changed`.
+- **Events.** Typed `specta` events, `<area>:<verb-ed>`, with no dots (Tauri 2.12 rejects them; ADR-017). The registered events are `task:progressed`, `task:finished`, `run_report:progressed`, `kill_switch:changed` and `notification:opened`. A validity test in `ipc/mod.rs` runs every registered name through Tauri's own validation.
 - **Tray.** Tauri `tray-icon` feature. The menu shows: Open · Run search now · *Today: N new matches* · **Pause all automation (kill switch)** · Quit. Closing the window hides it to the tray. The autostart plugin is opt-in, offered during onboarding.
 - **Scheduler (AD-18).** A tokio task that wakes every minute and evaluates cron expressions (`cron` crate) against `job_run`. It catches up on missed slots after sleep or launch. Jobs: `daily_search` (default 08:00 local), `email_sync` (every 30 min if connected), `rescore` (on profile/prefs version bump), `retention_sweep` (weekly). While the app is **Locked** (ADR-009), each due job is recorded as `skipped_locked` and one notification is sent per slot. A job is never marked as succeeded.
 - **ProcessSupervisor.** Spawns children with `process-wrap`: a process group on Unix and a Job Object on Windows, with kill-on-drop. It enforces the wall-clock timeout, captures stdout and stderr line by line, and turns cancellation into kill-tree. Children: agent CLIs, the user's Chrome for CDP, and (v1.1) external-process adapters.
@@ -234,7 +234,7 @@ sequenceDiagram
   S->>T: connect local socket, auth(token)
   loop until done / limit / cancel
     C-->>AR: JSONL events (text, tool_use, usage)
-    AR-->>F: AgentEvent stream (→ UI `agent.run.progressed`)
+    AR-->>F: AgentEvent stream (→ UI `task:progressed`)
     C->>S: tools/call get_* / propose_*
     S->>T: forward
     T-->>S: result (untrusted envelopes, AD-7)
