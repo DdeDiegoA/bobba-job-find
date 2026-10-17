@@ -54,6 +54,10 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     let system: Arc<dyn SystemRepo> =
         Arc::new(SqliteSystemRepo::new(store.clone(), keychain_service()));
     mount_port::<dyn SystemRepo>(app, Arc::clone(&system));
+    // The on-device F3 encoder and its opt-in (S6.9, AD-8): the port exists
+    // only in a build with the `embeddings` feature; the use case always does,
+    // so Settings can say why F3 is unavailable (AC4).
+    mount_embeddings(app, Arc::clone(&system));
     mount_port::<dyn ProfileRepo>(app, store.clone());
     // The ingestion owner writes `posting` + `posting_source` (S4.2).
     mount_port::<dyn IngestionRepo>(app, store.clone());
@@ -196,6 +200,44 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // (S8.4): `email_classification` is no other area's table.
     mount_port::<dyn boba_app::status_proposals::repo::StatusProposalRepo>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
+}
+
+/// Mount the on-device F3 encoder and the opt-in use case over it (S6.9).
+///
+/// The model directory is app data `models/`: the opt-in download (AC1) writes
+/// there, and the network-activity view lists that same destination. A build
+/// without the `embeddings` feature mounts no port, so the use case answers
+/// `available: false` and F3 drops out of scoring unchanged (AC4).
+fn mount_embeddings<R: Runtime>(app: &AppHandle<R>, system: Arc<dyn SystemRepo>) {
+    #[cfg(feature = "embeddings")]
+    let port: Option<Arc<dyn boba_app::ports::embedding::EmbeddingPort>> =
+        match app.path().app_data_dir() {
+            Ok(data) => {
+                let port: Arc<dyn boba_app::ports::embedding::EmbeddingPort> =
+                    Arc::new(boba_embed::FastembedEncoder::new(data.join("models")));
+                mount_port::<dyn boba_app::ports::embedding::EmbeddingPort>(app, Arc::clone(&port));
+                Some(port)
+            }
+            Err(error) => {
+                tracing::error!(?error, "embedding port left unmounted");
+                None
+            }
+        };
+    #[cfg(not(feature = "embeddings"))]
+    let port: Option<Arc<dyn boba_app::ports::embedding::EmbeddingPort>> = {
+        let _ = app;
+        None
+    };
+
+    let service = Arc::new(boba_app::embeddings::EmbeddingsService::new(
+        port,
+        system,
+        Arc::new(boba_app::system::SystemClock),
+    ));
+    assert!(
+        app.manage(Arc::clone(&service)),
+        "duplicate embeddings state in port_list"
+    );
 }
 
 /// The Email Apply engine, built from the ports just mounted (startup pass only).

@@ -516,6 +516,18 @@ impl<R: Runtime> JobHandler for DailySearchHandler<R> {
     }
 }
 
+/// The mounted embeddings use case (S6.9), or `None` when it is not there.
+///
+/// A build without the `embeddings` feature still mounts the use case (with no
+/// encoder), and `similarity` then answers `None`; an unmounted state is a
+/// locked store, which likewise means no F3 for this run.
+fn embeddings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Option<Arc<boba_app::embeddings::EmbeddingsService>> {
+    app.try_state::<Arc<boba_app::embeddings::EmbeddingsService>>()
+        .map(|state| Arc::clone(state.inner()))
+}
+
 /// What one run produced, and the store it was produced against, so the caller
 /// decides what is stored (a retry folds its lines into the report it retried
 /// instead of replacing it — reviewer-1 F4).
@@ -588,7 +600,10 @@ fn execute<R: Runtime>(
     // hours, the user's choices) instead of S5.2's plain top-matches notice.
     .with_digest(Some(Arc::new(crate::notifications::DigestNotifier::new(
         app.clone(),
-    ))));
+    ))))
+    // S6.9: F3 rides along when the build carries the encoder — the opt-in
+    // decides whether it answers (AC1), and a missing mount is simply no F3.
+    .with_embeddings(embeddings(app));
 
     let report = service
         .run(options)

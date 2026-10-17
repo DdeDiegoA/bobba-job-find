@@ -25,7 +25,8 @@ pub mod report;
 use std::sync::Arc;
 use std::time::Duration;
 
-use boba_domain::scoring::factors::ScoreInputs;
+use boba_domain::posting::Offer;
+use boba_domain::scoring::factors::{ScoreInputs, SemanticScore};
 use boba_domain::scoring::gates::{self, Verdict as GateVerdict};
 use boba_domain::scoring::rank::{self, ScoreCardRow, Verdict as BandVerdict};
 use boba_domain::source::{
@@ -35,6 +36,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::digest::{self, DigestInput, DigestPort, NotificationSettings, TopMatch};
+use crate::embeddings::EmbeddingsService;
 use crate::ingest::dedup::{Outcome, ingest_deduped};
 use crate::ingest::lifecycle::{self, RunWindow};
 use crate::ports::agent::RunBudget;
@@ -189,6 +191,11 @@ pub struct DailySearch {
     /// plain top-matches notice the run has shown since S5.2.
     digest: Option<Arc<dyn DigestPort>>,
     observer: Option<Arc<dyn RunObserver>>,
+    /// F3's optional on-device scorer (S6.9, AD-8). `None` in a build without
+    /// the encoder; even when present, [`EmbeddingsService::similarity`] answers
+    /// `None` until the user opts in, so the factor drops out and the axis
+    /// renormalises (AC2).
+    embeddings: Option<Arc<EmbeddingsService>>,
 }
 
 impl DailySearch {
@@ -208,6 +215,29 @@ impl DailySearch {
             notifier,
             digest: None,
             observer,
+            embeddings: None,
+        }
+    }
+
+    /// F3's optional scorer (S6.9): the composition root hands the mounted
+    /// embeddings use case over, and the run asks it for each Offer's semantic
+    /// similarity. Without it, scoring is exactly the deterministic one.
+    pub fn with_embeddings(mut self, embeddings: Option<Arc<EmbeddingsService>>) -> Self {
+        self.embeddings = embeddings;
+        self
+    }
+
+    /// F3 for one Offer (S6.9, AD-8): `None` when this build has no encoder,
+    /// the user has not opted in, or the encoder could not answer. A failed
+    /// encode never fails a run — the factor drops out and renormalises.
+    fn semantic(&self, offer: &Offer, inputs: &ScoringInputs) -> Option<SemanticScore> {
+        let embeddings = self.embeddings.as_ref()?;
+        match embeddings.similarity(offer, &inputs.profile, &inputs.prefs) {
+            Ok(similarity) => similarity,
+            Err(error) => {
+                tracing::warn!(%error, "embeddings: F3 skipped for this Offer");
+                None
+            }
         }
     }
 
@@ -504,7 +534,7 @@ impl DailySearch {
             profile: &inputs.profile,
             prefs: &inputs.prefs,
             market: &inputs.market,
-            semantic: None,
+            semantic: self.semantic(&offer, inputs),
             now,
         };
         rank::score(&score_inputs).map(|card| card.rank)
@@ -564,6 +594,8 @@ impl DailySearch {
                 title: offer.title.clone(),
                 company: offer.company.clone(),
             };
+            // F3 before the request takes the Offer (S6.9, AC1).
+            let semantic = self.semantic(&offer, inputs);
             let request = ScoreRequest {
                 posting_id: posting_id.clone(),
                 profile_version: inputs.profile_version,
@@ -573,7 +605,7 @@ impl DailySearch {
                 profile: inputs.profile.clone(),
                 prefs: inputs.prefs.clone(),
                 market: inputs.market.clone(),
-                semantic: None,
+                semantic,
                 gates: gate_report,
             };
             match service.score(request) {

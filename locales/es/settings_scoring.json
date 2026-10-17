@@ -57,5 +57,17 @@
       },
       "report": "Fuente: {report}"
     }
+  },
+  "embeddings": {
+    "title": "Coincidencia semántica local",
+    "hint": "Boba puede comparar el significado de cada oferta con tu perfil usando un modelo de lenguaje pequeño que se ejecuta en este dispositivo. La descarga es de unos {size} MB, una sola vez, y nada de tu búsqueda sale de tu ordenador. Sin él, la puntuación de encaje omite este factor y reparte su peso entre los demás.",
+    "loading": "Comprobando si el modelo está en este dispositivo…",
+    "unavailable": "Esta versión de Boba no incluye el modelo local, así que la coincidencia semántica no está disponible. Todo lo demás funciona igual.",
+    "on": "La coincidencia semántica está activa. Se ejecuta en este dispositivo y sin conexión.",
+    "off": "Desactivar",
+    "enable": "Descargar el modelo",
+    "downloading": "Descargando y comprobando el modelo… puede tardar unos minutos.",
+    "destination": "El modelo se guarda en {path}.",
+    "error": "Boba no pudo cambiar el ajuste de coincidencia semántica."
   }
 }

@@ -677,7 +677,6 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "boba-domain",
- "fastembed",
  "flate2",
  "html2text",
  "lingua",
@@ -739,6 +738,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "boba-embed"
+version = "0.1.0"
+dependencies = [
+ "boba-app",
+ "boba-domain",
+ "fastembed",
+ "hf-hub",
+ "sha2 0.10.9",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "boba-fake-cli"
 version = "0.1.0"
 dependencies = [
@@ -755,6 +767,7 @@ dependencies = [
  "boba-browser",
  "boba-docs",
  "boba-domain",
+ "boba-embed",
  "boba-mail",
  "boba-mcp-proto",
  "boba-sources",

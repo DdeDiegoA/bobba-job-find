@@ -1,0 +1,7 @@
+{
+  "errors.embeddings.unavailable": "This build of Boba has no on-device model, so the semantic match (F3) is unavailable. Scoring works without it.",
+  "errors.embeddings.not_installed": "The on-device model is not on this device. Turn on the semantic match in Settings → Scoring to download it.",
+  "errors.embeddings.download": "The model could not be downloaded. Check your connection and try again.",
+  "errors.embeddings.encode": "The on-device model could not score this Offer. F3 is skipped for it; the other factors still count.",
+  "errors.embeddings.store": "Boba could not save the semantic-match setting. Try again."
+}

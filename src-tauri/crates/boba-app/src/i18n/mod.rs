@@ -61,6 +61,7 @@ const ERROR_FRAGMENTS: &[(&str, &str, &str)] = error_fragments![
     "autostart",
     "backup",
     "email",
+    "embeddings",
     "inbox_actions",
     "lifecycle",
     "manual",

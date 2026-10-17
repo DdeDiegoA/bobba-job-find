@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { commands, type PreferencesSnapshot, type ScoringWeights } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
+import SemanticMatch from "./embeddings";
 
 /**
  * Settings → Scoring (S6.8, FR-58).
@@ -192,6 +193,9 @@ export default function SettingsScoring() {
           {t(`settings_scoring:error.${invalid}`)}
         </p>
       ) : null}
+
+      {/* S6.9: F3's model is a download, so it lives behind an explicit choice. */}
+      <SemanticMatch />
 
       <div className="flex flex-wrap items-center gap-3">
         <Button

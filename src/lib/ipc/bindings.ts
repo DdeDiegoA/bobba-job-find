@@ -266,6 +266,24 @@ export const commands = {
   agentModels: (cli: string) =>
     typedError<string[], AppError_Serialize>(__TAURI_INVOKE("agent_models", { cli })),
   /**
+   *  What F3 can do right now: whether this build carries the encoder, whether
+   *  the user opted in, where the model lives and what it costs (AC1, AC4).
+   */
+  embeddingsStatus: () =>
+    typedError<EmbeddingStatus, AppError_Serialize>(__TAURI_INVOKE("embeddings_status")),
+  /**
+   *  The user's consent: download the model (about 487 MB, multilingual-e5-small)
+   *  if it is not on disk, record the destination, and turn F3 on (AC1).
+   */
+  embeddingsOptIn: () =>
+    typedError<EmbeddingStatus, AppError_Serialize>(__TAURI_INVOKE("embeddings_opt_in")),
+  /**
+   *  Turn F3 off (AC2): the next run scores without it and renormalises its
+   *  weight. The model files stay on disk.
+   */
+  embeddingsOptOut: () =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("embeddings_opt_out")),
+  /**
    *  The draft, the verified attachments and the approved answers the review
    *  screen shows before Send (S9.3, AC1/AC3).
    */
@@ -1320,6 +1338,27 @@ export type EmailMode =
   | "send_only"
   /**  Read and send. */
   | "read_send";
+
+/**
+ *  What the Settings screen shows about F3 (AC1, AC4). Crosses IPC (AD-3), so
+ *  the path is the string the user sees, not a `PathBuf`.
+ */
+export type EmbeddingStatus = {
+  /**  This build carries an encoder (`boba-embed` + the `embeddings` feature). */
+  available: boolean;
+  /**  The user accepted the download (the opt-in). */
+  opted_in: boolean;
+  /**  The model files are on disk. */
+  installed: boolean;
+  model_id: string;
+  /**  Where the model lives, once the opt-in downloaded it. */
+  destination: string | null;
+  /**
+   *  What the download costs, for the opt-in copy. `u32`: IPC carries no
+   *  64-bit integers (specta), and half a gigabyte fits with room to spare.
+   */
+  approximate_bytes: number;
+};
 
 /**  What one change did, for the command result and the audit detail. */
 export type Engagement = {
