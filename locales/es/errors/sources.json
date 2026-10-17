@@ -1,0 +1,6 @@
+{
+  "errors.sources.invalid_url": "Esa URL de feed no es válida. Usa una dirección https, como https://example.com/feed.xml.",
+  "errors.sources.fetch": "Boba no pudo obtener ese feed. Revisa la dirección o inténtalo más tarde.",
+  "errors.sources.store": "No se pudieron leer ni guardar tus fuentes.",
+  "errors.sources.invalid": "La lista de feeds guardada está dañada. Elimina los feeds personalizados y vuelve a añadirlos."
+}

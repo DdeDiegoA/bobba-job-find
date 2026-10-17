@@ -42,6 +42,14 @@ pub trait SourcesRepo: Send + Sync {
 
     fn start_run(&self, run: &SourceRunRecord) -> Result<(), SourcesRepoError>;
 
+    /// The newest runs of one source, newest first, capped at `limit`
+    /// (S4.8: the Connections tile folds them into its health view).
+    fn recent_runs(
+        &self,
+        source_id: &str,
+        limit: usize,
+    ) -> Result<Vec<SourceRunRecord>, SourcesRepoError>;
+
     fn finish_run(
         &self,
         id: &str,

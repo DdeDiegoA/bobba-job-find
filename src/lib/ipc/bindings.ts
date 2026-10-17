@@ -422,6 +422,26 @@ export const commands = {
         utcOffsetMinutes,
       }),
     ),
+  /**
+   *  Every Source, with its health: built-in feeds are registered on the first
+   *  open (the same lazy seam Manual intake uses), then every row is read back.
+   */
+  sourcesCatalogue: () =>
+    typedError<SourceTileView[], AppError_Serialize>(__TAURI_INVOKE("sources_catalogue")),
+  /**
+   *  Fetch a pasted feed once and return its count and a sample (AC2). Nothing
+   *  is saved here: the screen saves separately once the user accepts the preview.
+   */
+  sourcesTestRss: (url: string, name: string | null) =>
+    typedError<RssTestView, AppError_Serialize>(__TAURI_INVOKE("sources_test_rss", { url, name })),
+  /**  Save a custom feed that the user previewed; re-adding a URL updates it. */
+  sourcesAddRss: (url: string, name: string | null) =>
+    typedError<SourceTileView, AppError_Serialize>(
+      __TAURI_INVOKE("sources_add_rss", { url, name }),
+    ),
+  /**  Remove a custom feed; `true` when it was saved. */
+  sourcesRemoveRss: (id: string) =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("sources_remove_rss", { id })),
 };
 
 /** Events */
@@ -1425,6 +1445,26 @@ export type ReviewView_Serialize = {
   findings: Finding_Serialize[];
 };
 
+/**  One sampled posting in the add-feed preview (AC2). */
+export type RssSampleView = {
+  title: string;
+  company: string;
+  url: string;
+  posted_at: string | null;
+};
+
+/**  What the test fetch shows before the user saves (AC2). */
+export type RssTestView = {
+  /**  The id the feed will be saved under (`rss:<slug>`). */
+  id: string;
+  name: string;
+  url: string;
+  /**  How many items the feed returned for this fetch. */
+  count: number;
+  /**  Up to five items, for the preview. */
+  sample: RssSampleView[];
+};
+
 /**
  *  What the screen submits to create or edit a rule (AC1). `id` is `None` for a
  *  new rule; an unknown id is refused rather than silently created.
@@ -1577,6 +1617,42 @@ export type SessionSnapshotView = {
 
 /**  How serious a finding is; the studio ranks by this. */
 export type Severity = "high" | "medium" | "low";
+
+/**  The status a tile shows (AC1). */
+export type SourceStatus =
+  /**  The newest run succeeded, or the source has never run. */
+  | "ok"
+  /**  The newest run failed, but not three times in a row yet. */
+  | "degraded"
+  /**  Three or more consecutive failures (FR-31). */
+  | "failing";
+
+/**  One Source tile on the Connections screen (AC1). */
+export type SourceTileView = {
+  /**  Registry id and `source` primary key. */
+  id: string;
+  name: string;
+  /**
+   *  Type shown on the tile: `api`, `ats_board`, `feed`, `session_board`,
+   *  `manual` or `custom` (EXPERIENCE §9.7).
+   */
+  source_type: string;
+  /**  The markets the source covers, as the manifest declares them. */
+  markets: string[];
+  /**  Risk tier: `safe`, `caution` or `prohibited_automation`. */
+  risk_tier: string;
+  /**  Whether the user added this source (`custom`). */
+  custom: boolean;
+  enabled: boolean;
+  /**  Source health, folded from the newest runs (FR-31). */
+  status: SourceStatus;
+  last_run: string | null;
+  /**  Postings found by the newest run (i32 keeps the binding numeric). */
+  offers_found: number;
+  last_error: string | null;
+  consecutive_failures: number;
+  attribution: string | null;
+};
 
 /**
  *  One move in the timeline (AC3). The Stage is the label the UI shows (FR-94:

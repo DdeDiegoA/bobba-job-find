@@ -90,6 +90,15 @@ impl SourcesRepo for FakeSourcesRepo {
         Ok(())
     }
 
+    fn recent_runs(
+        &self,
+        _source_id: &str,
+        _limit: usize,
+    ) -> Result<Vec<SourceRunRecord>, SourcesRepoError> {
+        // The intake never runs a source, so it has no run history to report.
+        Ok(Vec::new())
+    }
+
     fn finish_run(
         &self,
         _id: &str,

@@ -16,6 +16,9 @@ pub enum Notification {
     /// activity, rate limit) and is paused until the user acts (FR-30, AD-10).
     /// One per pause, never per retry: Boba does not retry around a wall.
     SessionChallengePaused,
+    /// A Source failed its third run in a row (S4.8 AC3, FR-31). One per
+    /// streak: the fourth and later failures stay quiet until a run succeeds.
+    SourceFailing,
 }
 
 /// A notification the OS refused to show.

@@ -73,6 +73,10 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_rules_set_global_cap,
             crate::commands::apply::apply_rules_reset,
             crate::commands::apply::apply_rules_explain,
+            crate::commands::sources::sources_catalogue,
+            crate::commands::sources::sources_test_rss,
+            crate::commands::sources::sources_add_rss,
+            crate::commands::sources::sources_remove_rss,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

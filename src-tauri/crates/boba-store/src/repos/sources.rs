@@ -177,6 +177,31 @@ pub fn finish_run(
     Ok(())
 }
 
+/// The newest runs of one source, newest first, capped at `limit` (S4.8).
+pub fn recent_runs(
+    conn: &Connection,
+    source_id: &str,
+    limit: usize,
+) -> Result<Vec<SourceRunRecord>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, source_id, status, started_at, finished_at, postings_found, error \
+         FROM source_run WHERE source_id = ?1 \
+         ORDER BY started_at DESC, id DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![source_id, limit as i64], |r| {
+        Ok(SourceRunRecord {
+            id: r.get(0)?,
+            source_id: r.get(1)?,
+            status: parse(r.get(2)?)?,
+            started_at: r.get(3)?,
+            finished_at: r.get(4)?,
+            postings_found: r.get(5)?,
+            error: r.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 fn map_err(error: StoreError) -> SourcesRepoError {
     SourcesRepoError::Store(error.to_string())
 }
@@ -235,6 +260,16 @@ impl SourcesRepo for Store {
     fn start_run(&self, run: &SourceRunRecord) -> Result<(), SourcesRepoError> {
         let run = run.clone();
         self.execute(move |conn| start_run(conn, &run))
+            .map_err(map_err)
+    }
+
+    fn recent_runs(
+        &self,
+        source_id: &str,
+        limit: usize,
+    ) -> Result<Vec<SourceRunRecord>, SourcesRepoError> {
+        let source_id = source_id.to_string();
+        self.read(move |conn| recent_runs(conn, &source_id, limit))
             .map_err(map_err)
     }
 
@@ -394,6 +429,65 @@ mod tests {
         assert_eq!(found, 12);
 
         assert!(finish_run(&conn, "missing", "t", RunStatus::Failed, 0, Some("boom")).is_err());
+    }
+
+    #[test]
+    fn recent_runs_returns_the_newest_first_and_caps_the_limit() {
+        let conn = connection();
+        upsert_source(&conn, &source("remotive", AccessClass::PublicJson)).unwrap();
+        upsert_source(&conn, &source("remoteok", AccessClass::PublicJson)).unwrap();
+        for (id, day, status) in [
+            ("run_1", "01", RunStatus::Ok),
+            ("run_2", "02", RunStatus::Failed),
+            ("run_3", "03", RunStatus::Ok),
+        ] {
+            start_run(
+                &conn,
+                &SourceRunRecord {
+                    id: id.into(),
+                    source_id: "remotive".into(),
+                    status: RunStatus::Running,
+                    started_at: format!("2026-10-{day}T00:00:00Z"),
+                    finished_at: None,
+                    postings_found: 0,
+                    error: None,
+                },
+            )
+            .unwrap();
+            finish_run(
+                &conn,
+                id,
+                &format!("2026-10-{day}T00:01:00Z"),
+                status,
+                5,
+                None,
+            )
+            .unwrap();
+        }
+        start_run(
+            &conn,
+            &SourceRunRecord {
+                id: "other".into(),
+                source_id: "remoteok".into(),
+                status: RunStatus::Ok,
+                started_at: "2026-10-04T00:00:00Z".into(),
+                finished_at: Some("2026-10-04T00:01:00Z".into()),
+                postings_found: 9,
+                error: None,
+            },
+        )
+        .unwrap();
+
+        let runs = recent_runs(&conn, "remotive", 2).unwrap();
+        assert_eq!(runs.len(), 2, "the limit caps the rows");
+        assert_eq!(runs[0].id, "run_3", "newest first");
+        assert_eq!(runs[1].id, "run_2");
+        assert_eq!(runs[0].postings_found, 5);
+        assert_eq!(runs[0].status, RunStatus::Ok);
+
+        let all = recent_runs(&conn, "remotive", 10).unwrap();
+        assert_eq!(all.len(), 3, "only this source's runs");
+        assert_eq!(recent_runs(&conn, "ghost", 10).unwrap(), Vec::new());
     }
 
     #[test]
