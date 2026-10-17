@@ -22,6 +22,7 @@ pub mod preferences;
 pub mod profile;
 pub mod profile_gaps;
 pub mod profile_import;
+pub mod retention;
 pub mod session;
 pub mod sources;
 pub mod status_proposals;
