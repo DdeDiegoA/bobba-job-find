@@ -57,6 +57,10 @@ jobs:
       # placeholder, never a secret key).
       - name: Updater pubkey is valid
         run: node scripts/release/verify-updater-pubkey.mjs
+      # F5: latest.json is resolved from the endpoint's URL by every installed
+      # app, so it must name the repository that publishes the release.
+      - name: Updater endpoint matches this repository
+        run: node scripts/release/verify-updater-endpoint.mjs
       # AC3: an empty pin would make the macOS check meaningless.
       - name: macOS signing identity is pinned
         run: |

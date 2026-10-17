@@ -63,7 +63,25 @@ means the bundled path is unavailable and the UI offers BYO instead. Client ids
 are public by definition; the Gmail client secret is only "secret" in name, but
 keep it in repository secrets anyway rather than in the tree.
 
-### 4. Windows signing (future)
+### 4. Protect the signing secrets (required once the repository is public)
+
+Anyone who can push a `v*` tag triggers `release.yml`, which holds the signing
+identity and the updater key. Restrict tag creation to maintainers:
+
+- **Settings → Rules → Rulesets → New ruleset → Target: Tags**, pattern `v*`,
+  "Restrict creations" and "Restrict updates" to the maintainers team; or
+- put `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`,
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in a
+  GitHub **environment** named `release` with required reviewers, and add
+  `environment: release` to the `guard`/`build` jobs.
+
+The updater endpoint must name the publishing repository: the release guard
+(`scripts/release/verify-updater-endpoint.mjs`) compares
+`tauri.conf.json → plugins.updater.endpoints[0]` with `GITHUB_REPOSITORY` on
+every CI run and every release, so a repository move fails loudly instead of
+serving a 404 to installed apps.
+
+### 5. Windows signing (future)
 
 The project applies to [SignPath Foundation](https://signpath.org/) for free
 Authenticode signing. Until it is accepted, Windows installers ship unsigned and
@@ -98,6 +116,21 @@ A beta (`v0.3.0-beta.1`) is built and published the same way but never becomes
 
 To rebuild an existing tag without moving it: Actions → Release → Run workflow,
 enter the tag.
+
+## Local builds (for developers)
+
+- `pnpm tauri dev` needs no signing material and never touches a real store:
+  debug builds use the `app.bobajobfind.dev` keychain service and their own
+  `<app-data>/dev/` database and snapshots directory (ADR-009). A dev database
+  created before S10.5 at `<app-data>/boba.db` is no longer opened by debug
+  builds; move it into `dev/` if you want to keep it.
+- `pnpm tauri build` **with bundling** needs the updater key because
+  `createUpdaterArtifacts` is on: set
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, or pass
+  `--no-bundle` (what CI does). `tauri dev` is unaffected.
+- A local bundle is signed with whatever identity your keychain has; only CI
+  enforces the pinned self-signed identity, and `check-macos-signature.mjs`
+  tells you when a local build does not match it.
 
 ## Release notes
 
