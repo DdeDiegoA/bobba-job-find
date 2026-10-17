@@ -398,6 +398,12 @@ impl SystemRepo for SqliteSystemRepo {
             .map_err(store_err)
     }
 
+    fn audit_rows(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
+        self.store
+            .read(|conn| all_rows(conn).map_err(|e| StoreError::Sqlite(e.to_string())))
+            .map_err(store_err)
+    }
+
     fn audit_unresolved_intents(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
         self.store
             .read(|conn| unresolved_intents(conn).map_err(|e| StoreError::Sqlite(e.to_string())))
@@ -749,6 +755,25 @@ mod tests {
             repo.audit_head_hash().unwrap().as_deref(),
             Some(o.hash.as_str())
         );
+    }
+
+    // S9.9 (FR-89): the viewer reads the whole chain, in order, through the
+    // owner's query (AD-16).
+    #[test]
+    fn audit_rows_returns_the_chain_in_order() {
+        let (_dir, repo) = temp_repo("test.audit.rows");
+        let i = repo
+            .audit_append_intent(&intent("email.sent", "att_r"))
+            .unwrap();
+        let o = repo
+            .audit_append_outcome(&i, AuditOutcome::Ok, "{}", "2026-10-05T01:00:10.000Z")
+            .unwrap();
+
+        let rows = repo.audit_rows().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].seq, 1);
+        assert_eq!(rows[1].seq, 2);
+        assert_eq!(rows[1].hash, o.hash);
     }
 
     // A crash can leave the anchor one append behind; that anchor still names a

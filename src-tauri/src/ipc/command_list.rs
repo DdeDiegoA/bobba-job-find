@@ -128,6 +128,9 @@ macro_rules! boba_commands {
             crate::commands::status_proposals::status_proposals_approve_many,
             crate::commands::status_proposals::status_proposals_dismiss,
             crate::commands::status_proposals::status_proposals_undo,
+            crate::commands::audit_stats::audit_log,
+            crate::commands::audit_stats::audit_log_export_csv,
+            crate::commands::audit_stats::stats_funnel,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

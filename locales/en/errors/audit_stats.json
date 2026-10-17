@@ -1,0 +1,5 @@
+{
+  "errors.audit_stats.store": "Could not read your audit log and stats.",
+  "errors.audit_stats.write": "Could not write the CSV file there.",
+  "errors.audit_stats.path": "No file was chosen."
+}

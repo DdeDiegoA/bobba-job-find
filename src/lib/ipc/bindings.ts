@@ -753,6 +753,19 @@ export const commands = {
   /**  Undo an automatically applied proposal (AC5). */
   statusProposalsUndo: (proposalId: string) =>
     typedError<null, AppError_Serialize>(__TAURI_INVOKE("status_proposals_undo", { proposalId })),
+  /**  The Audit Log timeline, newest first (AC-1). */
+  auditLog: () => typedError<AuditLogView, AppError_Serialize>(__TAURI_INVOKE("audit_log")),
+  /**
+   *  Write the Audit Log as CSV to the path the user picked in the native dialog
+   *  (AC-1: "I can export it as CSV"). Returns the path written.
+   */
+  auditLogExportCsv: (destination: string) =>
+    typedError<string, AppError_Serialize>(__TAURI_INVOKE("audit_log_export_csv", { destination })),
+  /**
+   *  Applications by Stage, reply rate and interview rate, with the Source,
+   *  Verdict and language breakdowns (AC-2). Computed locally.
+   */
+  statsFunnel: () => typedError<FunnelStats, AppError_Serialize>(__TAURI_INVOKE("stats_funnel")),
 };
 
 /** Events */
@@ -920,6 +933,56 @@ export type AttemptView = {
   message_id: string | null;
   created_at: string;
   sent_at: string | null;
+};
+
+/**  What one timeline row is (the UI picks its icon and label from this). */
+export type AuditEntry = {
+  /**
+   *  A stable id: the row's own ULID, a `status_event` id, or a derived id
+   *  for an outbox item / opt-in.
+   */
+  id: string;
+  /**  `send`, `decision`, `kill_switch`, `optin`, `stage_change` or `other`. */
+  kind: string;
+  /**  UTC RFC 3339 (AD-17); the UI converts to local time. */
+  at: string;
+  /**  The action name (`apply.submitted`, `stage.applied`, `auto.decision`, …). */
+  action: string;
+  /**  `core`, `user`, `auto` or a Status source (`status_proposal`, …). */
+  actor: string;
+  /**  `intent` / `outcome` on an audit row, `None` elsewhere. */
+  phase: string | null;
+  /**  `ok`, `failed`, `unknown_after_crash`, or the outbox state. */
+  outcome: string | null;
+  target_kind: string;
+  target_id: string | null;
+  /**
+   *  The Application the row is about, when there is one: the link to its
+   *  archived Package.
+   */
+  application_id: string | null;
+  /**  The row's metadata as stored (rule, reasons, from/to). */
+  detail_json: string;
+  /**  blake3 of the Package/message that was sent (AD-12). */
+  payload_blake3: string | null;
+  /**  The chain hash of an `audit_event` row; `None` for the merged sources. */
+  hash: string | null;
+};
+
+/**  The Audit Log as the viewer renders it. */
+export type AuditLogView = {
+  /**  Newest first. */
+  entries: AuditEntry[];
+  /**  Whether every `audit_event` row re-hashes and links (AD-12). */
+  chain_intact: boolean;
+  /**  How many `audit_event` rows the check walked. */
+  chain_rows: number;
+  /**
+   *  `seq` of the first broken row, when the chain does not verify. The chain
+   *  is `i64`; a position that large is reported as unknown, never truncated
+   *  silently (specta cannot export `i64` to TypeScript).
+   */
+  broken_at: number | null;
 };
 
 /**  The launch-at-login state the UI reads. */
@@ -1618,6 +1681,23 @@ export type Finding_Serialize = {
   suggestion?: string | null;
 };
 
+/**  The whole funnel view (AC-2). */
+export type FunnelStats = {
+  /**  Every Application on the board, all stages. */
+  applications: number;
+  /**  Applications that were applied to: the denominator of both rates. */
+  applied: number;
+  replies: number;
+  interviews: number;
+  reply_rate: number | null;
+  interview_rate: number | null;
+  /**  Every Stage, in board order, including the ones with no cards. */
+  by_stage: StageCount[];
+  by_source: RateRow[];
+  by_verdict: RateRow[];
+  by_language: RateRow[];
+};
+
 /**  One question the Profile cannot answer itself (FR-6). */
 export type Gap = {
   kind: GapKind;
@@ -2149,6 +2229,25 @@ export type QuietHours = {
   notify_during: boolean;
 };
 
+/**  One row of a breakdown: a Source, a Verdict band or a language. */
+export type RateRow = {
+  /**
+   *  The grouping id: a `source` id, a Verdict band, a BCP-47 tag, or
+   *  `unscored` / `unknown` when the data is missing.
+   */
+  key: string;
+  /**  A human label when the key is an id (the Source's name). */
+  label: string | null;
+  /**  Applications that were applied to in this group. */
+  applications: number;
+  replies: number;
+  interviews: number;
+  /**  `replies / applications` in 0..1, `0` for an empty group. */
+  reply_rate: number | null;
+  /**  `interviews / applications` in 0..1, `0` for an empty group. */
+  interview_rate: number | null;
+};
+
 /**
  *  One reason the UI shows word for word (AC2): the i18n leaf is
  *  `applying:reason.<code>` and `params` interpolate into it.
@@ -2563,6 +2662,13 @@ export type SourceTileView = {
   last_error: string | null;
   consecutive_failures: number;
   attribution: string | null;
+};
+
+/**  One Stage column and how many Applications currently sit in it. */
+export type StageCount = {
+  /**  The Stage id (`saved`, `preparing`, …), the i18n key is `stage.<id>`. */
+  stage: string;
+  count: number;
 };
 
 /**

@@ -213,6 +213,10 @@ impl SystemRepo for FakeSystemRepo {
         Ok(self.walk())
     }
 
+    fn audit_rows(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
+        Ok(self.rows())
+    }
+
     fn audit_unresolved_intents(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
         let rows = self.rows.lock().unwrap();
         Ok(rows
