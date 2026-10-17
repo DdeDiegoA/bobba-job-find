@@ -122,6 +122,33 @@ impl ApplyRepo for FakeApplyRepo {
             .collect())
     }
 
+    fn application_create(
+        &self,
+        application: &Application,
+        event: &StatusEvent,
+    ) -> Result<(), ApplyRepoError> {
+        if self.fail {
+            return Err(ApplyRepoError::Store("disk gone".to_string()));
+        }
+        let mut state = self.state.lock().unwrap();
+        if state
+            .applications
+            .iter()
+            .any(|row| row.id == application.id)
+        {
+            return Err(ApplyRepoError::Conflict {
+                expected: event
+                    .from_status
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_default(),
+                found: application.status.as_str().to_string(),
+            });
+        }
+        state.applications.push(application.clone());
+        state.events.push(event.clone());
+        Ok(())
+    }
+
     fn append_status_event(&self, event: &StatusEvent) -> Result<(), ApplyRepoError> {
         let mut state = self.state.lock().unwrap();
         let Some(row) = state

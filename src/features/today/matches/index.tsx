@@ -37,7 +37,7 @@ export default function TodayMatches() {
   const top = useMemo(
     () =>
       sortCards(cards, "rank")
-        .filter((card) => !isExcluded(card) && card.rank !== null)
+        .filter((card) => !isExcluded(card) && !card.dismissed && card.rank !== null)
         .slice(0, TOP_MATCHES),
     [cards],
   );

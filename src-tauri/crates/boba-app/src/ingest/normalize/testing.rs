@@ -289,6 +289,17 @@ impl IngestionRepo for FakeIngestionRepo {
         Ok(self.lifecycle.lock().unwrap().get(posting_id).cloned())
     }
 
+    fn lifecycle_many(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, PostingLifecycle>, IngestionRepoError> {
+        let rows = self.lifecycle.lock().unwrap();
+        Ok(posting_ids
+            .iter()
+            .filter_map(|id| rows.get(id).map(|row| (id.clone(), row.clone())))
+            .collect())
+    }
+
     fn save_lifecycle(&self, lifecycle: &PostingLifecycle) -> Result<(), IngestionRepoError> {
         self.lifecycle
             .lock()

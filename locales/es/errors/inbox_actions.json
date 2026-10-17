@@ -1,0 +1,9 @@
+{
+  "errors.inbox_actions.store": "Boba no pudo leer ni guardar tus decisiones de la Bandeja.",
+  "errors.inbox_actions.unknown_offer": "Esa oferta ya no está en la Bandeja.",
+  "errors.inbox_actions.not_excluded": "Ninguna Puerta vetó esta oferta, así que no hay nada que anular.",
+  "errors.inbox_actions.unknown_suggestion": "Esa sugerencia no es una que Boba conozca.",
+  "errors.inbox_actions.unknown_reason": "Ese no es un motivo de descarte que Boba conozca.",
+  "errors.inbox_actions.missing_offer": "No se indicó ninguna oferta.",
+  "errors.inbox_actions.suggestion_not_applicable": "Ese cambio te dejaría sin ninguna modalidad aceptada. Edita tus Preferencias."
+}

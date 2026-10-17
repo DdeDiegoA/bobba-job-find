@@ -38,6 +38,8 @@ function card(overrides: Partial<OfferCardView> = {}): OfferCardView {
     badges: [],
     exclusion: null,
     closing_soon: false,
+    dismissed: false,
+    overridden: false,
     ...overrides,
   };
 }

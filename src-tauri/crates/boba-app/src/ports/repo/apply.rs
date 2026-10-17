@@ -40,6 +40,17 @@ pub trait ApplyRepo: Send + Sync {
     /// Package the application carries, read through the documents owner).
     fn package(&self, application_id: &str) -> Result<Vec<PackageItem>, ApplyRepoError>;
 
+    /// Insert one application and its birth event, in one transaction (AC4).
+    ///
+    /// The row is created where the user first pursues an Offer — Save in the
+    /// Inbox (S6.6) — and the birth event is the same history every later move
+    /// appends to, so the timeline never starts mid-story.
+    fn application_create(
+        &self,
+        application: &Application,
+        event: &StatusEvent,
+    ) -> Result<(), ApplyRepoError>;
+
     /// Append one status event and move the row in one transaction (AC2/AC4).
     ///
     /// `event.from_status` is the status the caller saw: the write fails with

@@ -16,3 +16,4 @@ pub mod profile;
 pub mod scoring;
 pub mod sources;
 pub mod system;
+pub mod triage;
