@@ -101,6 +101,24 @@ pub async fn sources_catalogue(app: tauri::AppHandle) -> AppResult<Vec<SourceTil
         }
     }
 
+    // The Session Board Sources are seeded the same lazy way, so Connections
+    // and Settings → Privacy can list them before the per-Source opt-in
+    // (S11.1b, FR-30). Their rows stay disabled until that opt-in.
+    for manifest in [
+        boba_sources::session::linkedin::manifest(),
+        boba_sources::session::indeed::manifest(),
+    ] {
+        if sources
+            .get_source(&manifest.id)
+            .map_err(store_error)?
+            .is_none()
+        {
+            let mut record = record_from_manifest(&manifest, &now);
+            record.enabled = false;
+            sources.upsert_source(&record).map_err(store_error)?;
+        }
+    }
+
     let custom: Vec<CustomFeedConfig> =
         custom::list_custom_feeds(system.as_ref()).map_err(to_app)?;
     for feed in &custom {

@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod port_list;
+pub mod session;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

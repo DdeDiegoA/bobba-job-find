@@ -28,11 +28,18 @@ mod page;
 #[cfg(test)]
 mod tests;
 
+use std::sync::Arc;
+
+use boba_app::ports::session::SessionPages;
 use boba_domain::source::{
-    AccessClass, ApplyCapability, LegalTier, RateLimits, SearchQuery, SourceManifest, SourceRecord,
+    AccessClass, ApplyCapability, LegalTier, RateLimits, RawPosting, SearchQuery, SourceError,
+    SourceManifest, SourceRecord,
 };
 
-use crate::session::sdk::{BoardView, ChallengeKind, DEFAULT_PACING, RunError};
+use crate::sdk::{BoxFuture, SourceAdapter, SourceCtx};
+use crate::session::sdk::{
+    BoardView, ChallengeKind, DEFAULT_PACING, RunControl, RunError, SessionRun,
+};
 
 pub use page::{READ_DETAIL_JS, READ_SEARCH_JS, parse_detail, parse_search};
 
@@ -67,6 +74,9 @@ pub enum BoardError {
     /// Today's page budget is spent (FR-30: low volume).
     #[error("source '{source_id}' already used its {cap} page loads today")]
     CapReached { source_id: String, cap: u32 },
+    /// The core could not answer, so nothing touches the board (fail closed).
+    #[error("the session core refused the step: {0}")]
+    Control(String),
     /// The page did not describe itself the way the script expects.
     #[error("the page could not be read: {0}")]
     Malformed(String),
@@ -133,6 +143,7 @@ impl From<RunError> for BoardError {
             RunError::OptInRequired { source_id } => Self::OptInRequired { source_id },
             RunError::Paused { source_id, kind } => Self::Paused { source_id, kind },
             RunError::CapReached { source_id, cap } => Self::CapReached { source_id, cap },
+            RunError::Control(message) => Self::Control(message),
         }
     }
 }
@@ -202,3 +213,100 @@ pub(crate) fn with_params(url: &str, params: &[String]) -> String {
 }
 
 pub(crate) use crate::feeds::api::encode_query;
+
+/// The Indeed Session Board as a run Source (S11.1b).
+///
+/// It reads the user's own session through a [`SessionPages`] port — never
+/// [`crate::http`], never an account Boba creates — and every page load passes
+/// [`SessionRun`]: opt-in, no pause, a paced, audited page from today's budget.
+pub struct Indeed {
+    pages: Arc<dyn SessionPages>,
+    control: Arc<dyn RunControl>,
+}
+
+impl Indeed {
+    pub fn new(pages: Arc<dyn SessionPages>, control: Arc<dyn RunControl>) -> Self {
+        Self { pages, control }
+    }
+
+    /// Gate, audit, pace, then read the page through the user's session.
+    async fn load(&self, url: String, script: &'static str) -> Result<String, BoardError> {
+        let mut run = SessionRun::open(Arc::clone(&self.control), SOURCE_ID, DAILY_CAP)?;
+        let sample = u64::from(run.loads());
+        let delay = run.before_load(&url, sample)?;
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        let pages = Arc::clone(&self.pages);
+        tokio::task::spawn_blocking(move || pages.read(SOURCE_ID, &url, script))
+            .await
+            .map_err(|error| BoardError::Control(error.to_string()))?
+            .map_err(BoardError::Control)
+    }
+
+    /// One page's outcome, with a challenge pausing the Source (AD-10) and a
+    /// core failure staying that Source's error (never a posting).
+    fn outcome<T>(&self, result: Result<T, BoardError>) -> Result<T, SourceError> {
+        result.map_err(|error| self.to_source_error(error))
+    }
+
+    fn to_source_error(&self, error: BoardError) -> SourceError {
+        match error {
+            BoardError::OptInRequired { source_id } => SourceError::OptInRequired { source_id },
+            BoardError::Paused { source_id, kind } => SourceError::Paused {
+                source_id,
+                kind: kind.as_str().to_string(),
+            },
+            BoardError::CapReached { source_id, .. } => SourceError::DailyCapExceeded {
+                budget_key: source_id,
+            },
+            BoardError::Challenge(kind) => {
+                // AD-10: the Source pauses and the user is told; never a retry
+                // around the wall.
+                if let Err(message) = self.control.pause(SOURCE_ID, kind) {
+                    return SourceError::Unreachable {
+                        source_id: SOURCE_ID.to_string(),
+                        message: format!("challenge pause failed: {message}"),
+                    };
+                }
+                SourceError::Paused {
+                    source_id: SOURCE_ID.to_string(),
+                    kind: kind.as_str().to_string(),
+                }
+            }
+            BoardError::WrongSource { got, .. } => SourceError::UnknownSource { source_id: got },
+            BoardError::Malformed(message) => SourceError::InvalidPayload { message },
+            BoardError::Control(message) => SourceError::Unreachable {
+                source_id: SOURCE_ID.to_string(),
+                message,
+            },
+        }
+    }
+}
+
+impl SourceAdapter for Indeed {
+    fn manifest(&self) -> SourceManifest {
+        manifest()
+    }
+
+    fn search<'a>(
+        &'a self,
+        query: &'a SearchQuery,
+        _ctx: &'a SourceCtx<'_>,
+    ) -> BoxFuture<'a, Result<Vec<RawPosting>, SourceError>> {
+        Box::pin(async move {
+            let json = self.outcome(self.load(search_url(query), READ_SEARCH_JS).await)?;
+            self.outcome(parse_search(&json))
+        })
+    }
+
+    fn detail<'a>(
+        &'a self,
+        external_id: &'a str,
+        _ctx: &'a SourceCtx<'_>,
+    ) -> BoxFuture<'a, Result<RawPosting, SourceError>> {
+        Box::pin(async move {
+            let url = self.outcome(detail_url(external_id))?;
+            let json = self.outcome(self.load(url, READ_DETAIL_JS).await)?;
+            self.outcome(parse_detail(&json))
+        })
+    }
+}

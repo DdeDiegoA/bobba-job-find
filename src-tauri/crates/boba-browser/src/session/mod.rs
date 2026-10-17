@@ -10,12 +10,14 @@
 //! The browser is driven exactly like the ATS form driver (S9.4): headed, over
 //! an **ephemeral loopback** CDP port (`0`), never a fixed one.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use boba_app::ports::session::SessionStore;
+use boba_app::ports::session::{SessionPages, SessionStore};
 use boba_domain::session::{ClearReport, CookieProtection, SessionError};
 
-use crate::driver::{self, LaunchPlan};
+use crate::driver::{self, CdpTransport, ChromeTransport, LaunchPlan};
 
 /// The folder under the app data dir that holds every Source's profile.
 pub const SESSIONS_DIR: &str = "browser-sessions";
@@ -112,7 +114,9 @@ pub const LOCK_FILE: &str = "SingletonLock";
 /// The process Chrome recorded in its lock file, if the profile has one.
 ///
 /// Chrome writes `<hostname>-<pid>`: on macOS and Linux `SingletonLock` is a
-/// symlink whose target is that string, on Windows it is a file holding it.
+/// symlink whose target is that string, on Windows it is a file holding it
+/// (that spelling is from Chromium's `ProcessSingleton`, unverified on a
+/// Windows box — [residual] verify before S10.5's Windows build).
 /// A lock that does not parse is treated as absent — the profile then clears
 /// as it always did.
 pub fn lock_holder(profile: &Path) -> Option<u32> {
@@ -208,6 +212,69 @@ impl SessionStore for ProfileSessions {
             source_id: source_id.to_string(),
             removed,
         })
+    }
+}
+
+/// Reads Session Board pages in the user's own Chrome (S11.1b, AD-10).
+///
+/// One headed browser per Source, launched lazily on that Source's profile
+/// over an ephemeral loopback CDP port (never a fixed one), and kept for the
+/// whole run so a run's searches do not relaunch Chrome between pages.
+/// [`SessionPages::close`] drops them when the run ends.
+pub struct ChromeSessions {
+    app_data: PathBuf,
+    browsers: Mutex<BTreeMap<String, Arc<ChromeTransport>>>,
+}
+
+impl ChromeSessions {
+    pub fn new(app_data: impl Into<PathBuf>) -> Self {
+        Self {
+            app_data: app_data.into(),
+            browsers: Mutex::new(BTreeMap::new()),
+        }
+    }
+
+    /// The open browser for `source_id`, launching it on that Source's profile
+    /// the first time the run asks (never another Source's profile).
+    fn transport(&self, source_id: &str) -> Result<Arc<ChromeTransport>, SessionError> {
+        let mut browsers = self
+            .browsers
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(transport) = browsers.get(source_id) {
+            return Ok(Arc::clone(transport));
+        }
+        let plan = launch_plan(&self.app_data, source_id)?;
+        let transport = ChromeTransport::launch(&plan.profile)
+            .map_err(|error| SessionError::Io(error.to_string()))?;
+        let transport = Arc::new(transport);
+        browsers.insert(source_id.to_string(), Arc::clone(&transport));
+        Ok(transport)
+    }
+}
+
+impl SessionPages for ChromeSessions {
+    fn read(&self, source_id: &str, url: &str, script: &str) -> Result<String, String> {
+        let transport = self
+            .transport(source_id)
+            .map_err(|error| error.to_string())?;
+        transport.navigate(url).map_err(|error| error.to_string())?;
+        transport
+            .evaluate(script)
+            .map_err(|error| error.to_string())
+    }
+
+    fn close(&self) -> Result<(), String> {
+        // Dropping a transport shuts its Chrome down (S9.4): the next run
+        // launches fresh on the same profile, with the cookies still there.
+        let browsers = std::mem::take(
+            &mut *self
+                .browsers
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()),
+        );
+        drop(browsers);
+        Ok(())
     }
 }
 

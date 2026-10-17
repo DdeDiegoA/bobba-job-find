@@ -19,7 +19,7 @@ pub mod service;
 
 use serde::{Deserialize, Serialize};
 
-pub use run::{RunError, SessionRun, check};
+pub use run::{RunControl, RunError, SessionRun, check};
 pub use service::{BoardView, SessionBoardError, SessionBoardService, SessionSnapshot};
 
 /// The warning copy version the UI shows and the opt-in records (FR-30).
@@ -49,8 +49,9 @@ impl Pacing {
     }
 }
 
-/// The conservative defaults every Session Board Source starts from: at most
-/// one page every 30 s, ±40 % — low volume and human-like (FR-30).
+/// The conservative defaults every Session Board Source starts from: a mean of
+/// one page every 30 s, ±40 % — so the *floor* is 18 s and the ceiling 42 s.
+/// Low volume and human-like (FR-30), and never faster than the floor.
 pub const DEFAULT_PACING: Pacing = Pacing {
     min_interval_ms: 30_000,
     jitter_pct: 40,
@@ -186,6 +187,39 @@ pub fn weak_ack_key(source_id: &str) -> String {
     format!("session.weak_ack.{source_id}")
 }
 
+/// The `setting` key holding a Session Board Source's page loads for the local
+/// day `now` falls in (S11.1b: the daily cap is a local-day total).
+pub fn loads_key(source_id: &str, now: &str) -> String {
+    format!("session.loads.{source_id}.{}", local_day(now))
+}
+
+/// `YYYY-MM-DD` for `now` in the user's local day; UTC when `now` is unreadable.
+fn local_day(now: &str) -> String {
+    use time::format_description::well_known::Rfc3339;
+    let offset = time::Duration::minutes(i64::from(local_offset_minutes()));
+    match time::OffsetDateTime::parse(now, &Rfc3339) {
+        Ok(now) => {
+            let local = now + offset;
+            format!(
+                "{:04}-{:02}-{:02}",
+                local.year(),
+                u8::from(local.month()),
+                local.day()
+            )
+        }
+        Err(_) => "0000-00-00".to_string(),
+    }
+}
+
+/// The user's UTC offset in minutes, from the OS.
+fn local_offset_minutes() -> i32 {
+    i32::from(
+        time::UtcOffset::current_local_offset()
+            .unwrap_or(time::UtcOffset::UTC)
+            .whole_minutes(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,5 +344,22 @@ mod tests {
     fn setting_keys_are_namespaced_per_source() {
         assert_eq!(pause_key("linkedin"), "session.pause.linkedin");
         assert_eq!(weak_ack_key("linkedin"), "session.weak_ack.linkedin");
+    }
+
+    #[test]
+    fn the_page_budget_is_a_local_day_total() {
+        let key = loads_key("linkedin", "2026-10-17T06:00:00.000Z");
+        assert!(key.starts_with("session.loads.linkedin."));
+        assert_eq!(
+            key.rsplit('.').next().map(str::len),
+            Some(10),
+            "the key carries a YYYY-MM-DD local day"
+        );
+        assert_ne!(
+            key,
+            loads_key("linkedin", "2026-10-25T06:00:00.000Z"),
+            "another day starts a fresh budget"
+        );
+        assert_ne!(key, loads_key("indeed", "2026-10-17T06:00:00.000Z"));
     }
 }

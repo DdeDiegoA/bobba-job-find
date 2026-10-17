@@ -6,6 +6,11 @@
 //! access — the test suite asserts it. Their JSON is decoded here, so every
 //! reading rule is unit-tested without a browser (the same split as
 //! `boba-browser/src/forms`).
+//!
+//! The payload is scraped, so it is untrusted input all the way (AD-7): the
+//! posting keeps it verbatim in `RawPosting::raw`/`description_html`, and
+//! normalise sanitises the HTML with ammonia before any UI renders it. Nothing
+//! here trusts a title, a company name or a description.
 
 use boba_domain::source::RawPosting;
 use serde::{Deserialize, Serialize};

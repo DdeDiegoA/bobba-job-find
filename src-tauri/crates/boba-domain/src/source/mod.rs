@@ -287,6 +287,10 @@ pub enum SourceFetch {
 pub enum SourceError {
     #[error("source '{source_id}' requires an opt-in before it can run")]
     OptInRequired { source_id: String },
+    /// A challenge (CAPTCHA, sign-in wall, unusual activity, rate limit)
+    /// paused the Source; only the user resumes it (AD-10).
+    #[error("source '{source_id}' is paused after a {kind} challenge")]
+    Paused { source_id: String, kind: String },
     #[error("unknown source '{source_id}'")]
     UnknownSource { source_id: String },
     #[error("a source with id '{source_id}' is already registered")]
@@ -303,6 +307,10 @@ pub enum SourceError {
     ResponseTooLarge { url: String, limit: usize },
     #[error("source returned an invalid payload: {message}")]
     InvalidPayload { message: String },
+    /// The source could not be reached or read (a navigation failure, a
+    /// browser that is not there). One Source's failure, never the run's.
+    #[error("source '{source_id}' could not be read: {message}")]
+    Unreachable { source_id: String, message: String },
     #[error("invalid value '{value}' for {field}")]
     InvalidValue { field: String, value: String },
 }

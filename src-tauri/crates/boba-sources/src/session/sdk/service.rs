@@ -24,7 +24,7 @@ use boba_domain::session::{ClearReport, CookieProtection, SessionError};
 use boba_domain::source::{AccessClass, OptInRecord, SourceRecord};
 use serde::{Deserialize, Serialize};
 
-use super::{ChallengeKind, PauseRecord, WARNING_VERSION, pause_key, weak_ack_key};
+use super::{ChallengeKind, PauseRecord, WARNING_VERSION, loads_key, pause_key, weak_ack_key};
 
 /// The audit action the per-Source opt-in writes (AD-12: a settings change that
 /// enables automation is audited).
@@ -35,6 +35,8 @@ pub const SIGN_OUT_ACTION: &str = "session.signed_out";
 pub const CHALLENGE_ACTION: &str = "session.challenge_paused";
 /// The audit action clearing a challenge pause writes.
 pub const RESUME_ACTION: &str = "session.resumed";
+/// The audit action one page load of a session run writes (S11.1b).
+pub const PAGE_LOAD_ACTION: &str = "session.run";
 
 /// Why a Session Board action was refused.
 #[derive(Debug, thiserror::Error)]
@@ -264,6 +266,41 @@ impl<C: ClockPort> SessionBoardService<C> {
             let _ = notifier.notify(Notification::SessionChallengePaused);
         }
         self.view(&self.session_source(source_id)?)
+    }
+
+    /// Record one page load of a run: the local-day counter and the audit row
+    /// (S11.1b R1, AD-12).
+    ///
+    /// The detail carries the Source and the board page it opened — never a
+    /// cookie, a URL query that could hold a token, or a page body.
+    pub fn record_page_load(
+        &self,
+        source_id: &str,
+        url: &str,
+        loads_today: u32,
+    ) -> Result<(), SessionBoardError> {
+        self.session_source(source_id)?;
+        let detail = serde_json::json!({
+            "source_id": source_id,
+            "url": url,
+            "loads_today": loads_today,
+        });
+        self.audited(
+            PAGE_LOAD_ACTION,
+            source_id,
+            detail,
+            || {
+                let now = self.clock.now_rfc3339();
+                self.system.setting_put(
+                    &loads_key(source_id, &now),
+                    &loads_today.to_string(),
+                    &now,
+                )?;
+                Ok(())
+            },
+            |_| serde_json::json!({ "loads_today": loads_today }),
+        )?;
+        Ok(())
     }
 
     /// Clear a challenge pause after the user acted on it.

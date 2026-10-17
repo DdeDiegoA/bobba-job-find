@@ -23,9 +23,13 @@ reqwest = { workspace = true }
 governor = { workspace = true }
 texting_robots = { workspace = true }
 ammonia = { workspace = true }
+# The session page budget is a local-day total (S11.1b), like the Auto caps.
+time = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `test-util` lets the session-adapter tests run the human-like pacing on
+# tokio's virtual clock instead of waiting it out (S11.1b).
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 wiremock = { workspace = true }

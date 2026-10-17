@@ -1,9 +1,14 @@
 //! LinkedIn Session Board adapter tests (S11.1b, FR-30, AD-9, AD-10).
 
-use boba_domain::source::{AccessClass, ApplyCapability, LegalTier, SearchQuery};
+use std::sync::{Arc, Mutex};
+
+use boba_app::ports::session::SessionPages;
+use boba_domain::source::{AccessClass, ApplyCapability, LegalTier, SearchQuery, SourceError};
 
 use super::*;
-use crate::session::sdk::{BoardView, ChallengeKind, DEFAULT_PACING, PauseRecord};
+use crate::http::{HttpClient, HttpClientConfig};
+use crate::sdk::{SourceAdapter, SourceCtx};
+use crate::session::sdk::{BoardView, ChallengeKind, DEFAULT_PACING, PauseRecord, RunControl};
 
 const SEARCH: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -287,4 +292,178 @@ fn a_detail_page_that_is_a_challenge_is_not_a_posting() {
         parse_detail(page),
         Err(BoardError::Challenge(ChallengeKind::Captcha))
     );
+}
+
+// --- the run Source: pages go through the session, and the gate holds -------
+
+/// The user's session, as the adapter sees it: the JSON a page answers with,
+/// and every page it was asked to open.
+struct FakePages {
+    json: String,
+    reads: Mutex<Vec<(String, String)>>,
+}
+
+impl FakePages {
+    fn answering(json: &str) -> Arc<Self> {
+        Arc::new(Self {
+            json: json.to_string(),
+            reads: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn opened(&self) -> Vec<(String, String)> {
+        self.reads.lock().unwrap().clone()
+    }
+}
+
+impl SessionPages for FakePages {
+    fn read(&self, source_id: &str, url: &str, _script: &str) -> Result<String, String> {
+        self.reads
+            .lock()
+            .unwrap()
+            .push((source_id.to_string(), url.to_string()));
+        Ok(self.json.clone())
+    }
+
+    fn close(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// The core, as the adapter sees it: one board, today's counter, the audit and
+/// the pause.
+struct FakeCore {
+    board: BoardView,
+    used_today: u32,
+    loads: Mutex<Vec<u32>>,
+    paused: Mutex<Vec<ChallengeKind>>,
+}
+
+impl FakeCore {
+    fn with(board: BoardView) -> Arc<Self> {
+        Arc::new(Self {
+            board,
+            used_today: 0,
+            loads: Mutex::new(Vec::new()),
+            paused: Mutex::new(Vec::new()),
+        })
+    }
+}
+
+impl RunControl for FakeCore {
+    fn board(&self, _source_id: &str) -> Result<(BoardView, u32), String> {
+        Ok((self.board.clone(), self.used_today))
+    }
+
+    fn page_loaded(&self, _source_id: &str, _url: &str, loads_today: u32) -> Result<(), String> {
+        self.loads.lock().unwrap().push(loads_today);
+        Ok(())
+    }
+
+    fn pause(&self, _source_id: &str, kind: ChallengeKind) -> Result<(), String> {
+        self.paused.lock().unwrap().push(kind);
+        Ok(())
+    }
+}
+
+fn http() -> HttpClient {
+    HttpClient::new(HttpClientConfig {
+        min_interval: std::time::Duration::from_millis(0),
+        ..HttpClientConfig::default()
+    })
+    .expect("client")
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_search_reads_the_page_in_the_users_session() {
+    let pages = FakePages::answering(SEARCH);
+    let core = FakeCore::with(board());
+    let http = http();
+    let ctx = SourceCtx {
+        http: &http,
+        cancel: tokio_util::sync::CancellationToken::new(),
+    };
+    let adapter = LinkedIn::new(pages.clone(), core.clone());
+
+    let postings = adapter.search(&query(), &ctx).await.unwrap();
+
+    assert_eq!(postings.len(), 2);
+    assert_eq!(
+        pages.opened(),
+        vec![(
+            "linkedin".to_string(),
+            "https://www.linkedin.com/jobs/search/?keywords=Rust%20Engineer%20backend&location=Madrid%2C%20Spain"
+                .to_string()
+        )],
+        "the page is the query's search page"
+    );
+    assert_eq!(*core.loads.lock().unwrap(), vec![1], "the load is audited");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_detail_reads_the_canonical_page() {
+    let pages = FakePages::answering(DETAIL);
+    let core = FakeCore::with(board());
+    let http = http();
+    let ctx = SourceCtx {
+        http: &http,
+        cancel: tokio_util::sync::CancellationToken::new(),
+    };
+    let adapter = LinkedIn::new(pages.clone(), core);
+
+    let posting = adapter.detail("4123456789", &ctx).await.unwrap();
+
+    assert_eq!(posting.external_id, "4123456789");
+    assert_eq!(
+        pages.opened()[0].1,
+        "https://www.linkedin.com/jobs/view/4123456789/"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_challenge_pauses_the_source_and_yields_no_postings() {
+    let pages = FakePages::answering(CAPTCHA);
+    let core = FakeCore::with(board());
+    let http = http();
+    let ctx = SourceCtx {
+        http: &http,
+        cancel: tokio_util::sync::CancellationToken::new(),
+    };
+    let adapter = LinkedIn::new(pages.clone(), core.clone());
+
+    let error = adapter.search(&query(), &ctx).await.unwrap_err();
+
+    assert_eq!(
+        error,
+        SourceError::Paused {
+            source_id: "linkedin".to_string(),
+            kind: "captcha".to_string(),
+        }
+    );
+    assert_eq!(*core.paused.lock().unwrap(), vec![ChallengeKind::Captcha]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn without_an_opt_in_no_page_is_read() {
+    let pages = FakePages::answering(SEARCH);
+    let mut view = board();
+    view.opted_in = false;
+    let core = FakeCore::with(view);
+    let http = http();
+    let ctx = SourceCtx {
+        http: &http,
+        cancel: tokio_util::sync::CancellationToken::new(),
+    };
+    let adapter = LinkedIn::new(pages.clone(), core.clone());
+
+    let error = adapter.search(&query(), &ctx).await.unwrap_err();
+
+    assert_eq!(
+        error,
+        SourceError::OptInRequired {
+            source_id: "linkedin".to_string()
+        }
+    );
+    assert!(pages.opened().is_empty(), "the session was never touched");
+    assert!(core.loads.lock().unwrap().is_empty());
 }
