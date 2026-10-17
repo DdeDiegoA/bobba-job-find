@@ -1634,6 +1634,25 @@ mod tests {
         assert!(mode_covered(&outlook, EmailMode::ReadSend));
     }
 
+    /// AC1: Boba's bundled client can never ask Google for `gmail.readonly` —
+    /// not by default, and not through the form: the requested scopes follow the
+    /// mode, and the mode a bundled connection ends up with is send-only.
+    #[test]
+    fn the_bundled_client_never_requests_the_read_scope() {
+        let mode = gmail_mode(None, ClientIdKind::Bundled).expect("a bundled client connects");
+        assert_eq!(mode, EmailMode::SendOnly);
+        assert!(
+            !gmail_read::requested_scopes(mode).contains(&gmail_read::GMAIL_READ_SCOPE),
+            "the bundled client asks for {:?}",
+            gmail_read::requested_scopes(mode)
+        );
+        // And the form cannot talk it into reading either.
+        assert!(matches!(
+            gmail_mode(Some(EmailMode::ReadSend), ClientIdKind::Bundled),
+            Err(EmailFailure::GmailReadNeedsByo)
+        ));
+    }
+
     /// The refusal is a form error with its own key, so the UI can point the
     /// user at "Advanced" instead of a generic failure (AD-3).
     #[test]
