@@ -1,0 +1,10 @@
+{
+  "errors.backup.empty_passphrase": "Escribe una contraseña para la copia de seguridad.",
+  "errors.backup.not_a_backup": "Ese archivo no es una copia de seguridad de Boba.",
+  "errors.backup.wrong_passphrase": "Esa contraseña no abre esta copia de seguridad.",
+  "errors.backup.corrupt": "Esta copia está dañada y no se puede restaurar de forma segura.",
+  "errors.backup.too_new": "Esta copia se hizo con una versión más reciente de Boba. Actualiza Boba y vuelve a restaurarla.",
+  "errors.backup.wrong_confirmation": "Escribe DELETE exactamente para confirmar.",
+  "errors.backup.keychain": "El llavero del sistema rechazó el cambio.",
+  "errors.backup.internal": "La operación de copia de seguridad falló. No se cambió nada."
+}

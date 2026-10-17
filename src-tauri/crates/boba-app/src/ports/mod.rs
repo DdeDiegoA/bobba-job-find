@@ -5,6 +5,7 @@
 //! first needs it — append one `pub mod` line here, union-merged (AD-3).
 
 pub mod agent;
+pub mod backup;
 pub mod browser;
 pub mod cli;
 pub mod clock;

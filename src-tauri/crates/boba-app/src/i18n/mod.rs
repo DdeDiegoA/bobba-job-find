@@ -58,6 +58,7 @@ macro_rules! error_fragments {
 const ERROR_FRAGMENTS: &[(&str, &str, &str)] = error_fragments![
     "agent",
     "apply",
+    "backup",
     "email",
     "inbox_actions",
     "lifecycle",

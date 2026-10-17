@@ -1,0 +1,10 @@
+{
+  "errors.backup.empty_passphrase": "Enter a passphrase for the backup.",
+  "errors.backup.not_a_backup": "That file is not a Boba backup.",
+  "errors.backup.wrong_passphrase": "That passphrase does not open this backup.",
+  "errors.backup.corrupt": "This backup is damaged and cannot be restored safely.",
+  "errors.backup.too_new": "This backup was made by a newer version of Boba. Update Boba, then restore it.",
+  "errors.backup.wrong_confirmation": "Type DELETE exactly to confirm.",
+  "errors.backup.keychain": "The system keychain refused the change.",
+  "errors.backup.internal": "The backup operation failed. Nothing was changed."
+}
