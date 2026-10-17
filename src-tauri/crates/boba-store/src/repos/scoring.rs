@@ -11,6 +11,8 @@
 //! the Gates are the JSON the model produced, kept verbatim (FR-61: a card reads
 //! back exactly as it was written).
 
+use std::collections::HashMap;
+
 use rusqlite::Connection;
 
 use boba_app::ports::repo::scoring::{ScoringRepo, ScoringRepoError};
@@ -84,6 +86,34 @@ pub fn latest_card(
     let mut statement = conn.prepare(&sql)?;
     let mut rows = statement.query_map(rusqlite::params![posting_id], row)?;
     Ok(rows.next().transpose()?)
+}
+
+/// The newest card of a page of postings, in one query, keyed by posting id
+/// (S5.2; S6.4's N+1 follow-up). The order breaks ties the way
+/// [`latest_card`] does, so a batch and a single read agree. An Offer with no
+/// card has no entry.
+pub fn latest_cards(
+    conn: &Connection,
+    posting_ids: &[String],
+) -> Result<HashMap<String, ScoreCardRow>, StoreError> {
+    if posting_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = vec!["?"; posting_ids.len()].join(", ");
+    let sql = format!(
+        "{SELECT} WHERE posting_id IN ({placeholders}) \
+         ORDER BY posting_id ASC, created_at DESC, id DESC"
+    );
+    let mut statement = conn.prepare(&sql)?;
+    let rows = statement.query_map(rusqlite::params_from_iter(posting_ids.iter()), row)?;
+    let mut cards: HashMap<String, ScoreCardRow> = HashMap::with_capacity(posting_ids.len());
+    for row in rows {
+        let card = row?;
+        // The first row for a posting is its newest; later ones are older cards
+        // of the same Offer and are left for `cards_for`.
+        cards.entry(card.posting_id.clone()).or_insert(card);
+    }
+    Ok(cards)
 }
 
 /// Every card an Offer has, oldest first (AC3).
@@ -259,6 +289,15 @@ impl ScoringRepo for Store {
             .map_err(map_err)
     }
 
+    fn latest_cards(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, ScoreCardRow>, ScoringRepoError> {
+        let ids = posting_ids.to_vec();
+        self.read(move |conn| latest_cards(conn, &ids))
+            .map_err(map_err)
+    }
+
     fn cards_for(&self, posting_id: &str) -> Result<Vec<ScoreCardRow>, ScoringRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| cards_for(conn, &posting_id))
@@ -381,6 +420,29 @@ mod tests {
             },
             created_at,
         )
+    }
+
+    // S5.2 (S6.4 follow-up): a page of cards reads its newest card in one query.
+    #[test]
+    fn latest_cards_reads_a_page_newest_first_per_posting() {
+        let conn = connection();
+        insert_card(&conn, &row(1, "2026-10-16T09:00:00Z")).expect("insert old");
+        insert_card(&conn, &row(2, "2026-10-16T10:00:00Z")).expect("insert new");
+
+        let ids = vec![POSTING.to_string(), "pst_missing".to_string()];
+        let cards = latest_cards(&conn, &ids).expect("read");
+
+        assert_eq!(cards.len(), 1);
+        assert_eq!(
+            cards[POSTING].versions().prefs_version,
+            2,
+            "the newest card"
+        );
+        assert!(
+            !cards.contains_key("pst_missing"),
+            "an unscored Offer has no entry, not an empty one"
+        );
+        assert!(latest_cards(&conn, &[]).expect("read").is_empty());
     }
 
     #[test]

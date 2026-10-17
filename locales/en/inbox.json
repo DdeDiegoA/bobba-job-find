@@ -7,6 +7,8 @@
   "empty.hint": "Offers from your Sources land here after a search run.",
   "manual.summary": "Found one yourself? Add it by hand",
   "filtered.empty": "No Offers for these filters.",
+  "more.load": "Load more Offers",
+  "more.loading": "Loading more…",
   "filter.clear": "Clear filters",
   "filter.any": "Any",
   "filter.source": "Source",

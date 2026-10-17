@@ -118,9 +118,18 @@ export const commands = {
   /**  Add an Offer from pasted text (AC2). */
   ingestManualText: (text: string) =>
     typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_text", { text })),
-  /**  One page of Offer cards, newest first (AC1/AC2). */
-  offersInbox: () =>
-    typedError<OfferCardView[], AppError_Serialize>(__TAURI_INVOKE("offers_inbox")),
+  /**
+   *  One page of Offer cards, newest first (AC1/AC2).
+   *
+   *  `limit` is clamped to `1..=OFFER_PAGE` and `offset` is where the previous
+   *  page ended, so the Inbox pages past the first 500 instead of stopping there
+   *  (S5.2). Absent values read the first page, which is what Today and the
+   *  first paint want.
+   */
+  offersInbox: (limit: number | null, offset: number | null) =>
+    typedError<OfferCardView[], AppError_Serialize>(
+      __TAURI_INVOKE("offers_inbox", { limit, offset }),
+    ),
   /**
    *  One Offer in full (S6.5, FR-65): the sanitised posting, its Gates and their
    *  quotes, the factor breakdown, its Sources and the copies dedup merged, its

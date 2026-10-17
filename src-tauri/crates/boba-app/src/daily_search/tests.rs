@@ -4,6 +4,10 @@ use std::sync::Arc;
 
 use boba_domain::source::{RunStatus as SourceRunStatus, SourceError};
 
+use boba_domain::scoring::factors::{Factor, FactorScore, FactorWeights};
+use boba_domain::scoring::gates::{Confidence, Evidence, GateReport};
+use boba_domain::scoring::rank::{MODEL_VERSION, ScoreCardRow, Verdict, card as build_card};
+
 use crate::ingest::normalize::testing::FakeIngestionRepo;
 use crate::ports::agent::{AgentPort, AgentTask, CancelToken, RunHandle};
 use crate::ports::clock::ClockPort;
@@ -19,9 +23,11 @@ use crate::system::testing::FakeSystemRepo;
 
 use super::report::{RunReport, SourceOutcome};
 use super::testing::{
-    RecordingObserver, RecordingSourcesRepo, ScriptedSources, StepClock, onsite, raw, source,
+    RecordingNotifier, RecordingObserver, RecordingSourcesRepo, ScriptedSources, StepClock, onsite,
+    raw, source,
 };
 use super::{DailySearch, RunObserver, RunOptions, RunRepos};
+use crate::ports::notifier::Notification;
 
 /// An `AgentPort` that never proposes anything: the deterministic features are
 /// all the tests here need, and a clean run is a served pass.
@@ -460,4 +466,77 @@ fn the_non_ai_stages_finish_within_three_minutes_on_fixtures() {
         elapsed < std::time::Duration::from_secs(180),
         "the non-AI stages took {elapsed:?}"
     );
+}
+
+/// A stored card with a chosen band and confidence, so the top-match rule can
+/// be read on its own.
+fn stored_card(verdict: Verdict, confidence: Confidence) -> ScoreCardRow {
+    let factors: Vec<FactorScore> = Factor::ALL
+        .into_iter()
+        .map(|factor| {
+            FactorScore::scored(
+                factor,
+                88.0,
+                FactorWeights::DEFAULT.of(factor),
+                Confidence::High,
+                vec![Evidence::Field("description_text".to_string())],
+            )
+        })
+        .collect();
+    let card = build_card(MODEL_VERSION, factors, &FactorWeights::DEFAULT).expect("a card");
+    let mut row = ScoreCardRow::new(
+        "sc_1",
+        "pst_1",
+        boba_domain::scoring::rank::CardVersions {
+            profile_version: 1,
+            prefs_version: 1,
+            model_version: MODEL_VERSION,
+        },
+        card,
+        GateReport { results: vec![] },
+        "2026-10-17T08:00:00Z",
+    );
+    row.card.verdict = verdict;
+    row.card.confidence = confidence;
+    row
+}
+
+/// FR-46: only a Strong or Good card that is a real judgement is a top match.
+#[test]
+fn only_strong_or_good_judged_cards_are_top_matches() {
+    assert!(super::is_top_match(&stored_card(
+        Verdict::Strong,
+        Confidence::High
+    )));
+    assert!(super::is_top_match(&stored_card(
+        Verdict::Good,
+        Confidence::Medium
+    )));
+    assert!(!super::is_top_match(&stored_card(
+        Verdict::Moderate,
+        Confidence::High
+    )));
+    assert!(!super::is_top_match(&stored_card(
+        Verdict::Weak,
+        Confidence::High
+    )));
+    // FR-57: a Low Confidence card is a lead, not a verdict worth a toast.
+    assert!(!super::is_top_match(&stored_card(
+        Verdict::Strong,
+        Confidence::Low
+    )));
+}
+
+/// FR-46: one notification when the run found top matches, none when it did
+/// not, and a missing notifier is not a failure.
+#[test]
+fn the_run_notifies_top_matches_once_and_stays_quiet_without_them() {
+    let notifier = RecordingNotifier::default();
+    super::notify_top_matches(Some(&notifier), 0);
+    assert!(notifier.shown().is_empty());
+
+    super::notify_top_matches(Some(&notifier), 3);
+    assert_eq!(notifier.shown(), [Notification::TopMatches { count: 3 }]);
+
+    super::notify_top_matches(None, 2);
 }

@@ -246,7 +246,8 @@ describe("loading and stale states (AC4)", () => {
 
   it("keeps the old list on screen and dims it while a re-run refreshes", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    client.setQueryData(inboxKey, [card()]);
+    // The Inbox is paged (S5.2): a cached page is `{pages, pageParams}`.
+    client.setQueryData(inboxKey, { pages: [[card()]], pageParams: [0] });
     vi.mocked(commands.offersInbox).mockReturnValue(new Promise(() => {}));
     const { container } = render(
       <QueryClientProvider client={client}>

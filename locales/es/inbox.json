@@ -7,6 +7,8 @@
   "empty.hint": "Las Ofertas de tus Fuentes llegan aquí después de una búsqueda.",
   "manual.summary": "¿Encontraste una tú? Añádela a mano",
   "filtered.empty": "Ninguna Oferta coincide con estos filtros.",
+  "more.load": "Cargar más ofertas",
+  "more.loading": "Cargando más…",
   "filter.clear": "Quitar filtros",
   "filter.any": "Cualquiera",
   "filter.source": "Fuente",

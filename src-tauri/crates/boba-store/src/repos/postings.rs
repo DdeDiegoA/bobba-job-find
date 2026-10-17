@@ -8,6 +8,8 @@
 //! seen again and rows are never deleted (AD-19). `IngestionRepo` is implemented
 //! for [`Store`], which is `Send + Sync`.
 
+use std::collections::HashMap;
+
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
@@ -267,6 +269,32 @@ pub fn offer_sources(conn: &Connection, posting_id: &str) -> Result<Vec<String>,
     )?;
     let rows = stmt.query_map(params![posting_id], |r| r.get::<_, String>(0))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The Sources of a page of postings, in one query, keyed by posting id
+/// (S5.2; S6.4's N+1 follow-up). An Offer with no Sources has no entry.
+pub fn offer_sources_many(
+    conn: &Connection,
+    posting_ids: &[String],
+) -> Result<HashMap<String, Vec<String>>, StoreError> {
+    if posting_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let placeholders = vec!["?"; posting_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT posting_id, source_id FROM posting_source WHERE posting_id IN ({placeholders}) \
+         GROUP BY posting_id, source_id ORDER BY posting_id, source_id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(posting_ids.iter()), |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    let mut sources: HashMap<String, Vec<String>> = HashMap::with_capacity(posting_ids.len());
+    for row in rows {
+        let (posting_id, source_id) = row?;
+        sources.entry(posting_id).or_default().push(source_id);
+    }
+    Ok(sources)
 }
 
 pub fn provenance_for(conn: &Connection, posting_id: &str) -> Result<Vec<Provenance>, StoreError> {
@@ -720,6 +748,15 @@ impl IngestionRepo for Store {
             .map_err(map_err)
     }
 
+    fn offer_sources_many(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, Vec<String>>, IngestionRepoError> {
+        let ids = posting_ids.to_vec();
+        self.read(move |conn| offer_sources_many(conn, &ids))
+            .map_err(map_err)
+    }
+
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| provenance_for(conn, &posting_id))
@@ -1011,6 +1048,43 @@ mod tests {
             "each source once, in source-id order"
         );
         assert!(offer_sources(&conn, "pst_missing").unwrap().is_empty());
+    }
+
+    // S5.2 (S6.4 follow-up): a page of cards reads its Sources in one query,
+    // not one per Offer.
+    #[test]
+    fn offer_sources_many_reads_a_page_in_one_call() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &provenance("pst_1", "remotive", "abc-1"),
+        )
+        .unwrap();
+        let mut second = offer("pst_2");
+        second.external_id = "abc-2".into();
+        insert_offer(&conn, &second, &provenance("pst_2", "remotive", "abc-2")).unwrap();
+        let mut third = provenance("pst_2", "himalayas", "him-2");
+        third.fetched_at = "2026-10-16T01:00:00Z".into();
+        merge_provenance(&conn, "pst_2", &third, "2026-10-16T01:00:00Z").unwrap();
+
+        let ids = vec![
+            "pst_1".to_string(),
+            "pst_2".to_string(),
+            "pst_missing".to_string(),
+        ];
+        let sources = offer_sources_many(&conn, &ids).unwrap();
+
+        assert_eq!(sources.get("pst_1").unwrap(), &vec!["remotive".to_string()]);
+        assert_eq!(
+            sources.get("pst_2").unwrap(),
+            &vec!["himalayas".to_string(), "remotive".to_string()]
+        );
+        assert!(
+            !sources.contains_key("pst_missing"),
+            "an Offer with no Sources has no entry, not an empty one"
+        );
+        assert!(offer_sources_many(&conn, &[]).unwrap().is_empty());
     }
 
     #[test]

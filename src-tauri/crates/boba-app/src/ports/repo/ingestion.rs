@@ -10,6 +10,8 @@
 //! is the cache FR-61 asks for: a version that has been read is read again from
 //! here, never re-extracted.
 
+use std::collections::HashMap;
+
 use boba_domain::dedup::DedupProbe;
 use boba_domain::posting::lifecycle::{ClosedWarning, PostingLifecycle};
 use boba_domain::posting::{Offer, Provenance};
@@ -48,6 +50,23 @@ pub trait IngestionRepo: Send + Sync {
     /// "Sources" line on an Offer card (FR-64) without reading each row's raw
     /// payload.
     fn offer_sources(&self, posting_id: &str) -> Result<Vec<String>, IngestionRepoError>;
+
+    /// The Sources of a whole page of Offers, keyed by posting id (S5.2; the
+    /// S6.4 follow-up that keeps the Inbox from querying once per card).
+    ///
+    /// The default is the per-Offer read — correct, but not batched; an adapter
+    /// overrides it when its storage can answer in one query (`boba-store`
+    /// does). An Offer with no Sources has no entry, not an empty one.
+    fn offer_sources_many(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, Vec<String>>, IngestionRepoError> {
+        let mut sources = HashMap::with_capacity(posting_ids.len());
+        for posting_id in posting_ids {
+            sources.insert(posting_id.clone(), self.offer_sources(posting_id)?);
+        }
+        Ok(sources)
+    }
 
     /// Every source payload that contributed to one posting, oldest first.
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError>;

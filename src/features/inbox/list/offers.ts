@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { commands, type OfferCardView } from "@/lib/ipc/bindings";
 import { unwrap } from "@/lib/ipc/errors";
 
@@ -20,15 +21,31 @@ import { unwrap } from "@/lib/ipc/errors";
 /** One Offer card, as the core sends it. */
 export type Card = OfferCardView;
 
-/** The Inbox is one query: every card, newest first. */
+/** The Inbox is one paged query: newest first, a page at a time. */
 export const inboxKey = ["offers", "inbox"] as const;
 
-/** Every Offer card, newest first. */
+/** How many cards one page holds; the core clamps to the same maximum. */
+export const INBOX_PAGE = 500;
+
+/**
+ * The Inbox's cards, newest first, a page at a time (S5.2): past the first
+ * [`INBOX_PAGE`] the screen asks for the next page instead of stopping at the
+ * cap. `hasNextPage` and `fetchNextPage` drive the list's Load more; `data` is
+ * every page read so far, flattened, so the sections and filters see one list.
+ */
 export function useInboxOffers() {
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: inboxKey,
-    queryFn: () => commands.offersInbox().then(unwrap),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => commands.offersInbox(INBOX_PAGE, pageParam).then(unwrap),
+    // A short page is the last one; anything else continues where it ended.
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length < INBOX_PAGE
+        ? undefined
+        : pages.reduce((total, page) => total + page.length, 0),
   });
+  const data = useMemo(() => query.data?.pages.flat() ?? [], [query.data]);
+  return { ...query, data };
 }
 
 /** The sections of FR-63, in the order the Inbox draws them. */

@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use boba_domain::scoring::gates::{self, Verdict as GateVerdict};
+use boba_domain::scoring::rank::{ScoreCardRow, Verdict as BandVerdict};
 use boba_domain::source::{
     RawPosting, RunStatus as SourceRunStatus, SearchQuery, SourceError, SourceRunRecord,
 };
@@ -36,7 +37,7 @@ use crate::ingest::dedup::{Outcome, ingest_deduped};
 use crate::ingest::lifecycle::{self, RunWindow};
 use crate::ports::agent::RunBudget;
 use crate::ports::clock::ClockPort;
-use crate::ports::notifier::NotifierPort;
+use crate::ports::notifier::{Notification, NotifierPort};
 use crate::ports::repo::ingestion::IngestionRepo;
 use crate::ports::repo::profile::ProfileRepo;
 use crate::ports::repo::scoring::ScoringRepo;
@@ -265,10 +266,12 @@ impl DailySearch {
         };
 
         let agent_tasks_used = self.run_agent_pass(&options, &new_ids, &mut errors);
-        let (vetoed, ranked) = match &inputs {
+        let (vetoed, ranked, top_matches) = match &inputs {
             Some(inputs) => self.score(&seen, inputs, &mut errors),
-            None => (0, 0),
+            None => (0, 0, 0),
         };
+        // FR-46's product rule: a run that found top matches says so once.
+        notify_top_matches(self.notifier.as_deref(), top_matches);
 
         let finished_at = self.clock.now_rfc3339();
         let report = RunReport {
@@ -438,10 +441,11 @@ impl DailySearch {
         posting_ids: &[String],
         inputs: &ScoringInputs,
         errors: &mut Vec<String>,
-    ) -> (u32, u32) {
+    ) -> (u32, u32, u32) {
         let service = ScoringService::new(Arc::clone(&self.repos.scoring), Arc::clone(&self.clock));
         let mut vetoed = 0;
         let mut ranked = 0;
+        let mut top_matches = 0;
 
         for posting_id in posting_ids {
             let offer = match self.repos.ingestion.get_offer(posting_id) {
@@ -480,12 +484,17 @@ impl DailySearch {
                 gates: gate_report,
             };
             match service.score(request) {
-                Ok(Some(_)) => ranked += 1,
+                Ok(Some(card)) => {
+                    ranked += 1;
+                    if is_top_match(&card) {
+                        top_matches += 1;
+                    }
+                }
                 Ok(None) => {}
                 Err(error) => errors.push(format!("scoring {posting_id}: {error}")),
             }
         }
-        (vetoed, ranked)
+        (vetoed, ranked, top_matches)
     }
 
     fn observe_started(&self, run_id: &str, total: u32) {
@@ -504,6 +513,25 @@ impl DailySearch {
         if let Some(observer) = &self.observer {
             observer.run_finished(report);
         }
+    }
+}
+
+/// FR-46: an Offer is a **top match** when its card says Strong or Good and is
+/// a real judgement — a Low Confidence card is a lead, not a verdict (FR-57),
+/// and a lead is not worth waking the user for.
+fn is_top_match(row: &ScoreCardRow) -> bool {
+    !row.card.is_lead() && matches!(row.card.verdict, BandVerdict::Strong | BandVerdict::Good)
+}
+
+/// Show the run's one top-matches notification (FR-46). Nothing when the run
+/// found none, and a notifier that refuses never fails the run: the report is
+/// already stored by then.
+fn notify_top_matches(notifier: Option<&dyn NotifierPort>, count: u32) {
+    if count == 0 {
+        return;
+    }
+    if let Some(notifier) = notifier {
+        let _ = notifier.notify(Notification::TopMatches { count });
     }
 }
 

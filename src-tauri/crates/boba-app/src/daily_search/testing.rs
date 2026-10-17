@@ -14,6 +14,7 @@ use boba_domain::source::{
 };
 
 use crate::ports::clock::ClockPort;
+use crate::ports::notifier::{Notification, NotifierError, NotifierPort};
 use crate::ports::repo::sources::{SourcesRepo, SourcesRepoError};
 
 use super::{RunObserver, RunSource, RunSources, SourceReport};
@@ -241,6 +242,26 @@ impl RunObserver for RecordingObserver {
 
     fn run_finished(&self, report: &super::report::RunReport) {
         self.runs.lock().unwrap().push(report.run_id.clone());
+    }
+}
+
+/// A `NotifierPort` that keeps what the run asked to show.
+#[derive(Default)]
+pub struct RecordingNotifier {
+    shown: Mutex<Vec<Notification>>,
+}
+
+impl RecordingNotifier {
+    /// Every notification, in the order it was asked for.
+    pub fn shown(&self) -> Vec<Notification> {
+        self.shown.lock().unwrap().clone()
+    }
+}
+
+impl NotifierPort for RecordingNotifier {
+    fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
+        self.shown.lock().unwrap().push(notification);
+        Ok(())
     }
 }
 

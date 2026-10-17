@@ -11,6 +11,8 @@
 //! [`CardVersions`] instead of updating the old one, so the history of what the
 //! user was told stays readable (FR-13/FR-14).
 
+use std::collections::HashMap;
+
 use boba_domain::scoring::narration::ScoreNarration;
 use boba_domain::scoring::rank::{CardVersions, ScoreCardRow};
 
@@ -43,6 +45,25 @@ pub trait ScoringRepo: Send + Sync {
 
     /// The newest card for an Offer, whatever versions it was computed for.
     fn latest_card(&self, posting_id: &str) -> Result<Option<ScoreCardRow>, ScoringRepoError>;
+
+    /// The newest card of a whole page of Offers, keyed by posting id (S5.2;
+    /// the S6.4 follow-up that keeps the Inbox from querying once per card).
+    ///
+    /// The default is the per-Offer read — correct, but not batched; an adapter
+    /// overrides it when its storage can answer in one query (`boba-store`
+    /// does). An Offer with no card has no entry, not an empty one.
+    fn latest_cards(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, ScoreCardRow>, ScoringRepoError> {
+        let mut cards = HashMap::with_capacity(posting_ids.len());
+        for posting_id in posting_ids {
+            if let Some(card) = self.latest_card(posting_id)? {
+                cards.insert(posting_id.clone(), card);
+            }
+        }
+        Ok(cards)
+    }
 
     /// Every card an Offer has, oldest first: what a re-score leaves behind
     /// (AC3), and what the Offer detail can show as history.
