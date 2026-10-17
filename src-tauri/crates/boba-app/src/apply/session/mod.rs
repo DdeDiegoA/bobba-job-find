@@ -372,7 +372,7 @@ impl SessionApplyService {
         // URL (no query, S11.1b R-b) and the document kinds.
         let stamp = self.clock.now_rfc3339().replace([':', '+', '.'], "-");
         let attempt_id = format!("session_{}_{stamp}", application.id);
-        let intent = self.system.audit_append_intent(&NewIntent {
+        let audit = self.system.audit_append_intent(&NewIntent {
             action: AUDIT_ACTION.to_string(),
             correlation_id: attempt_id.clone(),
             // The user presses submit in their own browser.
@@ -389,16 +389,12 @@ impl SessionApplyService {
             payload_blake3: None,
             created_at: self.clock.now_rfc3339(),
         });
-        let intent = match intent {
-            Ok(intent) => intent,
-            Err(error) => {
-                // Nothing was typed yet: close the window rather than leave
-                // one open for an attempt the log never heard of.
-                let _ = self.browser.close();
-                return Err(error.into());
-            }
-        };
-        let _ = intent;
+        if let Err(error) = audit {
+            // Nothing was typed yet: close the window rather than leave one
+            // open for an attempt the log never heard of.
+            let _ = self.browser.close();
+            return Err(error.into());
+        }
 
         let step = self.fill_page_step(&identity, &answers, &documents, &offer.source_id, page)?;
 
