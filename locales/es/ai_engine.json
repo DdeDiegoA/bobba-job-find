@@ -1,1 +1,38 @@
-{}
+{
+  "title": "Motor de IA",
+  "intro": "Cuánto trabajo de IA puede hacer una búsqueda y qué uso ha reportado tu CLI.",
+  "budget": {
+    "title": "Presupuesto por búsqueda",
+    "body": "Una búsqueda entrega como máximo esta cantidad de ofertas a la IA. El resto se sigue puntuando desde el propio texto de la oferta y se marca como «Confianza baja: aún no analizada».",
+    "loading": "Cargando el presupuesto…",
+    "label": "Ofertas analizadas por búsqueda",
+    "range": "Por defecto 30. Entre 1 y {max}.",
+    "save": "Guardar presupuesto",
+    "saved": "Presupuesto guardado.",
+    "error": {
+      "load": "Boba no pudo leer el presupuesto.",
+      "save": "Boba no pudo guardar el presupuesto."
+    }
+  },
+  "limits": {
+    "title": "Límites por tarea",
+    "body": "Cada tarea de IA se detiene al llegar a su límite, para que una búsqueda nunca agote tu cuota. Los aplica el núcleo: turnos, llamadas a herramientas y tiempo máximo.",
+    "task": "Tarea",
+    "limits": "Límites",
+    "summary": "{turns} turnos · {toolCalls} llamadas · {seconds} s"
+  },
+  "usage": {
+    "title": "Uso de tokens",
+    "body": "Haz una llamada de prueba para ver qué reporta tu CLI sobre una tarea. Boba muestra lo que envía el CLI y nunca estima el resto.",
+    "run": "Hacer una llamada de prueba",
+    "running": "Ejecutando…",
+    "noEngine": "Elige primero un motor en la puesta en marcha para ver su uso.",
+    "error": "La llamada de prueba no pudo ejecutarse.",
+    "tokensIn": "Tokens de entrada",
+    "tokensOut": "Tokens de salida",
+    "cost": "Coste",
+    "latency": "Latencia",
+    "latencyValue": "{ms} ms",
+    "notReported": "Este CLI no lo reporta."
+  }
+}

@@ -41,6 +41,16 @@ impl SilentAgent {
     pub fn tasks(&self) -> usize {
         self.tasks.lock().unwrap().len()
     }
+
+    /// The prompt of every task the run dispatched, in dispatch order.
+    pub fn prompts(&self) -> Vec<String> {
+        self.tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|task| task.prompt.clone())
+            .collect()
+    }
 }
 
 impl AgentPort for SilentAgent {
@@ -338,6 +348,52 @@ fn the_agent_pass_stops_at_the_run_budget() {
     assert_eq!(report.agent_tasks_used, 2);
     assert_eq!(harness.agent.tasks(), 2);
     assert_eq!(report.totals().new, 3);
+}
+
+/// FR-20 (S2.5, orquestador ruling 2026-10-17): the budget cap drops the
+/// lowest-ranked Offers, it does not simply take the first N the Sources
+/// returned. Deterministic scoring is offline, so the run orders the new
+/// Offers by their deterministic rank before the agent pass.
+#[test]
+fn the_agent_budget_keeps_the_best_ranked_offers() {
+    // Same posting in every way but age: the stale one ranks lowest on the
+    // Quality axis, so it is the one the budget leaves out.
+    let mut stale = raw("a3", "https://jobs.example.com/3", "Platform Engineer");
+    stale.posted_at = Some("2025-01-01T00:00:00Z".to_string());
+    let harness = Harness::new(ScriptedSources::new([(
+        source("remotive"),
+        Ok(vec![
+            raw("a1", "https://jobs.example.com/1", "Backend Engineer"),
+            stale,
+            raw("a2", "https://jobs.example.com/2", "Data Engineer"),
+        ]),
+    )]));
+
+    let mut options = Harness::options();
+    options.agent = Some(super::AgentPass {
+        cli: "claude_code".to_string(),
+        model: None,
+        max_tasks: 2,
+    });
+    let report = harness.run(options);
+
+    assert_eq!(report.agent_tasks_used, 2);
+    let prompts = harness.agent.prompts();
+    assert!(
+        prompts
+            .iter()
+            .all(|prompt| !prompt.contains("Platform Engineer")),
+        "the lowest-ranked Offer was analysed instead: {prompts:?}"
+    );
+    assert!(
+        prompts
+            .iter()
+            .any(|prompt| prompt.contains("Backend Engineer"))
+            && prompts
+                .iter()
+                .any(|prompt| prompt.contains("Data Engineer")),
+        "the budget did not keep the best-ranked Offers: {prompts:?}"
+    );
 }
 
 /// AC2: a VETOed Offer is still scored (it shows under Excluded), and the

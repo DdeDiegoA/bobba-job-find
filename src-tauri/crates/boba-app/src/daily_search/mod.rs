@@ -25,8 +25,9 @@ pub mod report;
 use std::sync::Arc;
 use std::time::Duration;
 
+use boba_domain::scoring::factors::ScoreInputs;
 use boba_domain::scoring::gates::{self, Verdict as GateVerdict};
-use boba_domain::scoring::rank::{ScoreCardRow, Verdict as BandVerdict};
+use boba_domain::scoring::rank::{self, ScoreCardRow, Verdict as BandVerdict};
 use boba_domain::source::{
     RawPosting, RunStatus as SourceRunStatus, SearchQuery, SourceError, SourceRunRecord,
 };
@@ -265,7 +266,8 @@ impl DailySearch {
             }
         };
 
-        let agent_tasks_used = self.run_agent_pass(&options, &new_ids, &mut errors);
+        let agent_tasks_used =
+            self.run_agent_pass(&options, &new_ids, inputs.as_ref(), &mut errors);
         let (vetoed, ranked, top_matches) = match &inputs {
             Some(inputs) => self.score(&seen, &new_ids, inputs, &mut errors),
             None => (0, 0, 0),
@@ -407,17 +409,31 @@ impl DailySearch {
     }
 
     /// The agent feature pass, bounded by the run's budget (FR-20, S2.5).
+    ///
+    /// The cap drops the **lowest-ranked** Offers, not the newest ones: the run
+    /// orders its new Offers by their deterministic rank first (offline, the
+    /// same factors the scoring pass reads), then spends the budget on the best
+    /// of them. Past the cap, an Offer keeps the deterministic features the
+    /// scoring pass gives every Offer, and the Inbox marks it "not yet analysed"
+    /// (no agent pass for it).
     fn run_agent_pass(
         &self,
         options: &RunOptions,
         new_ids: &[String],
+        inputs: Option<&ScoringInputs>,
         errors: &mut Vec<String>,
     ) -> u32 {
         let Some(pass) = &options.agent else {
             return 0;
         };
+        let ordered = match inputs {
+            Some(inputs) => self.rank_deterministically(new_ids, inputs),
+            // No Profile/Preferences could be read, so there is no rank to
+            // order by: the ingestion order is still deterministic.
+            None => new_ids.to_vec(),
+        };
         let mut used = 0;
-        for posting_id in new_ids.iter().take(pass.max_tasks as usize) {
+        for posting_id in ordered.iter().take(pass.max_tasks as usize) {
             used += 1;
             let request = ExtractRequest {
                 cli: pass.cli.clone(),
@@ -432,6 +448,50 @@ impl DailySearch {
             }
         }
         used
+    }
+
+    /// The run's new Offers, best deterministic rank first (FR-20, S2.5).
+    ///
+    /// A preview, not a stored card: [`rank::score`] is pure, so ordering costs
+    /// no write. The real card is stored by the scoring pass after the agent
+    /// had its turn, and includes what the agent proposed. Offers the model
+    /// knows nothing about have no rank and sort last; ties keep the run's
+    /// ingestion order.
+    fn rank_deterministically(&self, new_ids: &[String], inputs: &ScoringInputs) -> Vec<String> {
+        let now = self.clock.now_rfc3339();
+        let mut ranked: Vec<(usize, Option<f32>, String)> = new_ids
+            .iter()
+            .enumerate()
+            .map(|(index, posting_id)| {
+                let rank = self.preview_rank(posting_id, inputs, &now);
+                (index, rank, posting_id.clone())
+            })
+            .collect();
+        ranked.sort_by(|a, b| {
+            let key = |rank: Option<f32>| rank.unwrap_or(f32::NEG_INFINITY);
+            key(b.1)
+                .partial_cmp(&key(a.1))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.0.cmp(&b.0))
+        });
+        ranked.into_iter().map(|(_, _, id)| id).collect()
+    }
+
+    /// One Offer's deterministic rank, or `None` when it has no card (or could
+    /// not be read: ordering is best-effort, the run goes on).
+    fn preview_rank(&self, posting_id: &str, inputs: &ScoringInputs, now: &str) -> Option<f32> {
+        let offer = self.repos.ingestion.get_offer(posting_id).ok().flatten()?;
+        let features = self.features.features(posting_id).ok()?;
+        let score_inputs = ScoreInputs {
+            features: &features,
+            posting: &offer,
+            profile: &inputs.profile,
+            prefs: &inputs.prefs,
+            market: &inputs.market,
+            semantic: None,
+            now,
+        };
+        rank::score(&score_inputs).map(|card| card.rank)
     }
 
     /// Gates and cards for every Offer the run saw (E6). A vetoed Offer is

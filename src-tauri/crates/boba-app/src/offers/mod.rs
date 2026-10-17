@@ -40,6 +40,7 @@ use boba_domain::scoring::rank::ScoreCardRow;
 use crate::apply::manual::ChannelView;
 use crate::narration::{Narration, NarrationError, NarrationView};
 use crate::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
+use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
 use crate::ports::repo::scoring::{ScoringRepo, ScoringRepoError};
 use crate::ports::repo::triage::TriageRepo;
 
@@ -144,6 +145,10 @@ pub enum OffersError {
     /// The triage decisions (S6.6) could not be read.
     #[error("could not read the Inbox decisions")]
     Triage(#[from] crate::ports::repo::triage::TriageRepoError),
+    /// The Profile version — what "not yet analysed" is measured against —
+    /// could not be read.
+    #[error("could not read the Profile version")]
+    Profile(#[from] ProfileRepoError),
 }
 
 impl OffersError {
@@ -155,6 +160,7 @@ impl OffersError {
             Self::Narration(error) => error.message_key(),
             Self::NotFound => "errors.offers.not_found",
             Self::Triage(_) => "errors.inbox_actions.store",
+            Self::Profile(_) => "errors.profile.store",
         }
     }
 }
@@ -166,6 +172,13 @@ pub struct OffersInbox {
     /// The user's Inbox decisions (S6.6): dismissed and overridden Offers. A
     /// build without the port (an older test fixture) shows every Offer.
     triage: Option<Arc<dyn TriageRepo>>,
+    /// The Profile owner (S2.5): its version is what "not yet analysed" is
+    /// measured against. A build without the port marks nothing.
+    profile: Option<Arc<dyn ProfileRepo>>,
+    /// Whether an agent pass is even part of the run (S2.5): with no engine
+    /// chosen (Limited mode) nothing is "waiting to be analysed", so marking
+    /// every Offer would be noise. Off by default.
+    agent_marking: bool,
 }
 
 impl OffersInbox {
@@ -176,7 +189,24 @@ impl OffersInbox {
             postings,
             scoring,
             triage: None,
+            profile: None,
+            agent_marking: false,
         }
+    }
+
+    /// Turn on the FR-20 marker (S2.5). The composition root sets it only when
+    /// an engine is chosen: without one no Offer is ever analysed, so the badge
+    /// would be true of every Offer and mean nothing.
+    pub fn with_agent_marking(mut self, enabled: bool) -> Self {
+        self.agent_marking = enabled;
+        self
+    }
+
+    /// Add the Profile owner (S2.5): the current version and, through the
+    /// posting owner, whether each Offer's agent pass has run for it (FR-20).
+    pub fn with_profile(mut self, profile: Arc<dyn ProfileRepo>) -> Self {
+        self.profile = Some(profile);
+        self
     }
 
     /// Add the triage owner (S6.6): the reason rows that hide a dismissed Offer
@@ -203,12 +233,21 @@ impl OffersInbox {
                 .collect(),
             None => HashSet::new(),
         };
+        // FR-20 (S2.5): which of these Offers are still waiting for their agent
+        // feature pass, in one batched read like the page's other queries.
+        let not_analysed = self.not_analysed(&ids)?;
         Ok(offers
             .into_iter()
             .map(|offer| {
                 let sources = sources.get(&offer.id).cloned().unwrap_or_default();
                 let card = cards.get(&offer.id);
                 let mut view = card_view(&offer, card, sources);
+                if not_analysed.contains(&offer.id) {
+                    view.badges.push(BadgeView {
+                        id: boba_domain::posting_features::NOT_YET_ANALYSED.to_string(),
+                        gate: None,
+                    });
+                }
                 // FR-66: the dismissal is S4.4's lifecycle row, which is what a
                 // source re-sending the same posting must respect.
                 view.dismissed = lifecycle
@@ -217,6 +256,29 @@ impl OffersInbox {
                 view.overridden = overridden.contains(&offer.id);
                 view
             })
+            .collect())
+    }
+
+    /// The Offers among `ids` whose agent feature pass has not run for the
+    /// current Profile version (FR-20). A build with no Profile port, or a
+    /// Profile with no facts yet (`version == 0`), marks nothing: there is no
+    /// version to measure a pass against.
+    fn not_analysed(&self, ids: &[String]) -> Result<HashSet<String>, OffersError> {
+        if !self.agent_marking {
+            return Ok(HashSet::new());
+        }
+        let Some(profile) = self.profile.as_ref() else {
+            return Ok(HashSet::new());
+        };
+        let version = profile.profile_version()?;
+        if version == 0 || ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let done = self.postings.agent_done_many(ids, version)?;
+        Ok(ids
+            .iter()
+            .filter(|id| !done.contains(*id))
+            .cloned()
             .collect())
     }
 
@@ -709,8 +771,12 @@ mod tests {
     /// A posting repo whose single-Offer reads panic: the Inbox must read a
     /// page with the batched methods (S5.2's N+1 follow-up), and a regression to
     /// per-Offer reads fails loudly instead of only being slow.
+    #[derive(Default)]
     struct BatchedPostings {
         offers: Vec<Offer>,
+        /// Offers whose agent feature pass has run at the Profile version the
+        /// Inbox is asked to mark against (FR-20).
+        done: std::collections::HashSet<String>,
     }
 
     impl IngestionRepo for BatchedPostings {
@@ -784,7 +850,19 @@ mod tests {
             _posting_id: &str,
             _profile_version: u32,
         ) -> Result<bool, IngestionRepoError> {
-            unreachable!("the card does not read features")
+            unreachable!("the Inbox must not read features one Offer at a time")
+        }
+
+        fn agent_done_many(
+            &self,
+            posting_ids: &[String],
+            _profile_version: u32,
+        ) -> Result<std::collections::HashSet<String>, IngestionRepoError> {
+            Ok(posting_ids
+                .iter()
+                .filter(|id| self.done.contains(*id))
+                .cloned()
+                .collect())
         }
 
         fn save_deterministic_features(
@@ -925,6 +1003,7 @@ mod tests {
         second.id = "pst_02".to_string();
         let postings = BatchedPostings {
             offers: vec![offer(), second],
+            ..BatchedPostings::default()
         };
         let scoring = BatchedScoring::default();
         let row = card(Vec::new(), GateConfidence::Medium, Some(81.3));
@@ -937,6 +1016,141 @@ mod tests {
         assert_eq!(cards[0].sources, vec!["remotive".to_string()]);
         assert_eq!(cards[0].fit, Some(81.3));
         assert_eq!(cards[1].fit, None, "an unscored Offer has no scores");
+    }
+
+    /// The Profile version the Inbox marks agent passes against (FR-20).
+    struct FakeProfile {
+        version: u32,
+    }
+
+    impl crate::ports::repo::profile::ProfileRepo for FakeProfile {
+        fn profile_version(&self) -> Result<u32, crate::ports::repo::profile::ProfileRepoError> {
+            Ok(self.version)
+        }
+
+        fn facts_current(
+            &self,
+        ) -> Result<
+            Vec<boba_domain::profile::ProfileFact>,
+            crate::ports::repo::profile::ProfileRepoError,
+        > {
+            unreachable!("the Inbox does not read facts")
+        }
+
+        fn fact_latest(
+            &self,
+            _item_id: &str,
+        ) -> Result<
+            Option<boba_domain::profile::ProfileFact>,
+            crate::ports::repo::profile::ProfileRepoError,
+        > {
+            unreachable!("the Inbox does not read facts")
+        }
+
+        fn fact_get(
+            &self,
+            _id: &str,
+        ) -> Result<
+            Option<boba_domain::profile::ProfileFact>,
+            crate::ports::repo::profile::ProfileRepoError,
+        > {
+            unreachable!("the Inbox does not read facts")
+        }
+
+        fn fact_history(
+            &self,
+            _item_id: &str,
+        ) -> Result<
+            Vec<boba_domain::profile::ProfileFact>,
+            crate::ports::repo::profile::ProfileRepoError,
+        > {
+            unreachable!("the Inbox does not read facts")
+        }
+
+        fn fact_append_revision(
+            &self,
+            _revision: &boba_domain::profile::NewRevision,
+        ) -> Result<boba_domain::profile::ProfileFact, crate::ports::repo::profile::ProfileRepoError>
+        {
+            unreachable!("the read model does not write")
+        }
+
+        fn proposals_pending(
+            &self,
+        ) -> Result<
+            Vec<boba_domain::profile::FactProposal>,
+            crate::ports::repo::profile::ProfileRepoError,
+        > {
+            unreachable!("the Inbox does not read proposals")
+        }
+
+        fn proposal_append(
+            &self,
+            _proposal: &boba_domain::profile::FactProposal,
+        ) -> Result<(), crate::ports::repo::profile::ProfileRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn proposal_delete(
+            &self,
+            _id: &str,
+        ) -> Result<bool, crate::ports::repo::profile::ProfileRepoError> {
+            unreachable!("the read model does not write")
+        }
+    }
+
+    /// FR-20 (S2.5): an Offer whose agent feature pass has not run at the
+    /// current Profile version is marked "not yet analysed" — ranked from
+    /// deterministic features, shown as a lead. An Offer whose pass ran is not.
+    #[test]
+    fn an_offer_whose_agent_pass_has_not_run_is_marked_not_yet_analysed() {
+        let mut second = offer();
+        second.id = "pst_02".to_string();
+        let postings = BatchedPostings {
+            offers: vec![offer(), second],
+            done: ["pst_01".to_string()].into_iter().collect(),
+        };
+        let inbox = OffersInbox::new(Arc::new(postings), Arc::new(BatchedScoring::default()))
+            .with_profile(Arc::new(FakeProfile { version: 3 }))
+            .with_agent_marking(true);
+
+        let cards = inbox.cards(500, 0).expect("read");
+        let marker = boba_domain::posting_features::NOT_YET_ANALYSED;
+
+        assert!(
+            !cards[0].badges.iter().any(|badge| badge.id == marker),
+            "an analysed Offer is not marked: {:?}",
+            cards[0].badges
+        );
+        assert!(
+            cards[1].badges.iter().any(|badge| badge.id == marker),
+            "a deferred Offer is marked not yet analysed: {:?}",
+            cards[1].badges
+        );
+    }
+
+    /// FR-20 (S2.5), reviewer-2 F2: with no engine chosen (Limited mode) no
+    /// agent pass ever runs, so the marker would say something about every
+    /// Offer and nothing about any of them. It stays off.
+    #[test]
+    fn without_an_agent_pass_nothing_is_marked_not_yet_analysed() {
+        let postings = BatchedPostings {
+            offers: vec![offer()],
+            ..BatchedPostings::default()
+        };
+        let inbox = OffersInbox::new(Arc::new(postings), Arc::new(BatchedScoring::default()))
+            .with_profile(Arc::new(FakeProfile { version: 3 }))
+            .with_agent_marking(false);
+
+        let cards = inbox.cards(500, 0).expect("read");
+        assert!(
+            cards[0]
+                .badges
+                .iter()
+                .all(|badge| badge.id != boba_domain::posting_features::NOT_YET_ANALYSED),
+            "{:?}",
+            cards[0].badges
+        );
     }
 
     fn offer() -> Offer {

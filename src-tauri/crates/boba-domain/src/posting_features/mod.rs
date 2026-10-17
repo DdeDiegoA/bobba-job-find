@@ -82,6 +82,12 @@ impl FeatureKind {
     }
 }
 
+/// The marker an Offer carries while no agent pass has run for it at the
+/// current Profile version: it was ranked from deterministic features only
+/// (FR-20, S2.5's per-run budget). The Inbox shows it as a badge; the agent's
+/// later pass clears it, because the pass is then done.
+pub const NOT_YET_ANALYSED: &str = "not_yet_analysed";
+
 /// Who produced a claim (AD-5): the core's own reader, or an agent run. Stored
 /// as `det` / `llm` so the UI can say "refined by AI" (architecture §7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

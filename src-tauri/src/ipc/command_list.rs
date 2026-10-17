@@ -47,6 +47,8 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_export_pdfs,
             crate::commands::agent::agent_engine_snapshot,
             crate::commands::agent::agent_engine_choose,
+            crate::commands::agent::agent_budget_snapshot,
+            crate::commands::agent::agent_budget_save,
             crate::commands::agent::agent_test_call,
             crate::commands::agent::agent_models,
             crate::commands::apply::apply_email_review,

@@ -66,6 +66,7 @@
   "exclusion.reason.closing_soon": "closing soon",
   "exclusion.reason.satisfied": "met",
   "badge.lead": "Lead — worth checking",
+  "badge.not_yet_analysed": "Low confidence: not yet analysed",
   "badge.closing_soon": "Closing soon",
   "badge.expired": "Deadline passed",
   "badge.below_floor": "Below your salary floor",

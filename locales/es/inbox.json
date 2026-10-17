@@ -66,6 +66,7 @@
   "exclusion.reason.closing_soon": "cierra pronto",
   "exclusion.reason.satisfied": "cumplido",
   "badge.lead": "Pista — merece un vistazo",
+  "badge.not_yet_analysed": "Confianza baja: aún no analizada",
   "badge.closing_soon": "Cierra pronto",
   "badge.expired": "Fecha límite pasada",
   "badge.below_floor": "Bajo tu mínimo salarial",
