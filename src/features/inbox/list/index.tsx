@@ -133,6 +133,20 @@ export default function InboxList() {
           })}
         </div>
       )}
+
+      {/* Past the first page the core still has Offers (S5.2): ask for them. */}
+      {inbox.hasNextPage ? (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={inbox.isFetchingNextPage}
+            onClick={() => void inbox.fetchNextPage()}
+          >
+            {inbox.isFetchingNextPage ? t("more.loading") : t("more.load")}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

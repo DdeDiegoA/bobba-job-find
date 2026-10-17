@@ -4,5 +4,8 @@
   "session_challenge.title": "Se ha pausado un portal de sesión",
   "session_challenge.body": "Boba lo detuvo tras un desafío. Abre Ajustes → Privacidad para revisarlo.",
   "source_failing.title": "Una fuente sigue fallando",
+  "top_matches.title": "Tus coincidencias están listas",
+  "top_matches.body_one": "Hay una nueva coincidencia que vale la pena ver.",
+  "top_matches.body_many": "Hay {count} nuevas coincidencias que vale la pena ver.",
   "source_failing.body": "Boba no pudo obtenerla en 3 ejecuciones seguidas. Abre Conexiones para revisarla."
 }

@@ -20,11 +20,10 @@ use boba_app::ports::repo::scoring::ScoringRepo;
 
 use crate::wiring;
 
-/// How much of the list one read pulls. The port is paged
-/// (`offers(limit, offset)`) so the screen — not the store — decides how much it
-/// reads; one page covers a year of searching, and the search-run slice (S5.x)
-/// owns paging past it.
-const OFFER_PAGE: usize = 500;
+/// The most cards one read pulls. The port is paged (`offers(limit, offset)`),
+/// so the screen — not the store — decides how much it reads: the Inbox asks for
+/// the next page when it runs past this one (S5.2), and Today reads the first.
+pub const OFFER_PAGE: u32 = 500;
 
 /// The read model over the mounted ports (ADR-012: ports come only from the
 /// helper).
@@ -41,10 +40,21 @@ fn to_app(error: OffersError) -> AppError {
 }
 
 /// One page of Offer cards, newest first (AC1/AC2).
+///
+/// `limit` is clamped to `1..=OFFER_PAGE` and `offset` is where the previous
+/// page ended, so the Inbox pages past the first 500 instead of stopping there
+/// (S5.2). Absent values read the first page, which is what Today and the
+/// first paint want.
 #[tauri::command]
 #[specta::specta]
-pub fn offers_inbox(app: tauri::AppHandle) -> AppResult<Vec<OfferCardView>> {
-    service(&app)?.cards(OFFER_PAGE, 0).map_err(to_app)
+pub fn offers_inbox(
+    app: tauri::AppHandle,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> AppResult<Vec<OfferCardView>> {
+    let limit = limit.unwrap_or(OFFER_PAGE).clamp(1, OFFER_PAGE) as usize;
+    let offset = offset.unwrap_or(0) as usize;
+    service(&app)?.cards(limit, offset).map_err(to_app)
 }
 
 /// One Offer in full (S6.5, FR-65): the sanitised posting, its Gates and their

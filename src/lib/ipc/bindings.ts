@@ -118,9 +118,18 @@ export const commands = {
   /**  Add an Offer from pasted text (AC2). */
   ingestManualText: (text: string) =>
     typedError<ManualOffer, AppError_Serialize>(__TAURI_INVOKE("ingest_manual_text", { text })),
-  /**  One page of Offer cards, newest first (AC1/AC2). */
-  offersInbox: () =>
-    typedError<OfferCardView[], AppError_Serialize>(__TAURI_INVOKE("offers_inbox")),
+  /**
+   *  One page of Offer cards, newest first (AC1/AC2).
+   *
+   *  `limit` is clamped to `1..=OFFER_PAGE` and `offset` is where the previous
+   *  page ended, so the Inbox pages past the first 500 instead of stopping there
+   *  (S5.2). Absent values read the first page, which is what Today and the
+   *  first paint want.
+   */
+  offersInbox: (limit: number | null, offset: number | null) =>
+    typedError<OfferCardView[], AppError_Serialize>(
+      __TAURI_INVOKE("offers_inbox", { limit, offset }),
+    ),
   /**
    *  One Offer in full (S6.5, FR-65): the sanitised posting, its Gates and their
    *  quotes, the factor breakdown, its Sources and the copies dedup merged, its
@@ -475,10 +484,44 @@ export const commands = {
    */
   applyOutboxReleaseDue: () =>
     typedError<OutboxItemView[], AppError_Serialize>(__TAURI_INVOKE("apply_outbox_release_due")),
+  /**  The newest run's report (AC2), `None` before the first run. */
+  runReportLatest: () =>
+    typedError<
+      {
+        run_id: string;
+        retry_of: string | null;
+        started_at: string;
+        finished_at: string;
+        /**
+         *  Whole milliseconds. Exported as a JS number (specta refuses BigInt-style
+         *  types over IPC); a run's duration is far below 2^53.
+         */
+        duration_ms: number;
+        sources: SourceReportView[];
+        queried: number;
+        fetched: number;
+        new: number;
+        duplicates: number;
+        vetoed: number;
+        ranked: number;
+        agent_tasks_used: number;
+        errors: string[];
+        /**  True when at least one Source failed: the banner with Retry (AC3). */
+        partial: boolean;
+      } | null,
+      AppError_Serialize
+    >(__TAURI_INVOKE("run_report_latest")),
+  /**
+   *  Retry the Sources the newest report could not reach (AC3): re-queries only
+   *  those, on its own thread, and emits `run_report.progressed` as it works.
+   *  Returns as soon as the retry starts; the screen follows the events.
+   */
+  runReportRetry: () => typedError<null, AppError_Serialize>(__TAURI_INVOKE("run_report_retry")),
 };
 
 /** Events */
 export const events = {
+  runReportProgressed: makeEvent<RunReportProgressed>("run_report.progressed"),
   taskFinished: makeEvent<TaskFinished>("task.finished"),
   taskProgressed: makeEvent<TaskProgressed>("task.progressed"),
 };
@@ -1607,6 +1650,55 @@ export type RunNowOutcome = {
   joined: boolean;
 };
 
+/**
+ *  A run's live progress, emitted as `run_report.progressed` (AC1).
+ *
+ *  One event per phase: `started` (the run began against `total` Sources),
+ *  `source` (one Source's turn ended, `done` of `total` now finished) and
+ *  `finished` (the report is stored; the screen reads it).
+ */
+export type RunReportProgressed = {
+  run_id: string;
+  /**  `started` | `source` | `finished`. */
+  phase: string;
+  done: number;
+  total: number;
+  /**  The Source whose turn just ended (`phase = source` only). */
+  source_id: string | null;
+  source_name: string | null;
+  /**  `ok` | `failed` (`phase = source` only). */
+  outcome: string | null;
+  /**  Whether the finished run has failed Sources (`phase = finished` only). */
+  partial: boolean | null;
+};
+
+/**
+ *  A finished run as the report screen reads it (AC2): the report's own fields
+ *  plus the totals derived from its Sources.
+ */
+export type RunReportView = {
+  run_id: string;
+  retry_of: string | null;
+  started_at: string;
+  finished_at: string;
+  /**
+   *  Whole milliseconds. Exported as a JS number (specta refuses BigInt-style
+   *  types over IPC); a run's duration is far below 2^53.
+   */
+  duration_ms: number;
+  sources: SourceReportView[];
+  queried: number;
+  fetched: number;
+  new: number;
+  duplicates: number;
+  vetoed: number;
+  ranked: number;
+  agent_tasks_used: number;
+  errors: string[];
+  /**  True when at least one Source failed: the banner with Retry (AC3). */
+  partial: boolean;
+};
+
 /**  Whether the salary floor excludes Offers or only lowers their score (FR-7). */
 export type SalaryFirmness = "hard" | "soft";
 
@@ -1697,6 +1789,19 @@ export type SessionSnapshotView = {
 
 /**  How serious a finding is; the studio ranks by this. */
 export type Severity = "high" | "medium" | "low";
+
+/**  One Source's turn as the report screen reads it (AC2). */
+export type SourceReportView = {
+  source_id: string;
+  name: string;
+  /**  `ok` | `failed`. */
+  outcome: string;
+  fetched: number;
+  new: number;
+  duplicates: number;
+  /**  Diagnostic text; the screen shows it as a detail, never as the outcome. */
+  error: string | null;
+};
 
 /**  The status a tile shows (AC1). */
 export type SourceStatus =

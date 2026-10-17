@@ -4,5 +4,8 @@
   "session_challenge.title": "A Session Board paused",
   "session_challenge.body": "Boba stopped it after a challenge. Open Settings → Privacy to review it.",
   "source_failing.title": "A source keeps failing",
+  "top_matches.title": "Your matches are ready",
+  "top_matches.body_one": "One new match is worth a look.",
+  "top_matches.body_many": "{count} new matches are worth a look.",
   "source_failing.body": "Boba couldn't fetch it 3 runs in a row. Open Connections to check it."
 }

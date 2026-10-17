@@ -1,0 +1,8 @@
+{
+  "errors.run_report.sources": "Boba no pudo leer la lista de fuentes, así que la búsqueda no empezó. Vuelve a intentarlo desde Conexiones.",
+  "errors.run_report.preferences": "Boba no pudo leer tus preferencias, así que la búsqueda no empezó. Abre Preferencias y vuelve a guardarlas.",
+  "errors.run_report.store": "Boba no pudo guardar el informe de la búsqueda. La búsqueda puede haber terminado; abre otra vez la última ejecución en un momento.",
+  "errors.run_report.no_report": "Todavía no hay ninguna búsqueda terminada que reintentar.",
+  "errors.run_report.nothing_to_retry": "La última búsqueda llegó a todas las fuentes, así que no hay nada que reintentar.",
+  "errors.run_report.retry_not_started": "No se pudo iniciar el reintento. Inténtalo de nuevo."
+}

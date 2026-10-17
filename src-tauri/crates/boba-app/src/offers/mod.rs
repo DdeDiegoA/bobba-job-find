@@ -161,14 +161,19 @@ impl OffersInbox {
     /// One page of cards, newest first (AC1/AC2).
     pub fn cards(&self, limit: usize, offset: usize) -> Result<Vec<OfferCardView>, OffersError> {
         let offers = self.postings.offers(limit, offset)?;
-        offers
+        // The Sources and the newest card of the whole page, in one read each
+        // (S5.2: the N+1 follow-up — two queries per page, not two per Offer).
+        let ids: Vec<String> = offers.iter().map(|offer| offer.id.clone()).collect();
+        let sources = self.postings.offer_sources_many(&ids)?;
+        let cards = self.scoring.latest_cards(&ids)?;
+        Ok(offers
             .into_iter()
             .map(|offer| {
-                let sources = self.postings.offer_sources(&offer.id)?;
-                let card = self.scoring.latest_card(&offer.id)?;
-                Ok(card_view(&offer, card.as_ref(), sources))
+                let sources = sources.get(&offer.id).cloned().unwrap_or_default();
+                let card = cards.get(&offer.id);
+                card_view(&offer, card, sources)
             })
-            .collect()
+            .collect())
     }
 
     /// One Offer in full (FR-65, EXPERIENCE §9.4): the sanitised posting, the
@@ -651,6 +656,227 @@ mod tests {
             self.narrations.lock().unwrap().push(row.clone());
             Ok(())
         }
+    }
+
+    /// A posting repo whose single-Offer reads panic: the Inbox must read a
+    /// page with the batched methods (S5.2's N+1 follow-up), and a regression to
+    /// per-Offer reads fails loudly instead of only being slow.
+    struct BatchedPostings {
+        offers: Vec<Offer>,
+    }
+
+    impl IngestionRepo for BatchedPostings {
+        fn insert_offer(
+            &self,
+            _offer: &Offer,
+            _provenance: &Provenance,
+        ) -> Result<(), IngestionRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn get_offer(&self, _id: &str) -> Result<Option<Offer>, IngestionRepoError> {
+            unreachable!("the read model reads a page")
+        }
+
+        fn offers(&self, limit: usize, offset: usize) -> Result<Vec<Offer>, IngestionRepoError> {
+            Ok(self
+                .offers
+                .iter()
+                .skip(offset)
+                .take(limit)
+                .cloned()
+                .collect())
+        }
+
+        fn offer_sources(&self, _posting_id: &str) -> Result<Vec<String>, IngestionRepoError> {
+            panic!("the Inbox must not read Sources one Offer at a time")
+        }
+
+        fn offer_sources_many(
+            &self,
+            posting_ids: &[String],
+        ) -> Result<std::collections::HashMap<String, Vec<String>>, IngestionRepoError> {
+            Ok(posting_ids
+                .iter()
+                .map(|id| (id.clone(), vec!["remotive".to_string()]))
+                .collect())
+        }
+
+        fn provenance(&self, _posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError> {
+            unreachable!("the card does not read provenance")
+        }
+
+        fn dedup_candidates(
+            &self,
+            _probe: &boba_domain::dedup::DedupProbe,
+        ) -> Result<Vec<Offer>, IngestionRepoError> {
+            unreachable!("the read model does not dedup")
+        }
+
+        fn merge_provenance(
+            &self,
+            _posting_id: &str,
+            _provenance: &Provenance,
+            _now: &str,
+        ) -> Result<(), IngestionRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn features(
+            &self,
+            _posting_id: &str,
+            _profile_version: u32,
+        ) -> Result<Option<boba_domain::posting_features::PostingFeatures>, IngestionRepoError>
+        {
+            unreachable!("the card does not read features")
+        }
+
+        fn features_agent_done(
+            &self,
+            _posting_id: &str,
+            _profile_version: u32,
+        ) -> Result<bool, IngestionRepoError> {
+            unreachable!("the card does not read features")
+        }
+
+        fn save_deterministic_features(
+            &self,
+            _features: &boba_domain::posting_features::PostingFeatures,
+            _now: &str,
+        ) -> Result<(), IngestionRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn save_agent_features(
+            &self,
+            _features: &boba_domain::posting_features::PostingFeatures,
+            _now: &str,
+        ) -> Result<(), IngestionRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn features_pending(
+            &self,
+            _profile_version: u32,
+            _limit: usize,
+        ) -> Result<Vec<boba_domain::posting_features::PendingPosting>, IngestionRepoError>
+        {
+            unreachable!("the card does not read features")
+        }
+
+        fn lifecycle(
+            &self,
+            _posting_id: &str,
+        ) -> Result<Option<boba_domain::posting::lifecycle::PostingLifecycle>, IngestionRepoError>
+        {
+            unreachable!("the card does not read lifecycle")
+        }
+
+        fn save_lifecycle(
+            &self,
+            _lifecycle: &boba_domain::posting::lifecycle::PostingLifecycle,
+        ) -> Result<(), IngestionRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn postings_missing_from_run(
+            &self,
+            _source_ids: &[String],
+            _before: &str,
+        ) -> Result<Vec<Offer>, IngestionRepoError> {
+            unreachable!("the read model does not sweep")
+        }
+
+        fn postings_seen_by_run(
+            &self,
+            _source_ids: &[String],
+            _since: &str,
+        ) -> Result<Vec<Offer>, IngestionRepoError> {
+            unreachable!("the read model does not sweep")
+        }
+
+        fn possibly_closed_with_applications(
+            &self,
+        ) -> Result<Vec<boba_domain::posting::lifecycle::ClosedWarning>, IngestionRepoError>
+        {
+            unreachable!("the read model does not sweep")
+        }
+    }
+
+    /// The same rule for the card side: newest cards are read in one call.
+    #[derive(Default)]
+    struct BatchedScoring {
+        rows: Mutex<Vec<ScoreCardRow>>,
+    }
+
+    impl ScoringRepo for BatchedScoring {
+        fn insert_card(&self, _row: &ScoreCardRow) -> Result<(), ScoringRepoError> {
+            unreachable!("the read model does not write")
+        }
+
+        fn card(
+            &self,
+            _posting_id: &str,
+            _versions: CardVersions,
+        ) -> Result<Option<ScoreCardRow>, ScoringRepoError> {
+            unreachable!("the read model reads the newest card")
+        }
+
+        fn latest_card(&self, _posting_id: &str) -> Result<Option<ScoreCardRow>, ScoringRepoError> {
+            panic!("the Inbox must not read cards one Offer at a time")
+        }
+
+        fn latest_cards(
+            &self,
+            posting_ids: &[String],
+        ) -> Result<std::collections::HashMap<String, ScoreCardRow>, ScoringRepoError> {
+            Ok(self
+                .rows
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|row| posting_ids.contains(&row.posting_id))
+                .map(|row| (row.posting_id.clone(), row.clone()))
+                .collect())
+        }
+
+        fn cards_for(&self, _posting_id: &str) -> Result<Vec<ScoreCardRow>, ScoringRepoError> {
+            unreachable!("the card does not read history")
+        }
+
+        fn latest_narration(
+            &self,
+            _posting_id: &str,
+            _score_card_id: &str,
+            _lang: &str,
+        ) -> Result<Option<ScoreNarration>, ScoringRepoError> {
+            unreachable!("the card does not read narration")
+        }
+
+        fn insert_narration(&self, _row: &ScoreNarration) -> Result<(), ScoringRepoError> {
+            unreachable!("the read model does not write")
+        }
+    }
+
+    // AC1/AC2 (S5.2 follow-up): one page is two reads, whatever its size.
+    #[test]
+    fn a_page_of_cards_reads_its_sources_and_scores_in_one_call_each() {
+        let mut second = offer();
+        second.id = "pst_02".to_string();
+        let postings = BatchedPostings {
+            offers: vec![offer(), second],
+        };
+        let scoring = BatchedScoring::default();
+        let row = card(Vec::new(), GateConfidence::Medium, Some(81.3));
+        scoring.rows.lock().unwrap().push(row);
+
+        let inbox = OffersInbox::new(Arc::new(postings), Arc::new(scoring));
+        let cards = inbox.cards(500, 0).expect("read");
+
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].sources, vec!["remotive".to_string()]);
+        assert_eq!(cards[0].fit, Some(81.3));
+        assert_eq!(cards[1].fit, None, "an unscored Offer has no scores");
     }
 
     fn offer() -> Offer {

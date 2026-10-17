@@ -63,6 +63,17 @@ pub const SOURCE_FAILING_TITLE: Entry = Entry {
 pub const SOURCE_FAILING_BODY: Entry = Entry {
     message_key: "jobs:source_failing.body",
 };
+/// The top-matches notice (S5.2, FR-46): a run found Strong or Good Offers.
+/// The body's plural is the catalog's: `body_one` for a single match.
+pub const TOP_MATCHES_TITLE: Entry = Entry {
+    message_key: "jobs:top_matches.title",
+};
+pub const TOP_MATCHES_BODY_ONE: Entry = Entry {
+    message_key: "jobs:top_matches.body_one",
+};
+pub const TOP_MATCHES_BODY_MANY: Entry = Entry {
+    message_key: "jobs:top_matches.body_many",
+};
 
 /// The Outbox hold notice (S9.7, FR-85): the wording lives in `outbox.json`,
 /// the slice that owns the feature.
@@ -143,20 +154,37 @@ impl<R: Runtime> TauriNotifier<R> {
 impl<R: Runtime> NotifierPort for TauriNotifier<R> {
     fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
         let locale = crate::lifecycle::ui_locale(&self.app);
-        let (title, body) = match notification {
-            Notification::LockedSearch => (text(locale, &LOCKED_TITLE), text(locale, &LOCKED_BODY)),
+        let (title, body): (&str, String) = match notification {
+            Notification::LockedSearch => (
+                text(locale, &LOCKED_TITLE),
+                text(locale, &LOCKED_BODY).to_string(),
+            ),
             Notification::SessionChallengePaused => (
                 text(locale, &SESSION_CHALLENGE_TITLE),
-                text(locale, &SESSION_CHALLENGE_BODY),
+                text(locale, &SESSION_CHALLENGE_BODY).to_string(),
             ),
             Notification::SourceFailing => (
                 text(locale, &SOURCE_FAILING_TITLE),
-                text(locale, &SOURCE_FAILING_BODY),
+                text(locale, &SOURCE_FAILING_BODY).to_string(),
             ),
             Notification::OutboxHold => (
                 outbox_text(locale, &OUTBOX_TITLE),
-                outbox_text(locale, &OUTBOX_BODY),
+                outbox_text(locale, &OUTBOX_BODY).to_string(),
             ),
+            Notification::TopMatches { count } => {
+                let entry = if count == 1 {
+                    &TOP_MATCHES_BODY_ONE
+                } else {
+                    &TOP_MATCHES_BODY_MANY
+                };
+                (
+                    text(locale, &TOP_MATCHES_TITLE),
+                    // `{count}` is the only placeholder these entries carry;
+                    // a plain replace keeps the catalog readable in both
+                    // languages without an ICU runtime in the core.
+                    text(locale, entry).replace("{count}", &count.to_string()),
+                )
+            }
         };
         // A host without the notification plugin panics inside Tauri's accessor
         // rather than returning an error; a missing toast never kills the tick.
@@ -222,6 +250,9 @@ mod tests {
             SESSION_CHALLENGE_BODY,
             SOURCE_FAILING_TITLE,
             SOURCE_FAILING_BODY,
+            TOP_MATCHES_TITLE,
+            TOP_MATCHES_BODY_ONE,
+            TOP_MATCHES_BODY_MANY,
         ] {
             assert!(
                 message(Locale::En, entry.message_key).is_some(),

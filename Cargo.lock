@@ -690,6 +690,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "time",
+ "ulid",
  "zip 9.0.4",
 ]
 

@@ -1,1 +1,36 @@
-{}
+{
+  "title": "Última búsqueda",
+  "loading": "Cargando la última búsqueda…",
+  "started": "Se ejecutó {when}",
+  "duration": "tardó {duration}",
+  "empty": {
+    "title": "Todavía no hay búsquedas",
+    "body": "Boba aún no ha buscado empleos. Se ejecuta según su horario, o lánzala ahora desde la barra superior."
+  },
+  "partial": {
+    "title": "No se pudo conectar con {count} de {total} fuentes",
+    "retry": "Reintentar las fuentes fallidas",
+    "retrying": "Reintentando…"
+  },
+  "totals": {
+    "queried": "Fuentes",
+    "fetched": "Obtenidas",
+    "new": "Nuevas",
+    "duplicates": "Duplicadas",
+    "vetoed": "Descartadas",
+    "ranked": "Puntuadas",
+    "agentTasks": "Tareas del agente"
+  },
+  "sources": {
+    "title": "Fuentes",
+    "failed": "Falló",
+    "counts": "{fetched} obtenidas · {new} nuevas · {duplicates} duplicadas"
+  },
+  "errors": {
+    "title": "{count} detalles"
+  },
+  "progress": {
+    "starting": "Buscando… 0/{total} fuentes",
+    "source": "Buscando en {name} ({done}/{total})"
+  }
+}

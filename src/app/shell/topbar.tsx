@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 import KillSwitch from "@/app/header/kill-switch";
 import { Button } from "@/components/ui/button";
+import { RunProgress } from "@/features/today/run-report/run-progress";
 import { currentLocale } from "@/lib/i18n";
 import { pageTitleKey, type RunState } from "./nav";
 
@@ -54,6 +55,7 @@ export function Topbar({ run, searchRef, onSearch }: TopbarProps) {
         </div>
       ) : null}
 
+      <RunProgress />
       <RunStatus run={run} />
     </header>
   );

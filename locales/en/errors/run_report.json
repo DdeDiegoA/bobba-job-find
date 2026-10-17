@@ -1,0 +1,8 @@
+{
+  "errors.run_report.sources": "Boba could not read the list of Sources, so the search did not start. Try again from Connections.",
+  "errors.run_report.preferences": "Boba could not read your preferences, so the search did not start. Open Preferences and save them again.",
+  "errors.run_report.store": "Boba could not save the run report. The search itself may have finished; open the last run again in a moment.",
+  "errors.run_report.no_report": "There is no finished search run to retry yet.",
+  "errors.run_report.nothing_to_retry": "The last run reached every Source, so there is nothing to retry.",
+  "errors.run_report.retry_not_started": "The retry could not start. Try again."
+}

@@ -1,0 +1,431 @@
+//! What a run reads from the stored Profile and Preferences before it starts
+//! (S5.2; the documents themselves are S3.7's and S3.4's).
+//!
+//! Two shapes come out of here:
+//!
+//! * a [`SearchQuery`] — what the Source adapters are asked for (AD-9);
+//! * the scoring inputs — the Profile snapshot, the Preferences, the Gate
+//!   inputs and the market data S6.3's [`ScoreRequest`] takes.
+//!
+//! **Nothing is imputed**: a fact the Profile does not state is absent from the
+//! snapshot, and a Preference the document does not carry keeps the domain
+//! default, which is what the factors and Gates read as "declared nothing".
+//! Reads are tolerant on purpose — a document from a newer build must not stop
+//! the daily search — so a row this build cannot read falls back to defaults.
+//!
+//! [`ScoreRequest`]: crate::scoring::ScoreRequest
+
+use boba_domain::posting::{Money, PayPeriod, WorkMode};
+use boba_domain::posting_features::Seniority;
+use boba_domain::profile::{FactKind, ProfileFact};
+use boba_domain::scoring::factors::{MarketData, Prefs, ProfileSnapshot};
+use boba_domain::scoring::gates::{
+    Cefr, DeclaredLanguage, GateInputs, Hardness, PermitKind, SalaryFloor, WorkAuthorization,
+};
+use boba_domain::source::SearchQuery;
+use serde::Deserialize;
+
+use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
+use crate::ports::repo::system::SystemRepo;
+
+/// The `setting` row holding the Preferences document (S3.7).
+pub const PREFERENCES_KEY: &str = "preferences";
+
+/// How near a deadline has to be to be "Closing soon" (offer-scoring.md §2).
+pub const CLOSING_SOON_DAYS: i64 = 7;
+
+/// Everything one run scores its Offers with, read once at run time.
+#[derive(Debug, Clone)]
+pub struct ScoringInputs {
+    /// The Profile version the snapshot was taken at (AD-15).
+    pub profile_version: u32,
+    /// The Preferences version in force (S3.7, FR-14).
+    pub prefs_version: u32,
+    pub profile: ProfileSnapshot,
+    pub prefs: Prefs,
+    /// What the five Gates read (S6.1).
+    pub gates: GateInputs,
+    /// Salary benchmarks; the user's own arrive with S6.8, so this is empty
+    /// until then — the Quality axis says what it is missing.
+    pub market: MarketData,
+}
+
+/// The Search request the run derives from the stored Preferences: the roles
+/// and places the user wants, and whether only remote work is acceptable.
+pub fn search_query(system: &dyn SystemRepo) -> SearchQuery {
+    let preferences = stored_preferences(system);
+    let values = &preferences.values;
+    SearchQuery {
+        roles: values.roles.clone(),
+        keywords: Vec::new(),
+        locations: values.locations.clone(),
+        remote: remote_only(values),
+        languages: values.working_languages.clone(),
+        markets: Vec::new(),
+    }
+}
+
+/// The Preferences-derived half of a run's scoring inputs, plus the Profile
+/// snapshot the factors read.
+pub fn scoring_inputs(
+    profile: &dyn ProfileRepo,
+    system: &dyn SystemRepo,
+    now: &str,
+) -> Result<ScoringInputs, InputsError> {
+    let profile_version = profile.profile_version()?;
+    let facts = profile.facts_current()?;
+    let preferences = stored_preferences(system);
+
+    let snapshot = snapshot_of(&facts, &preferences.values);
+    let prefs = prefs_of(&preferences.values);
+    let gates = GateInputs {
+        work_authorizations: authorizations_of(&facts),
+        languages: snapshot.languages.clone(),
+        salary_floor: preferences.values.salary_floor.as_ref().map(floor_of),
+        // Declared by the user in S6.8's settings; until then nothing is
+        // required, so the Gate never vetoes for it.
+        requires_known_compensation: false,
+        work_modes_allowed: work_modes(&preferences.values.work_modes),
+        locations: preferences.values.locations.clone(),
+        relocate_ok: false,
+        closing_soon_days: CLOSING_SOON_DAYS,
+        now: now.to_string(),
+    };
+
+    Ok(ScoringInputs {
+        profile_version,
+        prefs_version: preferences.version,
+        profile: snapshot,
+        prefs,
+        gates,
+        market: MarketData::default(),
+    })
+}
+
+/// A read that a run treats as fatal: without the Profile there is no version
+/// to key a card by.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum InputsError {
+    #[error(transparent)]
+    Profile(#[from] ProfileRepoError),
+}
+
+/// The Preferences document as this build reads it: `{version, values, …}`.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StoredPreferences {
+    #[serde(default)]
+    version: u32,
+    #[serde(default)]
+    values: Values,
+}
+
+/// `Preferences`'s stored fields, all optional on read (AD-21 tolerance).
+#[derive(Debug, Clone, Default, Deserialize)]
+struct Values {
+    #[serde(default)]
+    roles: Vec<String>,
+    #[serde(default)]
+    seniority_min: Option<String>,
+    #[serde(default)]
+    seniority_max: Option<String>,
+    #[serde(default)]
+    salary_floor: Option<StoredFloor>,
+    #[serde(default)]
+    locations: Vec<String>,
+    #[serde(default)]
+    work_modes: WorkModes,
+    #[serde(default)]
+    working_languages: Vec<String>,
+    #[serde(default)]
+    deal_breaker_keywords: Vec<String>,
+    #[serde(default)]
+    excluded_companies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct WorkModes {
+    #[serde(default)]
+    remote: bool,
+    #[serde(default)]
+    hybrid: bool,
+    #[serde(default)]
+    onsite: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredFloor {
+    amount_minor: i64,
+    currency: String,
+    period: String,
+    firmness: String,
+}
+
+/// Read the Preferences document; a missing or unreadable row is "not set",
+/// never an error — the run then searches everything and ranks without
+/// preferences, which is what every factor already knows how to say.
+fn stored_preferences(system: &dyn SystemRepo) -> StoredPreferences {
+    let Some(raw) = system.setting_get(PREFERENCES_KEY).ok().flatten() else {
+        return StoredPreferences::default();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+/// Whether the user accepts remote work only, in which case the adapters are
+/// told so (a Source that can filter saves the run a network round-trip).
+fn remote_only(values: &Values) -> Option<bool> {
+    (values.work_modes.remote && !values.work_modes.hybrid && !values.work_modes.onsite)
+        .then_some(true)
+}
+
+/// The Profile facts as the factors read them (F1..F6).
+fn snapshot_of(facts: &[ProfileFact], values: &Values) -> ProfileSnapshot {
+    ProfileSnapshot {
+        skills: texts(facts, FactKind::Skill),
+        // F2's seniority is the user's own level, which the Profile editor does
+        // not state separately from the target band: leave it undeclared
+        // rather than read the preference as a fact.
+        seniority: None,
+        years_experience: years_of(facts),
+        education: texts(facts, FactKind::Education),
+        certifications: texts(facts, FactKind::Certification),
+        languages: languages_of(facts),
+        locations: values.locations.clone(),
+    }
+}
+
+/// The Preferences as the factors read them.
+fn prefs_of(values: &Values) -> Prefs {
+    Prefs {
+        roles: values.roles.clone(),
+        seniority_min: values.seniority_min.as_deref().and_then(seniority),
+        seniority_max: values.seniority_max.as_deref().and_then(seniority),
+        work_modes: work_modes(&values.work_modes),
+        locations: values.locations.clone(),
+        working_languages: values.working_languages.clone(),
+        excluded_companies: values.excluded_companies.clone(),
+        deal_breaker_keywords: values.deal_breaker_keywords.clone(),
+        ..Prefs::default()
+    }
+}
+
+fn work_modes(modes: &WorkModes) -> Vec<WorkMode> {
+    let mut allowed = Vec::new();
+    if modes.remote {
+        allowed.push(WorkMode::Remote);
+    }
+    if modes.hybrid {
+        allowed.push(WorkMode::Hybrid);
+    }
+    if modes.onsite {
+        allowed.push(WorkMode::Onsite);
+    }
+    allowed
+}
+
+fn seniority(text: &str) -> Option<Seniority> {
+    Seniority::ALL
+        .into_iter()
+        .find(|level| level.as_str().eq_ignore_ascii_case(text))
+}
+
+/// The salary floor in the Gates' shape; an unreadable period makes the floor
+/// absent (a gate must not compare against a made-up unit).
+fn floor_of(stored: &StoredFloor) -> SalaryFloor {
+    let period = match stored.period.to_ascii_lowercase().as_str() {
+        "year" | "yearly" | "annual" => PayPeriod::Year,
+        "month" | "monthly" => PayPeriod::Month,
+        _ => PayPeriod::Hour,
+    };
+    SalaryFloor {
+        money: Money {
+            amount_minor: stored.amount_minor,
+            currency: stored.currency.clone(),
+            period,
+        },
+        hardness: if stored.firmness.eq_ignore_ascii_case("hard") {
+            Hardness::Hard
+        } else {
+            Hardness::Soft
+        },
+    }
+}
+
+/// The text of every current fact of one kind: the English variant, falling
+/// back to the Spanish one — the same rule the Profile editor shows.
+fn texts(facts: &[ProfileFact], kind: FactKind) -> Vec<String> {
+    facts
+        .iter()
+        .filter(|fact| fact.kind == kind)
+        .filter_map(|fact| fact.text_en.clone().or_else(|| fact.text_es.clone()))
+        .collect()
+}
+
+/// Years of experience, when an Experience fact states them (`detail_json`'s
+/// `years`). Nothing else is read as a number: a date range is not a count.
+fn years_of(facts: &[ProfileFact]) -> Option<u32> {
+    facts
+        .iter()
+        .filter(|fact| fact.kind == FactKind::Experience)
+        .filter_map(|fact| {
+            serde_json::from_str::<serde_json::Value>(&fact.detail_json)
+                .ok()?
+                .get("years")?
+                .as_u64()
+        })
+        .map(|years| years.min(u64::from(u32::MAX)) as u32)
+        .max()
+}
+
+/// The declared languages, from `Language` facts' `detail_json`
+/// (`{"language": "en", "level": "C1"}`). A fact without both is skipped:
+/// a level nobody stated is not A1.
+fn languages_of(facts: &[ProfileFact]) -> Vec<DeclaredLanguage> {
+    facts
+        .iter()
+        .filter(|fact| fact.kind == FactKind::Language)
+        .filter_map(language_of)
+        .collect()
+}
+
+fn language_of(fact: &ProfileFact) -> Option<DeclaredLanguage> {
+    let detail: serde_json::Value = serde_json::from_str(&fact.detail_json).ok()?;
+    let language = ["language", "lang", "tag"]
+        .iter()
+        .find_map(|key| detail.get(*key)?.as_str())?;
+    let level = ["level", "cefr"]
+        .iter()
+        .find_map(|key| detail.get(*key)?.as_str())
+        .and_then(Cefr::parse)?;
+    Some(DeclaredLanguage {
+        language: language.to_string(),
+        level,
+    })
+}
+
+/// Work authorizations from `Eligibility` facts' `detail_json`
+/// (`{"region": "es", "permit": "work_permit"}`).
+fn authorizations_of(facts: &[ProfileFact]) -> Vec<WorkAuthorization> {
+    facts
+        .iter()
+        .filter(|fact| fact.kind == FactKind::Eligibility)
+        .filter_map(authorization_of)
+        .collect()
+}
+
+fn authorization_of(fact: &ProfileFact) -> Option<WorkAuthorization> {
+    let detail: serde_json::Value = serde_json::from_str(&fact.detail_json).ok()?;
+    let region = detail.get("region")?.as_str()?.to_string();
+    let permit = match detail.get("permit")?.as_str()? {
+        "work_permit" => PermitKind::WorkPermit,
+        "residency" => PermitKind::Residency,
+        "citizenship" => PermitKind::Citizenship,
+        "clearance" => PermitKind::Clearance,
+        _ => return None,
+    };
+    Some(WorkAuthorization { region, permit })
+}
+
+#[cfg(test)]
+mod tests {
+    use boba_domain::posting::{PayPeriod, WorkMode};
+    use boba_domain::profile::{FactDraft, FactKind, ProfileFact};
+
+    use super::*;
+
+    fn fact(kind: FactKind, text: &str, detail: &str) -> ProfileFact {
+        ProfileFact {
+            id: "rev".to_string(),
+            item_id: "item".to_string(),
+            kind,
+            text_en: Some(text.to_string()),
+            text_es: None,
+            evidence: None,
+            detail_json: detail.to_string(),
+            supersedes: None,
+            profile_version: 1,
+            provenance: boba_domain::profile::Provenance::User,
+            agent_run_id: None,
+            created_at: "2026-10-17T08:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_language_fact_with_a_level_becomes_a_declared_language() {
+        let facts = vec![fact(
+            FactKind::Language,
+            "English",
+            r#"{"language":"en","level":"C1"}"#,
+        )];
+        let languages = languages_of(&facts);
+        assert_eq!(languages.len(), 1);
+        assert_eq!(languages[0].language, "en");
+        assert_eq!(languages[0].level, Cefr::C1);
+    }
+
+    #[test]
+    fn a_language_fact_without_a_level_is_not_declared() {
+        let facts = vec![fact(FactKind::Language, "English", "{}")];
+        assert!(languages_of(&facts).is_empty());
+    }
+
+    #[test]
+    fn an_experience_fact_states_the_years_it_states() {
+        let facts = vec![
+            fact(FactKind::Experience, "Data engineer", r#"{"years":4}"#),
+            fact(FactKind::Experience, "Analyst", r#"{"years":2}"#),
+        ];
+        assert_eq!(years_of(&facts), Some(4));
+    }
+
+    #[test]
+    fn remote_only_is_asked_of_the_adapters_only_when_it_holds() {
+        let only_remote = Values {
+            work_modes: WorkModes {
+                remote: true,
+                hybrid: false,
+                onsite: false,
+            },
+            ..Values::default()
+        };
+        assert_eq!(remote_only(&only_remote), Some(true));
+        let mixed = Values {
+            work_modes: WorkModes {
+                remote: true,
+                hybrid: true,
+                onsite: false,
+            },
+            ..Values::default()
+        };
+        assert_eq!(remote_only(&mixed), None);
+    }
+
+    #[test]
+    fn a_hard_floor_keeps_its_currency_and_period() {
+        let floor = floor_of(&StoredFloor {
+            amount_minor: 4_500_000,
+            currency: "EUR".to_string(),
+            period: "year".to_string(),
+            firmness: "hard".to_string(),
+        });
+        assert_eq!(floor.money.amount_minor, 4_500_000);
+        assert_eq!(floor.money.currency, "EUR");
+        assert_eq!(floor.money.period, PayPeriod::Year);
+        assert_eq!(floor.hardness, Hardness::Hard);
+    }
+
+    #[test]
+    fn work_modes_map_to_the_domain_modes() {
+        let modes = work_modes(&WorkModes {
+            remote: true,
+            hybrid: false,
+            onsite: true,
+        });
+        assert_eq!(modes, [WorkMode::Remote, WorkMode::Onsite]);
+    }
+
+    #[test]
+    fn a_draft_with_only_its_text_is_read_as_no_detail_at_all() {
+        let draft = FactDraft::new(FactKind::Skill);
+        assert_eq!(draft.detail_json, "{}");
+    }
+}

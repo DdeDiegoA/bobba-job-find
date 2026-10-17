@@ -22,6 +22,13 @@ pub enum Notification {
     /// An automatic send entered the Outbox hold (S9.7, FR-85). One per item,
     /// and only for a held send: a dry-run "would send" is not a notification.
     OutboxHold,
+    /// A search run produced new **top matches** (S5.2, FR-46): Strong or Good
+    /// Offers the user has not seen before. One per run, and only when there is
+    /// at least one: a run that found nothing worth a look stays quiet.
+    TopMatches {
+        /// How many top matches the run produced (never zero).
+        count: u32,
+    },
 }
 
 /// A notification the OS refused to show.
