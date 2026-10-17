@@ -202,6 +202,11 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The unencrypted export (S10.1, FR-110): the store owns every row the
     // files are built from.
     mount_port::<dyn boba_app::ports::export::ExportPort>(app, store.clone());
+    // The retention sweep (S10.3, FR-113): the store deletes expired raw
+    // payloads and email, and the scheduler's `retention_sweep` handler runs it
+    // on the slot the user's schedules name (like `email_sync`, S8.3).
+    mount_port::<dyn boba_app::retention::RetentionRepo>(app, store.clone());
+    crate::commands::retention::mount(app);
     // slices append ONE line above this comment; never reorder/remove
 }
 

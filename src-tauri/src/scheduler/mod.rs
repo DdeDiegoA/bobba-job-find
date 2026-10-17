@@ -462,12 +462,25 @@ fn local_offset() -> UtcOffset {
 fn read_schedules(system: &dyn SystemRepo) -> Option<Schedules> {
     let raw = system.setting_get(SCHEDULES_KEY).ok().flatten()?;
     match schedules_from_json(&raw) {
-        Ok(schedules) => Some(schedules),
+        Ok(schedules) => Some(with_defaults(schedules)),
         Err(error) => {
             tracing::warn!(%error, "stored job schedules ignored");
             None
         }
     }
+}
+
+/// Fill in the compiled retention default when the stored document omits it: a
+/// user who saved a daily-search schedule (FR-41) must not silently switch the
+/// sweep (S10.3) off. Only the sweep is filled in — the stored map is the set
+/// of jobs the user turned on, so adding any other job back would override a
+/// choice the user made by leaving it out. An explicit sweep entry, including
+/// an empty `days` list, always wins.
+fn with_defaults(mut stored: Schedules) -> Schedules {
+    if let Some(sweep) = default_schedules().get(&JobKind::RetentionSweep).cloned() {
+        stored.entry(JobKind::RetentionSweep).or_insert(sweep);
+    }
+    stored
 }
 
 /// When this install first ran the scheduler (FR-43): stored once, then read.
@@ -624,6 +637,74 @@ mod tests {
     }
 
     #[test]
+    fn the_default_schedule_includes_the_daily_retention_sweep() {
+        let schedules = default_schedules();
+        let sweep = &schedules[&JobKind::RetentionSweep];
+        assert_eq!(
+            sweep.times,
+            vec![Time::from_hms(3, 0, 0).unwrap()],
+            "the sweep runs in the quiet hours, every day"
+        );
+        assert_eq!(sweep.days.len(), 7);
+    }
+
+    #[test]
+    fn a_stored_daily_search_schedule_still_yields_the_retention_sweep() {
+        // A user who saved only a daily-search schedule must not switch the
+        // sweep off by omission.
+        let stored =
+            schedules_from_json(r#"{"daily_search": {"times": ["09:30"], "days": ["mon"]}}"#)
+                .expect("valid document");
+
+        let schedules = with_defaults(stored);
+
+        assert_eq!(
+            schedules[&JobKind::DailySearch].times,
+            vec![Time::from_hms(9, 30, 0).unwrap()],
+            "the stored entry wins"
+        );
+        assert_eq!(
+            schedules[&JobKind::RetentionSweep].times,
+            vec![Time::from_hms(3, 0, 0).unwrap()],
+            "an omitted job keeps its compiled default"
+        );
+    }
+
+    #[test]
+    fn a_stored_schedule_without_the_daily_search_does_not_get_it_back() {
+        // FR-41: the stored map is the set of jobs the user turned on, so a job
+        // it omits stays off. Only the retention sweep (S10.3) is filled in.
+        let stored =
+            schedules_from_json(r#"{"retention_sweep": {"times": ["03:00"], "days": ["mon"]}}"#)
+                .expect("valid document");
+
+        let schedules = with_defaults(stored);
+
+        assert!(
+            !schedules.contains_key(&JobKind::DailySearch),
+            "an omitted daily search is the user turning it off"
+        );
+        assert_eq!(
+            schedules[&JobKind::RetentionSweep].days,
+            vec![time::Weekday::Monday]
+        );
+    }
+
+    #[test]
+    fn a_stored_entry_can_switch_the_sweep_off() {
+        let stored =
+            schedules_from_json(r#"{"retention_sweep": {"times": ["03:00"], "days": []}}"#)
+                .expect("valid document");
+
+        let schedules = with_defaults(stored);
+
+        assert!(
+            schedules[&JobKind::RetentionSweep].days.is_empty(),
+            "an explicit empty day list is the user turning it off"
+        );
+    }
+
+    #[test]
     fn the_local_offset_falls_back_to_utc() {
         // Whatever this host reports, the scheduler always gets a usable offset.
         let _ = local_offset();
@@ -634,21 +715,31 @@ mod tests {
     }
 
     #[test]
-    fn a_locked_launch_reports_todays_slot_once() {
-        // 09:00 UTC with the 08:00 daily search already past: one slot.
+    fn a_locked_launch_reports_each_due_slot_once() {
+        // 09:00 UTC: the 08:00 daily search and the 03:00 retention sweep are
+        // both past, in `JobKind::ALL` order.
         assert_eq!(
             locked_slots(UtcOffset::UTC, at("2026-10-16T09:00:00Z")),
-            vec![(JobKind::DailySearch, "2026-10-16T08:00:00Z".to_string())]
+            vec![
+                (JobKind::DailySearch, "2026-10-16T08:00:00Z".to_string()),
+                (JobKind::RetentionSweep, "2026-10-16T03:00:00Z".to_string()),
+            ]
         );
-        // Before the run time there is nothing to report (it will not be missed).
-        assert!(locked_slots(UtcOffset::UTC, at("2026-10-16T07:00:00Z")).is_empty());
-        // The slot is the local wall clock, stored in UTC (AD-17).
+        // Before the daily search's run time only the night's sweep is due.
+        assert_eq!(
+            locked_slots(UtcOffset::UTC, at("2026-10-16T07:00:00Z")),
+            vec![(JobKind::RetentionSweep, "2026-10-16T03:00:00Z".to_string())]
+        );
+        // Slots are the local wall clock, stored in UTC (AD-17).
         assert_eq!(
             locked_slots(
                 UtcOffset::from_hms(-5, 0, 0).unwrap(),
                 at("2026-10-16T14:00:00Z")
             ),
-            vec![(JobKind::DailySearch, "2026-10-16T13:00:00Z".to_string())]
+            vec![
+                (JobKind::DailySearch, "2026-10-16T13:00:00Z".to_string()),
+                (JobKind::RetentionSweep, "2026-10-16T08:00:00Z".to_string()),
+            ]
         );
     }
 
@@ -695,7 +786,9 @@ mod tests {
             .lock()
             .unwrap()
             .len();
-        assert_eq!(pending, 1, "today's slot only, and only once");
+        // At 09:00 UTC both of today's slots are past — the 08:00 daily search
+        // and the 03:00 retention sweep — and each is recorded once.
+        assert_eq!(pending, 2, "today's slots, each only once");
 
         // The store mounts: every pending slot becomes a skipped_locked row.
         let repo = Arc::new(FakeJobs::default());
