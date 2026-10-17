@@ -442,6 +442,39 @@ export const commands = {
   /**  Remove a custom feed; `true` when it was saved. */
   sourcesRemoveRss: (id: string) =>
     typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("sources_remove_rss", { id })),
+  /**  The Outbox panel: the items and every rule's dry run (S9.7, FR-84/FR-85). */
+  applyOutboxView: () =>
+    typedError<OutboxView, AppError_Serialize>(__TAURI_INVOKE("apply_outbox_view")),
+  /**  Set the hold every automatic send waits (FR-85); core validates the range. */
+  applyOutboxSetHold: (minutes: number) =>
+    typedError<OutboxSettings, AppError_Serialize>(
+      __TAURI_INVOKE("apply_outbox_set_hold", { minutes }),
+    ),
+  /**  Cancel one item during its hold; nothing is sent for it (FR-85). */
+  applyOutboxCancel: (id: string) =>
+    typedError<OutboxItemView, AppError_Serialize>(__TAURI_INVOKE("apply_outbox_cancel", { id })),
+  /**  Edit the subject or the body during the hold; the send uses the edit (FR-85). */
+  applyOutboxEdit: (id: string, subject: string | null, body: string | null) =>
+    typedError<OutboxItemView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_outbox_edit", { id, subject, body }),
+    ),
+  /**  End one rule's dry run and let it send from now on (FR-84 AC1). */
+  applyOutboxActivateRule: (ruleId: string) =>
+    typedError<DryRunView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_outbox_activate_rule", { ruleId }),
+    ),
+  /**  Set how many matches one rule's dry run reports (FR-84, minimum 1). */
+  applyOutboxSetDryRun: (ruleId: string, matches: number) =>
+    typedError<DryRunView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_outbox_set_dry_run", { ruleId, matches }),
+    ),
+  /**
+   *  Release every item whose hold has ended (FR-85). The policy runs again for
+   *  each one; a still-Auto email is sent from the connected mailbox, and anything
+   *  else moves to the review queue. Returns the items it touched.
+   */
+  applyOutboxReleaseDue: () =>
+    typedError<OutboxItemView[], AppError_Serialize>(__TAURI_INVOKE("apply_outbox_release_due")),
 };
 
 /** Events */
@@ -784,6 +817,18 @@ export type DraftText = {
   sections: SectionView[];
   /**  Cover letters only; empty for a CV. */
   paragraphs: ClaimView[];
+};
+
+/**  One rule's dry run, as the screen shows it (FR-84). */
+export type DryRunView = {
+  rule_id: string;
+  rule_name: string;
+  required: number;
+  seen: number;
+  /**  Whether the user activated the rule; only then does it send. */
+  active: boolean;
+  /**  Whether the dry run has reported every match it promises. */
+  complete: boolean;
 };
 
 /**
@@ -1332,6 +1377,41 @@ export type OfferDetailView = {
    *  has not written one.
    */
   narration: NarrationView | null;
+};
+
+/**  One Outbox item, as the screen and the tray show it (FR-85). */
+export type OutboxItemView = {
+  id: string;
+  application_id: string;
+  rule_id: string;
+  rule_name: string;
+  title: string;
+  company: string;
+  /**  `email`, `ats_form`, `sanctioned_api` or `session_board`. */
+  channel: string;
+  /**  `would_send`, `held`, `releasing`, `sent`, `cancelled` or `needs_review`. */
+  state: string;
+  hold_minutes: number;
+  release_at: string;
+  /**  Whole minutes until the hold ends; 0 once it has (or for a dry run). */
+  minutes_left: number;
+  subject_override: string | null;
+  body_override: string | null;
+  note: string | null;
+  created_at: string;
+};
+
+/**  The Outbox's own settings, defaults resolved. */
+export type OutboxSettings = {
+  /**  The configured hold, before the per-channel floor. */
+  hold_minutes: number;
+};
+
+/**  Everything the Today Outbox panel and the tray read. */
+export type OutboxView = {
+  settings: OutboxSettings;
+  items: OutboxItemView[];
+  rules: DryRunView[];
 };
 
 /**  One document of the Package the application carries (AC3). */

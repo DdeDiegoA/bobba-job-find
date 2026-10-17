@@ -24,6 +24,14 @@ const ES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../locales/es/jobs.json"
 ));
+const OUTBOX_EN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../locales/en/outbox.json"
+));
+const OUTBOX_ES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../locales/es/outbox.json"
+));
 
 /// One notification's catalog entry: its `jobs:<key>` message key, in the UI's
 /// spelling, so `scripts/check-i18n.mjs` sees every key the core emits (AD-21).
@@ -56,10 +64,39 @@ pub const SOURCE_FAILING_BODY: Entry = Entry {
     message_key: "jobs:source_failing.body",
 };
 
+/// The Outbox hold notice (S9.7, FR-85): the wording lives in `outbox.json`,
+/// the slice that owns the feature.
+pub const OUTBOX_TITLE: Entry = Entry {
+    message_key: "outbox:notification.title",
+};
+pub const OUTBOX_BODY: Entry = Entry {
+    message_key: "outbox:notification.body",
+};
+
 /// The `jobs.json` message for `locale`, by its `jobs:<key>` (or bare `<key>`) key.
 pub fn message(locale: Locale, key: &str) -> Option<&'static str> {
     let key = key.strip_prefix("jobs:").unwrap_or(key);
     catalog(locale).get(key).map(String::as_str)
+}
+
+/// The `outbox.json` message for `locale`, by its `outbox:<key>` key.
+pub fn outbox_message(locale: Locale, key: &str) -> Option<&'static str> {
+    let key = key.strip_prefix("outbox:").unwrap_or(key);
+    outbox_catalog(locale).get(key).map(String::as_str)
+}
+
+/// The label of an outbox entry in `locale`; the key is the fallback.
+pub fn outbox_text(locale: Locale, entry: &Entry) -> &'static str {
+    outbox_message(locale, entry.message_key).unwrap_or(entry.message_key)
+}
+
+fn outbox_catalog(locale: Locale) -> &'static HashMap<String, String> {
+    static CATALOG_EN: OnceLock<HashMap<String, String>> = OnceLock::new();
+    static CATALOG_ES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    match locale {
+        Locale::En => CATALOG_EN.get_or_init(|| parse(OUTBOX_EN, "en")),
+        Locale::Es => CATALOG_ES.get_or_init(|| parse(OUTBOX_ES, "es")),
+    }
 }
 
 /// The label of `entry` in `locale`; the key itself is the fallback, so a text
@@ -116,6 +153,10 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
                 text(locale, &SOURCE_FAILING_TITLE),
                 text(locale, &SOURCE_FAILING_BODY),
             ),
+            Notification::OutboxHold => (
+                outbox_text(locale, &OUTBOX_TITLE),
+                outbox_text(locale, &OUTBOX_BODY),
+            ),
         };
         // A host without the notification plugin panics inside Tauri's accessor
         // rather than returning an error; a missing toast never kills the tick.
@@ -156,6 +197,20 @@ mod tests {
             message(Locale::En, "locked.title")
         );
         assert!(message(Locale::En, "jobs:does.not.exist").is_none());
+    }
+
+    #[test]
+    fn both_languages_resolve_the_outbox_hold_notification() {
+        for locale in [Locale::En, Locale::Es] {
+            for entry in [OUTBOX_TITLE, OUTBOX_BODY] {
+                let text = outbox_message(locale, entry.message_key);
+                assert!(
+                    text.is_some_and(|text| !text.is_empty()),
+                    "{locale:?} is missing {}",
+                    entry.message_key
+                );
+            }
+        }
     }
 
     #[test]

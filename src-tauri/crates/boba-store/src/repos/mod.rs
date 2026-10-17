@@ -9,6 +9,7 @@ pub mod documents;
 pub mod email;
 pub mod jobs;
 pub mod outbox;
+pub mod outbox_hold;
 pub mod postings;
 pub mod profile;
 pub mod scoring;

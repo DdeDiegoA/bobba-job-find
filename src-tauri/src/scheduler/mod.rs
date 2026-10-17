@@ -202,6 +202,14 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
     if crate::tray::schedule_paused(app) {
         return;
     }
+    // The Outbox release sweep (S9.7, FR-85): a hold that ended releases here,
+    // even when no daily search is due. It runs on the async runtime because a
+    // send is a network call; a failed sweep leaves the item held for the next
+    // tick rather than dropping it. A locked store has no ports to read, so the
+    // tick stays quiet until the user unlocks.
+    if !matches!(wiring::store_state(app), StoreStatus::Locked { .. }) {
+        crate::commands::apply::spawn_outbox_sweep(app.clone());
+    }
     let Some(repo) = jobs_repo(app) else {
         // No store this launch (locked at startup): nothing can be recorded,
         // but the user is still told a run was skipped (AC4).

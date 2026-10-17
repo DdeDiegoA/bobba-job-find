@@ -77,6 +77,14 @@ macro_rules! boba_commands {
             crate::commands::sources::sources_test_rss,
             crate::commands::sources::sources_add_rss,
             crate::commands::sources::sources_remove_rss,
+
+            crate::commands::apply::apply_outbox_view,
+            crate::commands::apply::apply_outbox_set_hold,
+            crate::commands::apply::apply_outbox_cancel,
+            crate::commands::apply::apply_outbox_edit,
+            crate::commands::apply::apply_outbox_activate_rule,
+            crate::commands::apply::apply_outbox_set_dry_run,
+            crate::commands::apply::apply_outbox_release_due,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

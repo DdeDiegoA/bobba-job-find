@@ -3,5 +3,6 @@
 pub mod attempt;
 pub mod channel;
 pub mod guard;
+pub mod outbox;
 pub mod policy;
 pub mod session_policy;

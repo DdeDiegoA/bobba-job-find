@@ -18,18 +18,25 @@ use boba_app::apply::ats_form::{
 };
 use boba_app::apply::engine::{ApplyEngine, EmailApplyView, EngineError, SendReceipt, SendRequest};
 use boba_app::apply::manual::{ManualError, ManualService, ManualView};
+use boba_app::apply::outbox::{
+    DryRunView, Finish, OutboxError, OutboxItemView, OutboxService, OutboxSettings, OutboxView,
+    Release, Submit,
+};
 use boba_app::apply::rules::{
     self, AutoRulesService, DecisionView, RuleInput, RuleView, RulesError, RulesSnapshot,
 };
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::kill_switch::KillSwitchPort;
 use boba_app::ports::mail::{MailError, MailPort};
 use boba_app::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use boba_app::ports::repo::auto_rules::AutoRulesRepo;
 use boba_app::ports::repo::documents::DocumentsRepo;
+use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::outbox::OutboxRepo;
+use boba_app::ports::repo::outbox_hold::OutboxHoldRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
@@ -86,7 +93,10 @@ fn service(app: &tauri::AppHandle) -> AppResult<ManualService> {
 }
 
 /// The application and the Offer its channels are detected from.
-fn context(app: &tauri::AppHandle, application_id: &str) -> AppResult<(Application, Offer)> {
+fn context<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    application_id: &str,
+) -> AppResult<(Application, Offer)> {
     let application = wiring::port::<dyn ApplyRepo>(app)?
         .application_get(application_id)
         .map_err(|_| CommandError::Store.app_error())?
@@ -181,7 +191,7 @@ pub fn apply_export_pdfs(
 }
 
 /// The Email Apply engine (S9.3), built from the mounted ports.
-fn engine(app: &tauri::AppHandle) -> AppResult<ApplyEngine> {
+fn engine<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<ApplyEngine> {
     Ok(ApplyEngine::new(
         wiring::port::<dyn ApplyRepo>(app)?,
         wiring::port::<dyn DocumentsRepo>(app)?,
@@ -449,24 +459,48 @@ pub fn apply_rules_explain(
     let application_id = required_id(application_id)?;
     let channel = RuleChannel::parse(&channel)
         .ok_or_else(|| AppError::invalid_input("errors.apply.rule_invalid"))?;
-    let (application, offer) = context(&app, &application_id)?;
+    let candidate = candidate_for(
+        &app,
+        &application_id,
+        channel,
+        local_minute,
+        utc_offset_minutes,
+    )?;
+    // The sample only drives the 5–20 minute gap (AC4); a preview never sends,
+    // so the sample is deterministic here and the reason names the longest wait.
+    rules_service(&app)?
+        .decide(&candidate, 0)
+        .map_err(rules_error)
+}
 
-    let card = wiring::port::<dyn ScoringRepo>(&app)?
+/// The facts about one application the policy reads (S9.6 AC2). Both the preview
+/// and the Outbox release use it, so what the user sees and what enforcement
+/// does cannot drift.
+fn candidate_for<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    application_id: &str,
+    channel: RuleChannel,
+    local_minute: Option<u16>,
+    utc_offset_minutes: Option<i32>,
+) -> AppResult<PolicyCandidate> {
+    let (application, offer) = context(app, application_id)?;
+
+    let card = wiring::port::<dyn ScoringRepo>(app)?
         .latest_card(&application.posting_id)
         .map_err(|_| CommandError::Store.app_error())?;
-    let package = wiring::port::<dyn ApplyRepo>(&app)?
-        .package(&application_id)
+    let package = wiring::port::<dyn ApplyRepo>(app)?
+        .package(application_id)
         .map_err(|_| CommandError::Store.app_error())?;
-    let documents = wiring::port::<dyn DocumentsRepo>(&app)?
-        .list_for_application(&application_id)
+    let documents = wiring::port::<dyn DocumentsRepo>(app)?
+        .list_for_application(application_id)
         .map_err(|_| CommandError::Store.app_error())?;
-    let opt_in = wiring::port::<dyn SourcesRepo>(&app)?
+    let opt_in = wiring::port::<dyn SourcesRepo>(app)?
         .get_optin(&offer.source_id)
         .map_err(|_| CommandError::Store.app_error())?
         .is_some();
     let offset = utc_offset_minutes.unwrap_or_else(rules::local_offset_minutes);
 
-    let candidate = PolicyCandidate {
+    Ok(PolicyCandidate {
         source_id: offer.source_id.clone(),
         channel,
         company_key: policy::company_key(&offer.company),
@@ -502,16 +536,11 @@ pub fn apply_rules_explain(
         local_minute: local_minute.unwrap_or_else(|| {
             rules::local_minute_at(&ClockPort::now_rfc3339(&SystemClock), offset)
         }),
-    };
-    // The sample only drives the 5–20 minute gap (AC4); a preview never sends,
-    // so the sample is deterministic here and the reason names the longest wait.
-    rules_service(&app)?
-        .decide(&candidate, 0)
-        .map_err(rules_error)
+    })
 }
 
 /// The Auto Rules use case, built from the mounted ports (ADR-012).
-fn rules_service(app: &tauri::AppHandle) -> AppResult<AutoRulesService> {
+fn rules_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<AutoRulesService> {
     Ok(AutoRulesService::new(
         wiring::port::<dyn AutoRulesRepo>(app)?,
         wiring::port::<dyn SystemRepo>(app)?,
@@ -534,6 +563,207 @@ fn rules_error(error: RulesError) -> AppError {
     AppError::new(code, error.message_key())
 }
 
+/// The Outbox panel: the items and every rule's dry run (S9.7, FR-84/FR-85).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_view(app: tauri::AppHandle) -> AppResult<OutboxView> {
+    outbox_service(&app)?.snapshot().map_err(outbox_error)
+}
+
+/// Set the hold every automatic send waits (FR-85); core validates the range.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_set_hold(app: tauri::AppHandle, minutes: u16) -> AppResult<OutboxSettings> {
+    outbox_service(&app)?
+        .set_hold(minutes)
+        .map_err(outbox_error)
+}
+
+/// Cancel one item during its hold; nothing is sent for it (FR-85).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_cancel(app: tauri::AppHandle, id: String) -> AppResult<OutboxItemView> {
+    let id = required_id(id)?;
+    outbox_service(&app)?.cancel(&id).map_err(outbox_error)
+}
+
+/// Edit the subject or the body during the hold; the send uses the edit (FR-85).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_edit(
+    app: tauri::AppHandle,
+    id: String,
+    subject: Option<String>,
+    body: Option<String>,
+) -> AppResult<OutboxItemView> {
+    let id = required_id(id)?;
+    outbox_service(&app)?
+        .edit(&id, subject, body)
+        .map_err(outbox_error)
+}
+
+/// End one rule's dry run and let it send from now on (FR-84 AC1).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_activate_rule(app: tauri::AppHandle, rule_id: String) -> AppResult<DryRunView> {
+    let rule_id = required_id(rule_id)?;
+    outbox_service(&app)?
+        .activate_rule(&rule_id)
+        .map_err(outbox_error)
+}
+
+/// Set how many matches one rule's dry run reports (FR-84, minimum 1).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_outbox_set_dry_run(
+    app: tauri::AppHandle,
+    rule_id: String,
+    matches: u8,
+) -> AppResult<DryRunView> {
+    let rule_id = required_id(rule_id)?;
+    outbox_service(&app)?
+        .set_dry_run(&rule_id, matches)
+        .map_err(outbox_error)
+}
+
+/// Release every item whose hold has ended (FR-85). The policy runs again for
+/// each one; a still-Auto email is sent from the connected mailbox, and anything
+/// else moves to the review queue. Returns the items it touched.
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_outbox_release_due(app: tauri::AppHandle) -> AppResult<Vec<OutboxItemView>> {
+    release_due(&app).await
+}
+
+/// The release sweep, run by the scheduler tick every minute (S9.7, FR-85).
+pub fn spawn_outbox_sweep<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = release_due(&app).await {
+            tracing::warn!(key = error.message_key, "outbox: release sweep failed");
+        }
+    });
+}
+
+/// One release sweep. A hold that ended is re-checked against the policy, and a
+/// send that dies here leaves the attempt evidence the review screen reads.
+async fn release_due<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<Vec<OutboxItemView>> {
+    let service = outbox_service(app)?;
+    let mut touched = Vec::new();
+    for item in service.due().map_err(outbox_error)? {
+        // Only Email Apply has an automatic channel in this build: an ATS form
+        // waits for the user (S9.4) and the Session Board is S11.3's. The item
+        // goes to the review queue rather than pretending to send.
+        if item.channel != "email" {
+            touched.push(
+                service
+                    .park(&item.id, "channel_unavailable")
+                    .map_err(outbox_error)?,
+            );
+            continue;
+        }
+        let channel = RuleChannel::parse(&item.channel)
+            .ok_or_else(|| AppError::invalid_input("errors.apply.rule_invalid"))?;
+        let candidate = candidate_for(app, &item.application_id, channel, None, None)?;
+        match service
+            .release(&item.id, &candidate, spacing_sample())
+            .map_err(outbox_error)?
+        {
+            Release::Review(_) => touched.push(service.item_view(&item.id).map_err(outbox_error)?),
+            // The Source's anti-ban gap is not over: the item stays held and the
+            // next tick tries again (FR-91).
+            Release::Deferred { .. } => {}
+            Release::Sending(stored) => {
+                touched.push(send_email(app, &service, &stored, &candidate).await?)
+            }
+        }
+    }
+    Ok(touched)
+}
+
+/// Send one released Email Apply and record how it ended.
+async fn send_email<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    service: &OutboxService,
+    item: &boba_domain::apply::outbox::OutboxItem,
+    candidate: &PolicyCandidate,
+) -> AppResult<OutboxItemView> {
+    let account = wiring::port::<dyn EmailRepo>(app)?
+        .list_accounts()
+        .map_err(|_| CommandError::Store.app_error())?
+        .into_iter()
+        .next();
+    let Some(account) = account else {
+        // No mailbox: the user connects one and sends by hand meanwhile.
+        return service.park(&item.id, "no_mailbox").map_err(outbox_error);
+    };
+    // The last enforcement point (S9.6 AC2): the Kill Switch and `decide()` run
+    // again immediately before the message is composed and sent.
+    if service
+        .confirm_before_submit(&item.id, candidate, spacing_sample())
+        .map_err(outbox_error)?
+        == Submit::Stop
+    {
+        return service.item_view(&item.id).map_err(outbox_error);
+    }
+    let (application, offer) = context(app, &item.application_id)?;
+    let request = SendRequest {
+        account_id: account.id,
+        subject: item.subject_override.clone(),
+        body_text: item.body_override.clone(),
+        confirm_resend: false,
+    };
+    match engine(app)?.send(&application, &offer, &request).await {
+        Ok(_) => service.finish(&item.id, Finish::Sent).map_err(outbox_error),
+        Err(_) => {
+            // The attempt row holds the evidence; an automatic retry would be a
+            // second send, so the item goes to the user.
+            service
+                .finish(&item.id, Finish::NeedsReview)
+                .map_err(outbox_error)
+        }
+    }
+}
+
+/// A random sample for the S9.6 spacing gap, drawn from the system clock.
+fn spacing_sample() -> u64 {
+    time::OffsetDateTime::now_utc().unix_timestamp_nanos() as u64
+}
+
+/// The Outbox use case, built from the mounted ports (ADR-012).
+fn outbox_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<OutboxService> {
+    Ok(OutboxService::new(
+        wiring::port::<dyn OutboxHoldRepo>(app)?,
+        Arc::new(rules_service(app)?),
+        wiring::port::<dyn SystemRepo>(app)?,
+        Arc::new(SystemClock),
+        Some(Arc::new(crate::scheduler::notify::TauriNotifier::new(
+            app.clone(),
+        ))),
+        // The Kill Switch (S9.8) mounts its adapter next wave; until then the
+        // port is unmounted, which reads as "not engaged".
+        wiring::port::<dyn KillSwitchPort>(app).ok(),
+    ))
+}
+
+/// Map an Outbox failure onto the typed IPC error (AD-3, CH7).
+fn outbox_error(error: OutboxError) -> AppError {
+    let code = match &error {
+        OutboxError::Hold(_)
+        | OutboxError::DryRun(_)
+        | OutboxError::Edit
+        | OutboxError::UnknownChannel(_) => ErrorCode::InvalidInput,
+        OutboxError::UnknownItem(_) => ErrorCode::NotFound,
+        OutboxError::UnknownRule(_) => ErrorCode::NotFound,
+        OutboxError::NotWaiting(_) | OutboxError::AlreadyQueued(_) => ErrorCode::Conflict,
+        OutboxError::KillSwitch => ErrorCode::Conflict,
+        OutboxError::Rules(rules) => return rules_error(rules.clone()),
+        OutboxError::Repo(_) | OutboxError::System(_) | OutboxError::Clock => ErrorCode::Internal,
+    };
+    AppError::new(code, error.message_key())
+}
+
 /// The folder one application's kit is written to, created on demand.
 fn kit_dir(app: &tauri::AppHandle, application_id: &str) -> AppResult<PathBuf> {
     let base = app
@@ -550,6 +780,7 @@ fn kit_dir(app: &tauri::AppHandle, application_id: &str) -> AppResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boba_domain::apply::outbox::{DryRunViolation, HoldViolation};
 
     #[test]
     fn ats_errors_map_to_codes_and_i18n_keys() {
@@ -649,6 +880,56 @@ mod tests {
             ),
         ] {
             let mapped = email_error(error);
+            assert_eq!(mapped.code, code);
+            assert_eq!(mapped.message_key, key);
+        }
+    }
+
+    #[test]
+    fn outbox_failures_map_to_codes_and_i18n_keys() {
+        for (error, code, key) in [
+            (
+                OutboxError::Hold(HoldViolation::TooShort),
+                ErrorCode::InvalidInput,
+                "errors.apply.outbox_hold",
+            ),
+            (
+                OutboxError::DryRun(DryRunViolation::TooLong),
+                ErrorCode::InvalidInput,
+                "errors.apply.outbox_dry_run",
+            ),
+            (
+                OutboxError::UnknownItem("out_1".into()),
+                ErrorCode::NotFound,
+                "errors.apply.outbox_not_found",
+            ),
+            (
+                OutboxError::NotWaiting("out_1".into()),
+                ErrorCode::Conflict,
+                "errors.apply.outbox_not_live",
+            ),
+            (
+                OutboxError::AlreadyQueued("app_1".into()),
+                ErrorCode::Conflict,
+                "errors.apply.outbox_queued",
+            ),
+            (
+                OutboxError::Edit,
+                ErrorCode::InvalidInput,
+                "errors.apply.outbox_edit",
+            ),
+            (
+                OutboxError::KillSwitch,
+                ErrorCode::Conflict,
+                "errors.apply.outbox_kill_switch",
+            ),
+            (
+                OutboxError::Clock,
+                ErrorCode::Internal,
+                "errors.apply.outbox_clock",
+            ),
+        ] {
+            let mapped = outbox_error(error);
             assert_eq!(mapped.code, code);
             assert_eq!(mapped.message_key, key);
         }

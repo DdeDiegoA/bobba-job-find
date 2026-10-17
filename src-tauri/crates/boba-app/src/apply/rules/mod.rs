@@ -307,6 +307,12 @@ impl AutoRulesService {
         )))
     }
 
+    /// The newest automatic send to one Source, `None` when it never sent. The
+    /// Outbox release keeps its per-Source spacing on it (S9.7, FR-91).
+    pub fn last_auto_for_source(&self, source_id: &str) -> Result<Option<String>, RulesError> {
+        Ok(self.rules.ledger_last_at_for_source(source_id)?)
+    }
+
     /// Record one automatic submission before its channel starts (FR-83). The
     /// row is what the three caps count on the next call.
     pub fn record_auto_send(
@@ -701,6 +707,20 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
+                .map(|entry| entry.created_at.clone())
+                .max())
+        }
+
+        fn ledger_last_at_for_source(
+            &self,
+            source_id: &str,
+        ) -> Result<Option<String>, AutoRulesRepoError> {
+            Ok(self
+                .ledger
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.source_id == source_id)
                 .map(|entry| entry.created_at.clone())
                 .max())
         }

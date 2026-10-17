@@ -53,4 +53,11 @@ pub trait AutoRulesRepo: Send + Sync {
 
     /// The newest ledger row's `created_at`, `None` when Auto never sent.
     fn ledger_last_at(&self) -> Result<Option<String>, AutoRulesRepoError>;
+
+    /// The newest automatic send to one Source, `None` when that Source never
+    /// took one. S9.7's per-Source spacing reads it (FR-91).
+    fn ledger_last_at_for_source(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<String>, AutoRulesRepoError>;
 }
