@@ -14,7 +14,7 @@ import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
  * and stays on — the quiet chip — until the user turns it off here.
  *
  * Deliberately no query cache: the topbar renders in shells that have none, and
- * the state is one small command plus the `kill_switch.changed` event that the
+ * the state is one small command plus the `kill_switch:changed` event that the
  * tray and the shortcut also emit.
  */
 export const KILL_SWITCH_SHORTCUT = "Meta+Shift+K Control+Shift+K";

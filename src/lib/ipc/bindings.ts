@@ -592,7 +592,7 @@ export const commands = {
     >(__TAURI_INVOKE("run_report_latest")),
   /**
    *  Retry the Sources the newest report could not reach (AC3): re-queries only
-   *  those, on its own thread, and emits `run_report.progressed` as it works.
+   *  those, on its own thread, and emits `run_report:progressed` as it works.
    *  Returns as soon as the retry starts; the screen follows the events.
    */
   runReportRetry: () => typedError<null, AppError_Serialize>(__TAURI_INVOKE("run_report_retry")),
@@ -689,11 +689,11 @@ export const commands = {
 
 /** Events */
 export const events = {
-  killSwitchChanged: makeEvent<KillSwitchChanged>("kill_switch.changed"),
-  notificationOpened: makeEvent<NotificationOpened>("notification.opened"),
-  runReportProgressed: makeEvent<RunReportProgressed>("run_report.progressed"),
-  taskFinished: makeEvent<TaskFinished>("task.finished"),
-  taskProgressed: makeEvent<TaskProgressed>("task.progressed"),
+  killSwitchChanged: makeEvent<KillSwitchChanged>("kill_switch:changed"),
+  notificationOpened: makeEvent<NotificationOpened>("notification:opened"),
+  runReportProgressed: makeEvent<RunReportProgressed>("run_report:progressed"),
+  taskFinished: makeEvent<TaskFinished>("task:finished"),
+  taskProgressed: makeEvent<TaskProgressed>("task:progressed"),
 };
 
 /* Types */
@@ -2087,7 +2087,7 @@ export type RunNowOutcome = {
 };
 
 /**
- *  A run's live progress, emitted as `run_report.progressed` (AC1).
+ *  A run's live progress, emitted as `run_report:progressed` (AC1).
  *
  *  One event per phase: `started` (the run began against `total` Sources),
  *  `source` (one Source's turn ended, `done` of `total` now finished) and
@@ -2494,7 +2494,7 @@ export type SuggestionView = {
   count: number;
 };
 
-/**  Terminal event for a long task, emitted as `task.finished`. */
+/**  Terminal event for a long task, emitted as `task:finished`. */
 export type TaskFinished = {
   /**  Id of the task that ended. */
   task_id: string;
@@ -2527,9 +2527,9 @@ export type TaskOutcome =
   /**  Stopped with an error. */
   | "failed";
 
-/**  Progress for a long task, emitted as `task.progressed`. */
+/**  Progress for a long task, emitted as `task:progressed`. */
 export type TaskProgressed = {
-  /**  Stable id of the task instance (matches the `task.finished` id). */
+  /**  Stable id of the task instance (matches the `task:finished` id). */
   task_id: string;
   /**  Owning area, e.g. `agent.run`, `ingest.run`, `apply.attempt`. */
   area: string;

@@ -5,7 +5,7 @@ import { commands } from "@/lib/ipc/bindings";
 import "@/lib/i18n";
 import KillSwitch from "./index";
 
-/** The callback the component registered for `kill_switch.changed`. */
+/** The callback the component registered for `kill_switch:changed`. */
 let onChanged: ((event: { payload: KillSwitchChanged }) => void) | null = null;
 
 vi.mock("@/lib/ipc/bindings", () => ({

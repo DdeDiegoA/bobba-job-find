@@ -66,6 +66,8 @@ pub fn task_cancel(app: tauri::AppHandle, task_id: String) -> AppResult<bool> {
 mod tests {
     use std::path::PathBuf;
 
+    use tauri::Emitter;
+
     /// Write the raw generated bindings to a deterministic temp path.
     /// `scripts/gen-bindings.mjs` runs this test, then formats the output and
     /// writes/checks `src/lib/ipc/bindings.ts` (AD-3).
@@ -74,5 +76,60 @@ mod tests {
         let out = std::env::temp_dir().join("boba-bindings.generated.ts");
         crate::ipc::export_bindings(&out).expect("export bindings");
         assert!(PathBuf::from(&out).exists(), "bindings not written");
+    }
+
+    /// CH10: Tauri 2.12 rejects `.` in an event name (`IllegalEventName`), and
+    /// the failure was swallowed — the app-wide event bus was silently dead.
+    ///
+    /// This walks **every registered event** (via the export, so a `collect_
+    /// events!` entry added without regenerating bindings still shows up) and
+    /// puts its name through Tauri's own validation. A dotted name fails CI.
+    #[test]
+    fn every_registered_event_name_is_legal_for_tauri() {
+        let out = std::env::temp_dir().join("boba-events.generated.ts");
+        crate::ipc::export_bindings(&out).expect("export bindings");
+        let bindings = std::fs::read_to_string(&out).expect("read bindings");
+        let names = event_names(&bindings);
+
+        // A tiny parser that matched nothing must never pass for free.
+        for expected in [
+            "task:progressed",
+            "task:finished",
+            "run_report:progressed",
+            "kill_switch:changed",
+            "notification:opened",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "`{expected}` is not in the exported bindings: {names:?}"
+            );
+        }
+
+        let app = tauri::test::mock_app();
+        for name in &names {
+            assert!(
+                !name.contains('.'),
+                "`{name}`: event names use ':' between segments (`<area>:<verb-ed>`), never '.'"
+            );
+            assert!(
+                app.emit(name, ()).is_ok(),
+                "`{name}` is not a legal Tauri event name"
+            );
+        }
+    }
+
+    /// The `makeEvent<Type>("name")` names of the exported bindings, one per
+    /// registered event. The `makeEvent` helper's own signature is spread over
+    /// lines, so it does not match.
+    fn event_names(bindings: &str) -> Vec<&str> {
+        bindings
+            .lines()
+            .filter_map(|line| {
+                let (_, rest) = line.split_once("makeEvent<")?;
+                let (_, rest) = rest.split_once(">(\"")?;
+                let (name, _) = rest.split_once("\")")?;
+                Some(name)
+            })
+            .collect()
     }
 }

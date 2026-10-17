@@ -16,7 +16,7 @@ export function useLatestRunReport() {
 
 /**
  * Retry the Sources the newest report could not reach (AC3). The command
- * returns as soon as the retry starts; `run_report.progressed` is what tells
+ * returns as soon as the retry starts; `run_report:progressed` is what tells
  * the screen to reload, so nothing here waits on the network.
  */
 export function useRetryRunReport() {
@@ -35,7 +35,7 @@ export interface RunProgress {
 }
 
 /**
- * The live progress of a running search (AC1), from `run_report.progressed`.
+ * The live progress of a running search (AC1), from `run_report:progressed`.
  *
  * `onFinished` is called when the run ends — the screen that shows the report
  * reloads it there, which is the only moment it reads the run again: the UI

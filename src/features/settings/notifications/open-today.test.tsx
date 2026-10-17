@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationOpened } from "@/lib/ipc/bindings";
 import { OpenToday } from "./open-today";
 
-/** The callback the component registered for `notification.opened`. */
+/** The callback the component registered for `notification:opened`. */
 let onOpened: ((event: { payload: NotificationOpened }) => void) | null = null;
 
 vi.mock("@/lib/ipc/bindings", () => ({

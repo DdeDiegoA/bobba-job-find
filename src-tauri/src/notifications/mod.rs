@@ -21,7 +21,7 @@ pub use adapter::DigestNotifier;
 
 /// Emitted when the user's click reaches the app: the UI opens Today (FR-45).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Event)]
-#[tauri_specta(event_name = "notification.opened")]
+#[tauri_specta(event_name = "notification:opened")]
 pub struct NotificationOpened {
     /// Where the click wants to land; `today` is the only target today.
     pub target: String,
@@ -56,10 +56,12 @@ pub fn arm_open_today<R: Runtime>(app: &AppHandle<R>) {
     let handle = app.clone();
     window.on_window_event(move |event| {
         if matches!(event, tauri::WindowEvent::Focused(true)) && claim_pending_open() {
-            let _ = NotificationOpened {
+            let opened = NotificationOpened {
                 target: "today".to_string(),
+            };
+            if let Err(error) = opened.emit(&handle) {
+                tracing::warn!(%error, "notification:opened not delivered");
             }
-            .emit(&handle);
         }
     });
 }

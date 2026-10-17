@@ -18,7 +18,7 @@ use crate::wiring;
 /// The state changed (tray, shortcut or the header itself): the window listens
 /// so the chip reflects a switch thrown from the tray while it is open.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-#[tauri_specta(event_name = "kill_switch.changed")]
+#[tauri_specta(event_name = "kill_switch:changed")]
 pub struct KillSwitchChanged {
     pub engaged: bool,
     /// RFC 3339, when the user engaged it; `None` while it is off.
@@ -28,11 +28,13 @@ pub struct KillSwitchChanged {
 /// Tell the window the switch moved. A window that is closed or loading is not
 /// an error: the chip reads the state again when it mounts.
 pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, view: &KillSwitchView) {
-    let _ = KillSwitchChanged {
+    let event = KillSwitchChanged {
         engaged: view.engaged,
         since: view.since.clone(),
+    };
+    if let Err(error) = event.emit(app) {
+        tracing::warn!(%error, "kill_switch:changed not delivered");
     }
-    .emit(app);
 }
 
 /// The mounted switch (ADR-012: the port list owns the adapter).
