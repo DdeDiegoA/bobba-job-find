@@ -30,3 +30,4 @@ pub mod studio;
 pub mod tracker;
 pub mod triage;
 pub mod unlock;
+pub mod updater;

@@ -66,34 +66,32 @@ ignore = [
     # RUSTSEC-2026-0368 (ZipArchive::extract creates symlinks whose target escapes the destination),
     # RUSTSEC-2026-0369 (ZipStreamReader::extract applies Unix permissions through symlinks).
     # All three need an attacker-controlled archive to be extracted by the process.
-    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (bundle extraction), Windows target only.
-    # Unreachable: the updater is unused until S10.5 (no update checks in the MVP, NFR-1 opt-in), and
-    # zip only runs when a downloaded bundle is extracted; `cargo tree -i zip` resolves nothing on
-    # macOS/Linux because the dependency is cfg(target_os = "windows").
-    # No fixed release: the advisories ask for zip >= 9.0.0, but every tauri-plugin-updater release
-    # (2.13.1, 2.14.0, 3.0.0-alpha.3) requires zip ^4, and zip 9.0.0..9.0.2 are yanked (9.0.3/9.0.4
-    # exist but nothing allows them).
+    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (bundle extraction), Windows target only; the updater
+    # is now wired (S10.5) but opt-in and off by default, and a downloaded bundle is verified with the
+    # project's minisign pubkey BEFORE `install()` extracts it (updater.rs `download()` -> verify_signature,
+    # then `download_and_install` -> install). All three advisories need an attacker-controlled archive to
+    # be extracted, which requires a valid signature from the project's private key; without it no bytes
+    # reach zip. `cargo tree -i zip` resolves nothing on macOS/Linux (cfg(target_os = "windows")).
+    # No fixed release (re-checked at S10.5): the advisories ask for zip >= 9.0.0, but tauri-plugin-updater
+    # 2.13.1, 2.14.0 and 3.0.0-alpha.3 (the newest, alpha) all require zip ^4. The other zip dependent,
+    # docx-rs 0.4.22 (newest; write-only DOCX path), requires zip ^8.6.0, so "zip >= 9 everywhere" is not
+    # reachable until the updater crate moves. zip 9.0.4 is already in the tree where dependents allow it.
     # Scoping: cargo-deny 0.20.2 takes only `id` and `reason` here (a `crate` key is rejected:
     # "expected: [id, reason]"), so the ignore is written by id. It is still zip-only in effect:
-    # each of these ids is `package = "zip"` in the RustSec DB (verified in the fetched advisory-db,
-    # crates/zip/RUSTSEC-2026-036{7,8,9}.md), and an advisory id belongs to exactly one package, so
-    # no other crate can be masked by it.
-    # Revisit at S10.5: either tauri-plugin-updater allows zip >= 9, or S10.5 confirms the update
-    # bundle's signature is verified BEFORE extraction (minisign), which is the guard the
-    # yanked-crate ignore below also rests on.
-    { id = "RUSTSEC-2026-0367", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; SUID/SGID preservation needs an extracted attacker bundle" },
-    { id = "RUSTSEC-2026-0368", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; symlink escape needs an extracted attacker bundle" },
-    { id = "RUSTSEC-2026-0369", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only, updater unused until S10.5; permission-through-symlink needs an extracted attacker bundle" },
+    # each of these ids is `package = "zip"` in the RustSec DB, and an advisory id belongs to exactly one
+    # package, so no other crate can be masked by it.
+    { id = "RUSTSEC-2026-0367", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only; minisign signature is verified before extraction, so an attacker archive never reaches zip" },
+    { id = "RUSTSEC-2026-0368", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only; minisign signature is verified before extraction, so an attacker archive never reaches zip" },
+    { id = "RUSTSEC-2026-0369", reason = "zip-only advisory (package = zip) via tauri-plugin-updater, Windows-target-only; minisign signature is verified before extraction, so an attacker archive never reaches zip" },
     # zip 4.6.1 — yanked crate, scoped ignore (Diego 2026-10-15). Crate spec, not an advisory id:
     # the `yanked` check stays `deny` for every other crate.
     # Every zip 4.x release (4.0.0 .. 4.6.1) is yanked, so `cargo update -p zip` cannot resolve at all
     # ("failed to select a version for the requirement `zip = \"^4\"`"): there is nothing to upgrade to.
-    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (bundle extraction). Every tauri-plugin-updater
-    # release up to 3.0.0-alpha.3 requires zip ^4, so a bump cannot avoid it either.
-    # Unreachable: the updater is unused until S10.5 (no update checks in the MVP, NFR-1 opt-in) and
-    # zip only runs when a downloaded bundle is extracted.
+    # Path: tauri-plugin-updater 2.13.1 -> zip ^4 (Windows bundle extraction). Re-checked at S10.5:
+    # 2.14.0 and 3.0.0-alpha.3 still require zip ^4, so a bump does not avoid it. The updater verifies
+    # the minisign signature before extracting, so only a project-signed bundle reaches zip.
     # Revisit: a non-yanked zip 4.x is published, or tauri-plugin-updater drops the zip dependency.
-    { crate = "zip@4.6.1", reason = "Diego 2026-10-15: entire zip 4.x yanked; every tauri-plugin-updater release (<=3.0.0-alpha.3) requires zip ^4; reached only via updater bundle extraction, updater unused until S10.5. Revisit: a non-yanked zip 4.x appears or tauri-plugin-updater drops zip." },
+    { crate = "zip@4.6.1", reason = "Diego 2026-10-15: entire zip 4.x yanked; every tauri-plugin-updater release including 3.0.0-alpha.3 requires zip ^4; reached only after minisign verification of the update bundle (S10.5). Revisit: a non-yanked zip 4.x appears or tauri-plugin-updater drops zip." },
     # --- CH11 (2026-10-17): zbus family unmaintained, ignore scoped by id (Diego standing OK, recommended). ---
     # zbus_names 4.3.4 (RUSTSEC-2026-0371), zvariant 5.15.0 (RUSTSEC-2026-0370),
     # zvariant_derive 5.15.0 (RUSTSEC-2026-0372): all unmaintained, no known vulnerability.
@@ -104,7 +102,8 @@ ignore = [
     # No safe upgrade: the crates were folded into zbus 6.0.0 (a semver-major); `cargo update -p zbus`
     # keeps 5.19.0 because every dependent above requires zbus ^5, and no maintained release of them
     # accepts zbus 6 yet. Unmaintained ≠ vulnerable: the advisories carry no CVE/patch.
-    # Revisit at S10.5: tauri-plugin-opener/-single-instance/notify-rust allow zbus 6.
+    # Re-checked at S10.5: still no zbus 6. notify-rust 4.18.2 (newest) and tauri-plugin-opener /
+    # -single-instance / -notification 3.0.0-alpha.3 (newest) all require zbus ^5, so the ignores stay.
     { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },
     { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zvariant/zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },

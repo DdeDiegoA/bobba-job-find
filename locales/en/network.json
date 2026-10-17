@@ -21,5 +21,11 @@
   "fx.off": "Conversions are off. Salaries show in their original currency only.",
   "fx.rate_as_of": "Rates from {date}, per 1 {currency}.",
   "fx.no_rate": "No rate has been fetched yet.",
-  "fx.error": "Exchange rates could not be turned on."
+  "fx.error": "Exchange rates could not be turned on.",
+  "update.title": "Update checks",
+  "update.description": "Off by default. When on, Boba asks GitHub Releases for a newer version at startup and once a day. Every update is signature-checked, and a native dialog asks before anything is installed.",
+  "update.toggle": "Check for updates",
+  "update.on": "Update checks are on. Boba asks GitHub at startup and once a day.",
+  "update.off": "Update checks are off. Boba never contacts the update server.",
+  "update.error": "Update checks could not be changed."
 }

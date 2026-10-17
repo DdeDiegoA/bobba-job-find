@@ -283,6 +283,13 @@ export const commands = {
    */
   fxSetEnabled: (enabled: boolean) =>
     typedError<FxSettings, AppError_Serialize>(__TAURI_INVOKE("fx_set_enabled", { enabled })),
+  /**  The current choice (off on a fresh install). */
+  updateSettings: () => __TAURI_INVOKE<UpdateSettings>("update_settings"),
+  /**  Turn update checks on or off. Turning them on checks immediately. */
+  updateSetEnabled: (enabled: boolean) =>
+    typedError<UpdateSettings, AppError_Serialize>(
+      __TAURI_INVOKE("update_set_enabled", { enabled }),
+    ),
   /**
    *  What F3 can do right now: whether this build carries the encoder, whether
    *  the user opted in, where the model lives and what it costs (AC1, AC4).
@@ -3117,6 +3124,12 @@ export type UnlockStatus_Serialize = {
   state: UnlockState;
   /**  The locked copy to show; absent when the store is open. */
   message_key?: string | null;
+};
+
+/**  Settings → Privacy → Network activity reads this (AC2). */
+export type UpdateSettings = {
+  /**  Whether update checks are on. The default is off (NFR-1). */
+  enabled: boolean;
 };
 
 /**  Work modes the user accepts at all (FR-7). */

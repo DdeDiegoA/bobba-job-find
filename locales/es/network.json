@@ -21,5 +21,11 @@
   "fx.off": "La conversión está desactivada. Los salarios se muestran solo en su moneda original.",
   "fx.rate_as_of": "Tipos del {date}, por 1 {currency}.",
   "fx.no_rate": "Todavía no se ha obtenido ningún tipo de cambio.",
-  "fx.error": "No se pudo activar la conversión de salarios."
+  "fx.error": "No se pudo activar la conversión de salarios.",
+  "update.title": "Búsqueda de actualizaciones",
+  "update.description": "Desactivada por defecto. Cuando está activa, Boba consulta GitHub Releases al iniciarse y una vez al día. Cada actualización se verifica con su firma y un diálogo nativo pregunta antes de instalar nada.",
+  "update.toggle": "Buscar actualizaciones",
+  "update.on": "La búsqueda de actualizaciones está activa. Boba consulta GitHub al iniciarse y una vez al día.",
+  "update.off": "La búsqueda de actualizaciones está desactivada. Boba nunca contacta con el servidor de actualizaciones.",
+  "update.error": "No se pudo cambiar la búsqueda de actualizaciones."
 }

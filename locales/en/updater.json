@@ -1,0 +1,6 @@
+{
+  "dialog.title": "Update Boba Job Find",
+  "dialog.body": "Boba Job Find {version} is available. Download and install it now?",
+  "dialog.update": "Update",
+  "dialog.later": "Later"
+}

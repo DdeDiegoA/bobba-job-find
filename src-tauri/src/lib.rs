@@ -14,6 +14,7 @@ mod notifications;
 mod scheduler;
 mod shortcuts;
 mod tray;
+mod updater;
 pub mod wiring;
 
 /// Build and run the desktop application.
