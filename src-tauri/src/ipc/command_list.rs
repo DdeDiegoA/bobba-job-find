@@ -40,6 +40,7 @@ macro_rules! boba_commands {
             crate::commands::studio::studio_export_docx,
             crate::commands::studio::studio_generate,
             crate::commands::studio::studio_regenerate,
+            crate::scheduler::jobs_run_now,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

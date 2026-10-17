@@ -186,6 +186,8 @@ export const commands = {
     typedError<StudioView_Serialize, AppError_Serialize>(
       __TAURI_INVOKE("studio_regenerate", { applicationId, kind, section, into }),
     ),
+  /**  A manual "Run now" over IPC (FR-41). Registered in `ipc::command_list`. */
+  jobsRunNow: () => typedError<RunNowOutcome, AppError_Serialize>(__TAURI_INVOKE("jobs_run_now")),
 };
 
 /** Events */
@@ -813,6 +815,13 @@ export type ReviewView_Serialize = {
   document_id: string;
   document_version: number;
   findings: Finding_Serialize[];
+};
+
+/**  The `job_run` a manual "Run now" started or joined (AC3). */
+export type RunNowOutcome = {
+  run_id: string;
+  /**  `true` when a run was already executing and this call joined it (FR-47). */
+  joined: boolean;
 };
 
 /**  Whether the salary floor excludes Offers or only lowers their score (FR-7). */

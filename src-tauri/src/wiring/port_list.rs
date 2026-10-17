@@ -37,6 +37,8 @@ use super::{agent, keychain_service, mount_port};
 /// Mount every port that has a store adapter (ADR-012 §3).
 pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     mount_port::<dyn SourcesRepo>(app, store.clone());
+    // The job-run owner (S5.1, AD-18): the scheduler records and reads `job_run`.
+    mount_port::<dyn boba_app::jobs::JobsRepo>(app, store.clone());
     mount_port::<dyn AgentRepo>(app, store.clone());
     // The system repo also needs the keychain service for the audit anchor.
     mount_port::<dyn SystemRepo>(
