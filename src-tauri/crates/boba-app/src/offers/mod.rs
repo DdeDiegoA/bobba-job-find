@@ -25,6 +25,7 @@
 //! reads per Offer, which a local SQLite answers without a network round-trip;
 //! a joined query would be a second owner of the scoring table for no gain.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use boba_domain::apply::channel;
@@ -40,6 +41,7 @@ use crate::apply::manual::ChannelView;
 use crate::narration::{Narration, NarrationError, NarrationView};
 use crate::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use crate::ports::repo::scoring::{ScoringRepo, ScoringRepoError};
+use crate::ports::repo::triage::TriageRepo;
 
 /// One badge on an Offer card (FR-60, FR-64): a stable id the UI resolves to a
 /// label in the active language. The Gate-driven badges are decided here because
@@ -114,6 +116,14 @@ pub struct OfferCardView {
     /// FR-52/§9.3: the Deadline Gate says the posting closes soon, so the card
     /// belongs in the Closing soon section as well as in its band.
     pub closing_soon: bool,
+    /// FR-66: the user dismissed this Offer, so the sections do not draw it
+    /// (Undo clears it). The card still carries everything else, so the toast
+    /// that offers Undo needs no second read.
+    pub dismissed: bool,
+    /// FR-54: the user overruled the Gate that vetoed this Offer, so it is
+    /// shown in its band instead of under Excluded. `exclusion` still says which
+    /// Gate it was — an override is recorded, never silent.
+    pub overridden: bool,
 }
 
 /// A failure the screen shows through a `message_key` (AD-3).
@@ -131,6 +141,9 @@ pub enum OffersError {
     /// No Offer has this id (a stale link, or one already deleted).
     #[error("no Offer has that id")]
     NotFound,
+    /// The triage decisions (S6.6) could not be read.
+    #[error("could not read the Inbox decisions")]
+    Triage(#[from] crate::ports::repo::triage::TriageRepoError),
 }
 
 impl OffersError {
@@ -141,6 +154,7 @@ impl OffersError {
             Self::Scores(_) => "errors.scoring.store",
             Self::Narration(error) => error.message_key(),
             Self::NotFound => "errors.offers.not_found",
+            Self::Triage(_) => "errors.inbox_actions.store",
         }
     }
 }
@@ -149,29 +163,59 @@ impl OffersError {
 pub struct OffersInbox {
     postings: Arc<dyn IngestionRepo>,
     scoring: Arc<dyn ScoringRepo>,
+    /// The user's Inbox decisions (S6.6): dismissed and overridden Offers. A
+    /// build without the port (an older test fixture) shows every Offer.
+    triage: Option<Arc<dyn TriageRepo>>,
 }
 
 impl OffersInbox {
     /// The read model over the posting owner and the scoring owner (ADR-012:
     /// both arrive as mounted ports).
     pub fn new(postings: Arc<dyn IngestionRepo>, scoring: Arc<dyn ScoringRepo>) -> Self {
-        Self { postings, scoring }
+        Self {
+            postings,
+            scoring,
+            triage: None,
+        }
+    }
+
+    /// Add the triage owner (S6.6): the reason rows that hide a dismissed Offer
+    /// and the overrides that show a vetoed one.
+    pub fn with_triage(mut self, triage: Arc<dyn TriageRepo>) -> Self {
+        self.triage = Some(triage);
+        self
     }
 
     /// One page of cards, newest first (AC1/AC2).
     pub fn cards(&self, limit: usize, offset: usize) -> Result<Vec<OfferCardView>, OffersError> {
         let offers = self.postings.offers(limit, offset)?;
-        // The Sources and the newest card of the whole page, in one read each
-        // (S5.2: the N+1 follow-up — two queries per page, not two per Offer).
+        // The Sources, the newest card and the lifecycle of the whole page, in
+        // one read each (S5.2's N+1 follow-up; S6.6 adds the dismissal state).
         let ids: Vec<String> = offers.iter().map(|offer| offer.id.clone()).collect();
         let sources = self.postings.offer_sources_many(&ids)?;
         let cards = self.scoring.latest_cards(&ids)?;
+        let lifecycle = self.postings.lifecycle_many(&ids)?;
+        let overridden: HashSet<String> = match &self.triage {
+            Some(triage) => triage
+                .overrides()?
+                .into_iter()
+                .map(|row| row.posting_id)
+                .collect(),
+            None => HashSet::new(),
+        };
         Ok(offers
             .into_iter()
             .map(|offer| {
                 let sources = sources.get(&offer.id).cloned().unwrap_or_default();
                 let card = cards.get(&offer.id);
-                card_view(&offer, card, sources)
+                let mut view = card_view(&offer, card, sources);
+                // FR-66: the dismissal is S4.4's lifecycle row, which is what a
+                // source re-sending the same posting must respect.
+                view.dismissed = lifecycle
+                    .get(&offer.id)
+                    .is_some_and(|row| row.dismissed_at.is_some());
+                view.overridden = overridden.contains(&offer.id);
+                view
             })
             .collect())
     }
@@ -461,6 +505,10 @@ pub fn card_view(
                 .gate(GateKind::Deadline)
                 .is_some_and(|result| result.reason == GateReason::ClosingSoon)
         }),
+        // Set by the caller that holds the triage rows (S6.6); a card on its
+        // own knows nothing about what the user decided.
+        dismissed: false,
+        overridden: false,
     }
 }
 
@@ -769,7 +817,19 @@ mod tests {
             _posting_id: &str,
         ) -> Result<Option<boba_domain::posting::lifecycle::PostingLifecycle>, IngestionRepoError>
         {
-            unreachable!("the card does not read lifecycle")
+            unreachable!("the Inbox must not read lifecycle one Offer at a time")
+        }
+
+        fn lifecycle_many(
+            &self,
+            posting_ids: &[String],
+        ) -> Result<
+            std::collections::HashMap<String, boba_domain::posting::lifecycle::PostingLifecycle>,
+            IngestionRepoError,
+        > {
+            // No dismissals in this fixture: every Offer is live.
+            let _ = posting_ids;
+            Ok(std::collections::HashMap::new())
         }
 
         fn save_lifecycle(
@@ -1489,5 +1549,95 @@ mod tests {
                 .is_some(),
             "a narration written against the new card shows again"
         );
+    }
+
+    // S6.6 AC1: a dismissed Offer is still read, and says so — the sections
+    // hide it, Undo clears it.
+    #[test]
+    fn a_dismissed_offer_is_marked_on_its_card() {
+        use crate::ingest::normalize::testing::FakeIngestionRepo;
+        use crate::triage::testing::FakeTriageRepo;
+        use boba_domain::posting::Provenance;
+
+        let postings = Arc::new(FakeIngestionRepo::default());
+        let offer = offer();
+        postings
+            .insert_offer(
+                &offer,
+                &Provenance {
+                    posting_id: offer.id.clone(),
+                    source_id: "greenhouse".to_string(),
+                    external_id: offer.external_id.clone(),
+                    url: offer.apply.url.clone(),
+                    raw: "{}".to_string(),
+                    fetched_at: "2026-10-04T00:00:00Z".to_string(),
+                },
+            )
+            .expect("store the posting");
+        let mut row = postings
+            .lifecycle("pst_01")
+            .expect("lifecycle read")
+            .expect("the posting has a row");
+        row.dismissed_at = Some("2026-10-17T09:00:00Z".to_string());
+        postings.save_lifecycle(&row).expect("dismiss");
+
+        let inbox = OffersInbox::new(postings, Arc::new(FakeScoringRepo::default()))
+            .with_triage(Arc::new(FakeTriageRepo::default()));
+        let cards = inbox.cards(10, 0).expect("the inbox");
+        assert!(cards[0].dismissed);
+        assert!(!cards[0].overridden);
+    }
+
+    // S6.6 AC2: an Offer whose VETO the user overruled reads as overridden, and
+    // the Gate stays on the card (the override is recorded, never silent).
+    #[test]
+    fn an_overridden_veto_is_marked_on_its_card() {
+        use crate::ingest::normalize::testing::FakeIngestionRepo;
+        use crate::triage::testing::FakeTriageRepo;
+        use boba_domain::posting::Provenance;
+        use boba_domain::triage::VetoOverride;
+
+        let postings = Arc::new(FakeIngestionRepo::default());
+        let offer = offer();
+        postings
+            .insert_offer(
+                &offer,
+                &Provenance {
+                    posting_id: offer.id.clone(),
+                    source_id: "greenhouse".to_string(),
+                    external_id: offer.external_id.clone(),
+                    url: offer.apply.url.clone(),
+                    raw: "{}".to_string(),
+                    fetched_at: "2026-10-04T00:00:00Z".to_string(),
+                },
+            )
+            .expect("store the posting");
+        let scoring = Arc::new(FakeScoringRepo::default());
+        scoring
+            .insert_card(&card(
+                vec![gate(
+                    GateKind::Eligibility,
+                    GateVerdict::Veto,
+                    GateReason::RequirementNotMet,
+                    Some(Evidence::Field("work_authorization".to_string())),
+                )],
+                GateConfidence::High,
+                Some(61.0),
+            ))
+            .expect("store the card");
+        let triage = Arc::new(FakeTriageRepo::default());
+        triage
+            .override_veto(&VetoOverride {
+                posting_id: "pst_01".to_string(),
+                gate: "eligibility".to_string(),
+                created_at: "2026-10-17T09:00:00Z".to_string(),
+            })
+            .expect("override");
+
+        let inbox = OffersInbox::new(postings, scoring).with_triage(triage);
+        let cards = inbox.cards(10, 0).expect("the inbox");
+        assert!(cards[0].overridden);
+        assert!(!cards[0].dismissed);
+        assert!(cards[0].exclusion.is_some(), "the Gate is still on record");
     }
 }

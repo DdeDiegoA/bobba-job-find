@@ -17,6 +17,7 @@ use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::offers::{OfferCardView, OfferDetailView, OffersError, OffersInbox};
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
+use boba_app::ports::repo::triage::TriageRepo;
 
 use crate::wiring;
 
@@ -31,7 +32,8 @@ fn service(app: &tauri::AppHandle) -> AppResult<OffersInbox> {
     Ok(OffersInbox::new(
         wiring::port::<dyn IngestionRepo>(app)?,
         wiring::port::<dyn ScoringRepo>(app)?,
-    ))
+    )
+    .with_triage(wiring::port::<dyn TriageRepo>(app)?))
 }
 
 /// Map a use-case failure onto the typed IPC error (AD-3).

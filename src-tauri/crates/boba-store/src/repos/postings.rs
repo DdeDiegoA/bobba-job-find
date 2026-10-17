@@ -360,6 +360,32 @@ pub fn save_lifecycle(conn: &Connection, row: &PostingLifecycle) -> Result<(), S
     upsert_lifecycle(conn, row)
 }
 
+/// The lifecycle rows of `posting_ids`, keyed by posting id (S6.6): one query
+/// per Inbox page rather than one per Offer. Ids without a row are absent.
+pub fn lifecycle_many(
+    conn: &Connection,
+    posting_ids: &[String],
+) -> Result<HashMap<String, PostingLifecycle>, StoreError> {
+    if posting_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // A numbered placeholder per id, the way the other batched reads spell it.
+    let placeholders = (1..=posting_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut stmt = conn.prepare(&format!(
+        "{LIFECYCLE_SELECT} WHERE posting_id IN ({placeholders})"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(posting_ids), lifecycle_row)?;
+    let mut found = HashMap::new();
+    for row in rows {
+        let row = row?;
+        found.insert(row.posting_id.clone(), row);
+    }
+    Ok(found)
+}
+
 fn insert_lifecycle(conn: &Connection, row: &PostingLifecycle) -> Result<(), StoreError> {
     conn.execute(
         "INSERT INTO posting_lifecycle (posting_id, content_hash, description_simhash, seen_at, \
@@ -836,6 +862,15 @@ impl IngestionRepo for Store {
     fn lifecycle(&self, posting_id: &str) -> Result<Option<PostingLifecycle>, IngestionRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| lifecycle(conn, &posting_id))
+            .map_err(map_err)
+    }
+
+    fn lifecycle_many(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, PostingLifecycle>, IngestionRepoError> {
+        let posting_ids = posting_ids.to_vec();
+        self.read(move |conn| lifecycle_many(conn, &posting_ids))
             .map_err(map_err)
     }
 

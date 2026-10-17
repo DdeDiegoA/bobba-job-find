@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { cn } from "@/lib/utils";
+import { OfferActions } from "../actions";
 import {
   ageDays,
   BADGE_LABELS,
@@ -196,6 +197,10 @@ export function OfferCard({ card }: { card: Card }) {
           ) : null}
         </div>
       ) : null}
+
+      {/* S6.6's leaf (FR-54/FR-66): Save, Dismiss and — on an Excluded card —
+          Override. */}
+      <OfferActions card={card} />
     </article>
   );
 }

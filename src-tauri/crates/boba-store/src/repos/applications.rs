@@ -357,6 +357,16 @@ impl ApplyRepo for Store {
             .map_err(|e| ApplyRepoError::Store(e.to_string()))?
     }
 
+    fn application_create(
+        &self,
+        application: &Application,
+        event: &StatusEvent,
+    ) -> Result<(), ApplyRepoError> {
+        let (application, event) = (application.clone(), event.clone());
+        self.execute(move |conn| Ok(create_application(conn, &application, &event)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
     fn append_status_event(&self, event: &StatusEvent) -> Result<(), ApplyRepoError> {
         let event = event.clone();
         self.execute(move |conn| Ok(append_status_event(conn, &event)))

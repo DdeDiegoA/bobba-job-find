@@ -1,0 +1,9 @@
+{
+  "errors.inbox_actions.store": "Boba could not read or write your Inbox decisions.",
+  "errors.inbox_actions.unknown_offer": "That Offer is no longer in the Inbox.",
+  "errors.inbox_actions.not_excluded": "No Gate vetoed this Offer, so there is nothing to override.",
+  "errors.inbox_actions.unknown_suggestion": "That suggestion is not one Boba knows.",
+  "errors.inbox_actions.unknown_reason": "That is not a dismiss reason Boba knows.",
+  "errors.inbox_actions.missing_offer": "No Offer was named.",
+  "errors.inbox_actions.suggestion_not_applicable": "That change would leave you with no accepted work mode. Edit your Preferences instead."
+}

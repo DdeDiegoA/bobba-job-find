@@ -28,6 +28,7 @@ use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
+use boba_app::ports::repo::triage::TriageRepo;
 use boba_app::ports::secret::SecretPort;
 use boba_app::ports::session::SessionStore;
 use boba_app::ports::verify::VerifyPort;
@@ -138,6 +139,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     if let Err(error) = crate::commands::daily_search::mount(app) {
         tracing::error!(%error, "daily search wiring left unmounted");
     }
+    // The triage owner keeps the Inbox decisions (S6.6): why an Offer was
+    // dismissed, the VETOs the user overruled and the answers to suggestions.
+    mount_port::<dyn TriageRepo>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }
 

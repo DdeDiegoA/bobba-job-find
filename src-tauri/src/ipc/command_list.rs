@@ -87,6 +87,11 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_outbox_release_due,
             crate::commands::daily_search::run_report_latest,
             crate::commands::daily_search::run_report_retry,
+            crate::commands::triage::inbox_save,
+            crate::commands::triage::inbox_dismiss,
+            crate::commands::triage::inbox_undo_dismiss,
+            crate::commands::triage::inbox_override_veto,
+            crate::commands::triage::inbox_decide_suggestion,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

@@ -41,6 +41,8 @@ function card(overrides: Partial<OfferCardView> = {}): OfferCardView {
     badges: [],
     exclusion: null,
     closing_soon: false,
+    dismissed: false,
+    overridden: false,
     ...overrides,
   };
 }
@@ -253,5 +255,36 @@ describe("what the card reads (FR-64)", () => {
   it("formats pay in the card's currency, or nothing when unknown", () => {
     expect(salaryLabel(card(), "en")).toBeTruthy();
     expect(salaryLabel(card({ amount_minor: null, currency: null }), "en")).toBeNull();
+  });
+});
+
+describe("the Inbox decisions (S6.6)", () => {
+  const veto = {
+    gate: "eligibility",
+    reason: "requirement_not_met",
+    quote: "Must be authorized to work in the US.",
+  };
+
+  // AC1: a dismissed Offer leaves the sections until Undo.
+  it("draws no dismissed card in any section", () => {
+    const cards = [card({ posting_id: "gone", dismissed: true }), card({ posting_id: "live" })];
+    for (const section of SECTIONS) {
+      expect(cardsIn(cards, section.id).map((c) => c.posting_id)).not.toContain("gone");
+    }
+    expect(bandCounts(cards).strong).toBe(1);
+  });
+
+  // AC2: an overridden VETO is shown in its band, not under Excluded.
+  it("shows an overridden veto in its band instead of Excluded", () => {
+    const cards = [card({ posting_id: "over", exclusion: veto, overridden: true })];
+    expect(cardsIn(cards, "excluded")).toHaveLength(0);
+    expect(cardsIn(cards, "strong").map((c) => c.posting_id)).toEqual(["over"]);
+    expect(bandCounts(cards).excluded).toBe(0);
+  });
+
+  it("still excludes a veto nobody overrode", () => {
+    const cards = [card({ posting_id: "veto", exclusion: veto })];
+    expect(cardsIn(cards, "excluded").map((c) => c.posting_id)).toEqual(["veto"]);
+    expect(cardsIn(cards, "strong")).toHaveLength(0);
   });
 });

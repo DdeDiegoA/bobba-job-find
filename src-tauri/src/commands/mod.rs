@@ -17,4 +17,5 @@ pub mod session;
 pub mod sources;
 pub mod studio;
 pub mod tracker;
+pub mod triage;
 pub mod unlock;

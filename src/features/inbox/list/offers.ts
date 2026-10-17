@@ -68,9 +68,18 @@ export const SECTIONS: readonly Section[] = [
   { id: "excluded", labelKey: "inbox:section.excluded", collapsed: false },
 ];
 
-/** FR-54: a vetoed Offer is Excluded, never ranked. */
+/**
+ * FR-54: a vetoed Offer is Excluded, never ranked — unless the user overruled
+ * the Gate (S6.6): an Override means "show it anyway", with the veto still on
+ * record.
+ */
 export function isExcluded(card: Card): boolean {
-  return card.exclusion !== null;
+  return card.exclusion !== null && !card.overridden;
+}
+
+/** FR-66: a dismissed Offer is out of the sections until Undo brings it back. */
+export function isDismissed(card: Card): boolean {
+  return card.dismissed;
 }
 
 /**
@@ -93,10 +102,11 @@ export function bandOf(card: Card): SectionId {
 
 /** The cards one section shows (§9.3: band, then Closing soon, then Excluded). */
 export function cardsIn(cards: readonly Card[], section: SectionId): Card[] {
+  const live = cards.filter((card) => !isDismissed(card));
   if (section === "excluded") {
-    return cards.filter(isExcluded);
+    return live.filter(isExcluded);
   }
-  const ranked = cards.filter((card) => !isExcluded(card));
+  const ranked = live.filter((card) => !isExcluded(card));
   if (section === "closing_soon") {
     return ranked.filter((card) => card.closing_soon);
   }
@@ -116,6 +126,7 @@ export function bandCounts(cards: readonly Card[]): {
 } {
   const counts = { strong: 0, good: 0, moderate: 0, weak_poor: 0, excluded: 0 };
   for (const card of cards) {
+    if (isDismissed(card)) continue;
     if (isExcluded(card)) {
       counts.excluded += 1;
     } else {

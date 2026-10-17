@@ -12,5 +12,6 @@ pub mod profile;
 pub mod scoring;
 pub mod session;
 pub mod source;
+pub mod triage;
 pub mod untrusted;
 pub mod validator;

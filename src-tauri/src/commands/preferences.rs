@@ -180,7 +180,7 @@ fn repo(app: &tauri::AppHandle) -> AppResult<Arc<dyn SystemRepo>> {
 }
 
 /// The current preferences, or the defaults when nothing is stored yet (FR-7).
-fn snapshot(repo: &dyn SystemRepo) -> Result<PreferencesSnapshot, PreferencesError> {
+pub(crate) fn snapshot(repo: &dyn SystemRepo) -> Result<PreferencesSnapshot, PreferencesError> {
     let Some(raw) = repo.setting_get(KEY)? else {
         return Ok(PreferencesSnapshot::default());
     };
@@ -189,7 +189,7 @@ fn snapshot(repo: &dyn SystemRepo) -> Result<PreferencesSnapshot, PreferencesErr
 
 /// Save an edit: a real change appends a new version and marks scores stale
 /// (AC2, FR-14); an unchanged save returns the stored document untouched.
-fn save(
+pub(crate) fn save(
     repo: &dyn SystemRepo,
     clock: &dyn ClockPort,
     values: Preferences,

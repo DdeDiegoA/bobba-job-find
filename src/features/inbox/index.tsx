@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { Toaster } from "sonner";
+import { SuggestionBanner } from "./actions";
 import InboxList from "./list";
 import InboxManualAdd from "./manual-add";
 
@@ -22,6 +24,10 @@ export default function InboxIndex() {
         </h1>
       </header>
 
+      {/* S6.6's leaf (FR-67): the Preferences change the third dismissal of a
+          kind suggests. */}
+      <SuggestionBanner />
+
       <InboxList />
 
       {/* S4.7's leaf (FR-25): the supported way in for a job found where
@@ -32,6 +38,9 @@ export default function InboxIndex() {
         </summary>
         <InboxManualAdd />
       </details>
+
+      {/* S6.6: Dismiss offers Undo as a toast (FR-66). */}
+      <Toaster />
     </section>
   );
 }

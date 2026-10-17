@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
+import { InboxBulkBar } from "../actions";
 import { OfferCard } from "./card";
 import {
   cardsIn,
@@ -88,6 +89,9 @@ export default function InboxList() {
         onSort={setSort}
         options={options}
       />
+
+      {/* S6.6's leaf (FR-66): save, dismiss and bulk dismiss the cards below. */}
+      <InboxBulkBar cards={visible} />
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-start gap-2 p-6" role="status">

@@ -139,6 +139,14 @@ pub trait IngestionRepo: Send + Sync {
     /// existed (the migration backfills those, so in practice never).
     fn lifecycle(&self, posting_id: &str) -> Result<Option<PostingLifecycle>, IngestionRepoError>;
 
+    /// The lifecycle rows of `posting_ids`, keyed by posting id (S6.6): the
+    /// Inbox reads which Offers the user dismissed for the whole page in one
+    /// query, never one Offer at a time. Postings without a row are absent.
+    fn lifecycle_many(
+        &self,
+        posting_ids: &[String],
+    ) -> Result<HashMap<String, PostingLifecycle>, IngestionRepoError>;
+
     /// Upsert one posting's lifecycle row (S4.4).
     fn save_lifecycle(&self, lifecycle: &PostingLifecycle) -> Result<(), IngestionRepoError>;
 

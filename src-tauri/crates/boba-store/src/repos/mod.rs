@@ -15,3 +15,4 @@ pub mod profile;
 pub mod scoring;
 pub mod settings;
 pub mod sources;
+pub mod triage;

@@ -517,6 +517,38 @@ export const commands = {
    *  Returns as soon as the retry starts; the screen follows the events.
    */
   runReportRetry: () => typedError<null, AppError_Serialize>(__TAURI_INVOKE("run_report_retry")),
+  /**  Save an Offer: an Application in `Saved` (FR-66). */
+  inboxSave: (postingId: string) =>
+    typedError<SaveOutcome, AppError_Serialize>(__TAURI_INVOKE("inbox_save", { postingId })),
+  /**  Dismiss one or more Offers, optionally saying why (FR-66/FR-67). */
+  inboxDismiss: (postingIds: string[], reason: string | null) =>
+    typedError<DismissOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("inbox_dismiss", { postingIds, reason }),
+    ),
+  /**  Undo a Dismiss (FR-66): the reason and the lifecycle dismissal are cleared. */
+  inboxUndoDismiss: (postingId: string) =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("inbox_undo_dismiss", { postingId })),
+  /**  Override the Gate that vetoed an Offer (FR-54). */
+  inboxOverrideVeto: (postingId: string) =>
+    typedError<OverrideOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("inbox_override_veto", { postingId }),
+    ),
+  /**
+   *  Accept or ignore the Preferences change Boba suggested (FR-67 AC3).
+   *
+   *  Accepting applies the change **first**: recording an accepted suggestion
+   *  whose change never landed would stop Boba from ever asking again, leaving
+   *  the user with the pattern and no fix.
+   *
+   *  `company` is the spelling the user saw on the cards. The id carries the
+   *  normalized name (so two spellings are one suggestion); the preference keeps
+   *  the readable one, but only when it normalizes to the same company — the
+   *  screen cannot name one company under another's id.
+   */
+  inboxDecideSuggestion: (id: string, accept: boolean, company: string | null) =>
+    typedError<null, AppError_Serialize>(
+      __TAURI_INVOKE("inbox_decide_suggestion", { id, accept, company }),
+    ),
 };
 
 /** Events */
@@ -852,6 +884,16 @@ export type DiffLine = {
   before: string | null;
   after: string | null;
   change: DiffChange;
+};
+
+/**  What a Dismiss (single or bulk) did (FR-66). */
+export type DismissOutcome = {
+  /**  The Offers now dismissed. */
+  dismissed: string[];
+  /**  The ids whose posting is not in the store (a stale card). */
+  failed: string[];
+  /**  The change Boba suggests now, when this dismissal was the third (AC3). */
+  suggestion: SuggestionView | null;
 };
 
 /**  The editable content of a draft: the same claims the validator walked. */
@@ -1371,6 +1413,18 @@ export type OfferCardView = {
    *  belongs in the Closing soon section as well as in its band.
    */
   closing_soon: boolean;
+  /**
+   *  FR-66: the user dismissed this Offer, so the sections do not draw it
+   *  (Undo clears it). The card still carries everything else, so the toast
+   *  that offers Undo needs no second read.
+   */
+  dismissed: boolean;
+  /**
+   *  FR-54: the user overruled the Gate that vetoed this Offer, so it is
+   *  shown in its band instead of under Excluded. `exclusion` still says which
+   *  Gate it was — an override is recorded, never silent.
+   */
+  overridden: boolean;
 };
 
 /**
@@ -1455,6 +1509,13 @@ export type OutboxView = {
   settings: OutboxSettings;
   items: OutboxItemView[];
   rules: DryRunView[];
+};
+
+/**  What an override did (FR-54). */
+export type OverrideOutcome = {
+  posting_id: string;
+  /**  The Gate the override overruled. */
+  gate: string;
 };
 
 /**  One document of the Package the application carries (AC3). */
@@ -1717,6 +1778,16 @@ export type SalaryFloor = {
   firmness: SalaryFirmness;
 };
 
+/**
+ *  What Save did (FR-66). `created = false` means this Offer already had an
+ *  Application — in any status, not only `Saved`. Save is idempotent: it never
+ *  creates a second card for one Offer.
+ */
+export type SaveOutcome = {
+  application_id: string;
+  created: boolean;
+};
+
 /**  A section of a CV, as the editor shows it. */
 export type SectionView = {
   heading: string;
@@ -1961,6 +2032,18 @@ export type StudioView_Serialize = {
 export type SubmissionEvidence = {
   confirmation_text: string;
   screenshot_blake3: string;
+};
+
+/**
+ *  The Preferences change Boba asks the user to accept (FR-67, AC3). `kind` is
+ *  `exclude_company` or `exclude_onsite`; the UI builds the sentence from it,
+ *  `company` and `count`.
+ */
+export type SuggestionView = {
+  id: string;
+  kind: string;
+  company: string | null;
+  count: number;
 };
 
 /**  Terminal event for a long task, emitted as `task.finished`. */
