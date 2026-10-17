@@ -169,7 +169,7 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
             ),
             Notification::OutboxHold => (
                 outbox_text(locale, &OUTBOX_TITLE),
-                outbox_text(locale, &OUTBOX_BODY),
+                outbox_text(locale, &OUTBOX_BODY).to_string(),
             ),
             Notification::TopMatches { count } => {
                 let entry = if count == 1 {

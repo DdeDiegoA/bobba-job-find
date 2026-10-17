@@ -267,7 +267,7 @@ impl DailySearch {
 
         let agent_tasks_used = self.run_agent_pass(&options, &new_ids, &mut errors);
         let (vetoed, ranked, top_matches) = match &inputs {
-            Some(inputs) => self.score(&seen, inputs, &mut errors),
+            Some(inputs) => self.score(&seen, &new_ids, inputs, &mut errors),
             None => (0, 0, 0),
         };
         // FR-46's product rule: a run that found top matches says so once.
@@ -436,9 +436,17 @@ impl DailySearch {
 
     /// Gates and cards for every Offer the run saw (E6). A vetoed Offer is
     /// still scored: the Inbox shows it under Excluded, with its card's Gates.
+    ///
+    /// Every seen Offer is scored, not only the new ones: a posting that
+    /// predates this slice, or whose earlier scoring failed, still needs a card,
+    /// and `ScoringService::score` answers a current card from the store (FR-61)
+    /// without re-computing it. The report's counters, though, describe **this
+    /// run's new Offers** (`new_ids`): `vetoed` and `ranked` are what the run
+    /// added, not a re-tally of the whole inbox (reviewer-1 F5).
     fn score(
         &self,
         posting_ids: &[String],
+        new_ids: &[String],
         inputs: &ScoringInputs,
         errors: &mut Vec<String>,
     ) -> (u32, u32, u32) {
@@ -448,6 +456,7 @@ impl DailySearch {
         let mut top_matches = 0;
 
         for posting_id in posting_ids {
+            let is_new = new_ids.iter().any(|new| new == posting_id);
             let offer = match self.repos.ingestion.get_offer(posting_id) {
                 Ok(Some(offer)) => offer,
                 Ok(None) => continue,
@@ -457,10 +466,11 @@ impl DailySearch {
                 }
             };
             let gate_report = gates::run(&offer, &inputs.gates);
-            if gate_report
-                .results
-                .iter()
-                .any(|result| result.verdict == GateVerdict::Veto)
+            if is_new
+                && gate_report
+                    .results
+                    .iter()
+                    .any(|result| result.verdict == GateVerdict::Veto)
             {
                 vetoed += 1;
             }
@@ -484,12 +494,13 @@ impl DailySearch {
                 gates: gate_report,
             };
             match service.score(request) {
-                Ok(Some(card)) => {
+                Ok(Some(card)) if is_new => {
                     ranked += 1;
                     if is_top_match(&card) {
                         top_matches += 1;
                     }
                 }
+                Ok(Some(_)) => {}
                 Ok(None) => {}
                 Err(error) => errors.push(format!("scoring {posting_id}: {error}")),
             }

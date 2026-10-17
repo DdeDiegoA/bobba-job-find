@@ -362,6 +362,40 @@ fn a_vetoed_offer_is_counted_and_still_ranked() {
     assert_eq!(report.ranked, 1);
 }
 
+/// F5: a run's counters describe its new Offers, not a re-tally of everything
+/// the store already had. Re-seeing the same posting adds no "new" count.
+#[test]
+fn a_rerun_does_not_recount_offers_the_store_already_had() {
+    let harness = Harness::new(ScriptedSources::new([(
+        source("remotive"),
+        Ok(vec![raw(
+            "a1",
+            "https://jobs.example.com/1",
+            "Backend Engineer",
+        )]),
+    )]));
+
+    let first = harness.run(Harness::options());
+    assert_eq!(
+        (first.totals().new, first.totals().duplicates, first.ranked),
+        (1, 0, 1)
+    );
+
+    let mut second_options = Harness::options();
+    second_options.run_id = "run_2".to_string();
+    let second = harness.run(second_options);
+    assert_eq!(
+        (second.totals().new, second.totals().duplicates),
+        (0, 1),
+        "the same posting merges instead of being new"
+    );
+    assert_eq!(
+        (second.vetoed, second.ranked),
+        (0, 0),
+        "a known Offer is re-read, not recounted as this run's work"
+    );
+}
+
 /// A retry queries only the Sources the first run could not reach.
 #[test]
 fn a_retry_queries_only_the_failed_sources() {

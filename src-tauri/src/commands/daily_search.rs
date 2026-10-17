@@ -235,8 +235,15 @@ impl LiveSources {
     /// custom feeds the user saved. A feed that cannot be built keeps its id and
     /// carries its error, so it is a failed Source the banner can Retry rather
     /// than a tile that silently never runs.
-    fn adapters(&self) -> AdapterSet {
-        let rows = self.sources.list_sources().unwrap_or_default();
+    ///
+    /// A row read that fails is an **error**, not "no rows": treating it as an
+    /// empty table would run every Source, including the ones the user turned
+    /// off (reviewer-1 F1). The run fails closed instead.
+    fn adapters(&self) -> Result<AdapterSet, String> {
+        let rows = self
+            .sources
+            .list_sources()
+            .map_err(|error| error.to_string())?;
         let enabled = |id: &str| {
             rows.iter()
                 .find(|row| row.id == id)
@@ -263,7 +270,7 @@ impl LiveSources {
             }
             Err(error) => tracing::warn!(%error, "custom feeds not read for the run"),
         }
-        adapters
+        Ok(adapters)
     }
 
     /// A registry over `only` (or every) adapter, with the recorded opt-ins
@@ -289,9 +296,17 @@ impl LiveSources {
     /// foreign key). A row the Connections screen never created is created here
     /// from the manifest, the same lazy seam Manual intake uses.
     fn ensure_row(&self, id: &str, adapter: &dyn SourceAdapter) {
-        let exists = self.sources.get_source(id).ok().flatten().is_some();
-        if exists {
-            return;
+        match self.sources.get_source(id) {
+            // The row is there, whatever it says; never rewrite it here.
+            Ok(Some(_)) => return,
+            // Only a read that succeeded and found nothing creates a row: a
+            // failed read must not, or a transient error would re-enable a
+            // Source the user disabled (reviewer-1 F2).
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(%error, source = id, "source row not read; left alone");
+                return;
+            }
         }
         let manifest = adapter.manifest();
         let now = SystemClock.now_rfc3339();
@@ -316,7 +331,7 @@ impl LiveSources {
 
 impl RunSources for LiveSources {
     fn sources(&self) -> Result<Vec<RunSource>, String> {
-        let adapters = self.adapters();
+        let adapters = self.adapters()?;
         let mut sources = Vec::with_capacity(adapters.len());
         for (id, built) in &adapters {
             let name = match built {
@@ -338,7 +353,9 @@ impl RunSources for LiveSources {
     }
 
     fn search(&self, source_id: &str, query: &SearchQuery) -> Result<Vec<RawPosting>, SourceError> {
-        let adapters = self.adapters();
+        let adapters = self
+            .adapters()
+            .map_err(|reason| SourceError::InvalidPayload { message: reason })?;
         match adapters
             .iter()
             .find(|(id, _)| id == source_id)
@@ -369,14 +386,30 @@ impl RunSources for LiveSources {
 /// for callers that only want the postings (a detail fetch, a future probe).
 impl SourcePort for LiveSources {
     fn manifests(&self) -> Vec<SourceManifest> {
-        self.adapters()
-            .into_iter()
-            .filter_map(|(_, built)| built.ok().map(|adapter| adapter.manifest()))
-            .collect()
+        // A display list, not a run: an unreadable table leaves it empty rather
+        // than pretending to know the Sources.
+        match self.adapters() {
+            Ok(adapters) => adapters
+                .into_iter()
+                .filter_map(|(_, built)| built.ok().map(|adapter| adapter.manifest()))
+                .collect(),
+            Err(error) => {
+                tracing::warn!(%error, "source manifests not read");
+                Vec::new()
+            }
+        }
     }
 
     fn search<'a>(&'a self, query: &'a SearchQuery) -> SourceFuture<'a, Vec<SourceFetch>> {
-        Box::pin(async move { self.registry(self.adapters(), None).search(query).await })
+        Box::pin(async move {
+            match self.adapters() {
+                Ok(adapters) => self.registry(adapters, None).search(query).await,
+                Err(reason) => vec![SourceFetch::Err {
+                    source_id: "sources".to_string(),
+                    error: SourceError::InvalidPayload { message: reason },
+                }],
+            }
+        })
     }
 
     fn detail<'a>(
@@ -385,7 +418,10 @@ impl SourcePort for LiveSources {
         external_id: &'a str,
     ) -> SourceFuture<'a, Result<RawPosting, SourceError>> {
         Box::pin(async move {
-            self.registry(self.adapters(), Some(source_id))
+            let adapters = self
+                .adapters()
+                .map_err(|reason| SourceError::InvalidPayload { message: reason })?;
+            self.registry(adapters, Some(source_id))
                 .detail(source_id, external_id)
                 .await
         })
@@ -425,19 +461,29 @@ impl<R: Runtime> JobHandler for DailySearchHandler<R> {
 
         // The run itself succeeded even when a Source did not: a failed Source
         // is the report's story and the banner's Retry, never a failed job row.
-        execute(&self.app, RunOptions::for_run(run_id), None)
+        let execution = execute(&self.app, RunOptions::for_run(run_id), None)
+            .map_err(|error| error.message_key.to_string())?;
+        store_report(execution.system.as_ref(), &execution.report)
             .map_err(|error| error.message_key.to_string())?;
         Ok(())
     }
 }
 
-/// Resolve the ports, run the use case, store the report. `only_sources` makes
-/// the run a retry (AC3); `retry_of` names the report it follows.
+/// What one run produced, and the store it was produced against, so the caller
+/// decides what is stored (a retry folds its lines into the report it retried
+/// instead of replacing it — reviewer-1 F4).
+struct Execution {
+    report: RunReport,
+    system: Arc<dyn SystemRepo>,
+}
+
+/// Resolve the ports and run the use case. `only_sources` makes the run a
+/// retry (AC3); `retry_of` names the report it follows.
 fn execute<R: Runtime>(
     app: &AppHandle<R>,
     options: RunOptions,
     only_sources: Option<Vec<String>>,
-) -> AppResult<RunReport> {
+) -> AppResult<Execution> {
     let http = wiring::port::<HttpClient>(app)?;
     let sources = wiring::port::<dyn SourcesRepo>(app)?;
     let system = wiring::port::<dyn SystemRepo>(app)?;
@@ -486,8 +532,7 @@ fn execute<R: Runtime>(
     let report = service
         .run(options)
         .map_err(|error| AppError::internal(error.message_key()))?;
-    store_report(system.as_ref(), &report)?;
-    Ok(report)
+    Ok(Execution { report, system })
 }
 
 /// The engine the user chose (S3.2), read through the port so this stays
@@ -515,8 +560,20 @@ fn stored_engine(system: &dyn SystemRepo) -> Option<(String, Option<String>)> {
     Some((cli, model))
 }
 
+/// Serializes the report store: the index is a read-modify-write and a
+/// scheduled run and a Retry run on their own threads (reviewer-1 F3).
+static REPORT_STORE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Keep one finished report, and the newest [`MAX_REPORTS`] of them.
+///
+/// The report key is written before the index, and the index before
+/// [`LATEST_KEY`], so a reader that follows `LATEST_KEY` always finds the whole
+/// report. Writers are serialized, so two runs cannot drop each other's index
+/// entries or leave `LATEST_KEY` pointing at the older run.
 fn store_report(system: &dyn SystemRepo, report: &RunReport) -> AppResult<()> {
+    let _guard = REPORT_STORE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let now = SystemClock.now_rfc3339();
     let json = serde_json::to_string(report).map_err(|error| {
         AppError::internal("errors.run_report.store").with_detail("reason", error.to_string())
@@ -542,6 +599,33 @@ fn store_report(system: &dyn SystemRepo, report: &RunReport) -> AppResult<()> {
         .setting_put(LATEST_KEY, &report.run_id, &now)
         .map_err(store_error)?;
     Ok(())
+}
+
+/// Fold a retry's lines into the report it retried (reviewer-1 F4).
+///
+/// A retried Source replaces its old line and its old error; a Source the first
+/// run reached keeps its line. The scoring counters and the agent tasks add up,
+/// the errors concatenate, and the merged report keeps the original run's id and
+/// start, because it is the same run the user is looking at, now complete.
+fn merge_retry(previous: &RunReport, retry: &RunReport) -> RunReport {
+    let mut merged = previous.clone();
+    for line in &retry.sources {
+        match merged
+            .sources
+            .iter_mut()
+            .find(|source| source.source_id == line.source_id)
+        {
+            Some(existing) => *existing = line.clone(),
+            None => merged.sources.push(line.clone()),
+        }
+    }
+    merged.vetoed += retry.vetoed;
+    merged.ranked += retry.ranked;
+    merged.agent_tasks_used += retry.agent_tasks_used;
+    merged.errors.extend(retry.errors.iter().cloned());
+    merged.finished_at = retry.finished_at.clone();
+    merged.duration_ms += retry.duration_ms;
+    merged
 }
 
 /// The stored report ids, newest first.
@@ -597,6 +681,7 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
         ));
     }
 
+    let previous = report.clone();
     let run_id = report.run_id.clone();
     let thread_app = app.clone();
     let spawned = std::thread::Builder::new()
@@ -608,8 +693,19 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
                 only_sources: None,
                 agent: None,
             };
-            if let Err(error) = execute(&thread_app, options, Some(failed)) {
-                tracing::warn!(key = error.message_key, "daily search retry failed");
+            match execute(&thread_app, options, Some(failed)) {
+                // The retried Sources replace their failed lines; the Sources
+                // the first run reached keep theirs, so the newest view still
+                // shows the whole run (reviewer-1 F4).
+                Ok(execution) => {
+                    let merged = merge_retry(&previous, &execution.report);
+                    if let Err(error) = store_report(execution.system.as_ref(), &merged) {
+                        tracing::warn!(key = error.message_key, "retried report not stored");
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(key = error.message_key, "daily search retry failed");
+                }
             }
         });
     if let Err(error) = spawned {
@@ -759,6 +855,225 @@ mod tests {
             agent_tasks_used: 0,
             errors: Vec::new(),
         }
+    }
+
+    /// A `SourcesRepo` whose reads can be made to fail, so the fail-closed
+    /// rules (reviewer-1 F1/F2) are exercised without SQLite.
+    struct CheckedSources {
+        list: Result<(), ()>,
+        get: Result<(), ()>,
+        upserts: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CheckedSources {
+        fn failing_get() -> Self {
+            Self {
+                list: Ok(()),
+                get: Err(()),
+                upserts: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        fn upserts(&self) -> usize {
+            self.upserts.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl boba_app::ports::repo::sources::SourcesRepo for CheckedSources {
+        fn upsert_source(
+            &self,
+            _record: &SourceRecord,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            self.upserts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn get_source(
+            &self,
+            _id: &str,
+        ) -> Result<Option<SourceRecord>, boba_app::ports::repo::sources::SourcesRepoError>
+        {
+            match self.get {
+                Ok(()) => Ok(None),
+                Err(()) => Err(boba_app::ports::repo::sources::SourcesRepoError::Store(
+                    "disk".to_string(),
+                )),
+            }
+        }
+
+        fn list_sources(
+            &self,
+        ) -> Result<Vec<SourceRecord>, boba_app::ports::repo::sources::SourcesRepoError> {
+            match self.list {
+                Ok(()) => Ok(Vec::new()),
+                Err(()) => Err(boba_app::ports::repo::sources::SourcesRepoError::Store(
+                    "disk".to_string(),
+                )),
+            }
+        }
+
+        fn set_source_enabled(
+            &self,
+            _id: &str,
+            _enabled: bool,
+            _updated_at: &str,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            unreachable!("the run does not toggle Sources")
+        }
+
+        fn record_optin(
+            &self,
+            _optin: &boba_domain::source::OptInRecord,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            unreachable!("the run does not record opt-ins")
+        }
+
+        fn get_optin(
+            &self,
+            _source_id: &str,
+        ) -> Result<
+            Option<boba_domain::source::OptInRecord>,
+            boba_app::ports::repo::sources::SourcesRepoError,
+        > {
+            Ok(None)
+        }
+
+        fn remove_optin(
+            &self,
+            _source_id: &str,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            unreachable!("the run does not remove opt-ins")
+        }
+
+        fn opted_in_ids(
+            &self,
+        ) -> Result<Vec<String>, boba_app::ports::repo::sources::SourcesRepoError> {
+            Ok(Vec::new())
+        }
+
+        fn start_run(
+            &self,
+            _run: &boba_domain::source::SourceRunRecord,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            unreachable!("the run history is the use case's, not this test's")
+        }
+
+        fn recent_runs(
+            &self,
+            _source_id: &str,
+            _limit: usize,
+        ) -> Result<
+            Vec<boba_domain::source::SourceRunRecord>,
+            boba_app::ports::repo::sources::SourcesRepoError,
+        > {
+            Ok(Vec::new())
+        }
+
+        fn finish_run(
+            &self,
+            _id: &str,
+            _finished_at: &str,
+            _status: boba_domain::source::RunStatus,
+            _postings_found: i64,
+            _error: Option<&str>,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            unreachable!("the run history is the use case's, not this test's")
+        }
+    }
+
+    fn live(sources: Arc<CheckedSources>) -> LiveSources {
+        let http = HttpClient::new(boba_sources::http::HttpClientConfig {
+            min_interval: std::time::Duration::from_millis(1),
+            retry_base_delay: std::time::Duration::from_millis(1),
+            ..boba_sources::http::HttpClientConfig::default()
+        })
+        .expect("client");
+        LiveSources::new(Arc::new(http), sources, Arc::new(MemorySettings::default()))
+    }
+
+    /// F1: a failed read of the source rows fails the run closed instead of
+    /// running every Source, disabled ones included.
+    #[test]
+    fn a_source_row_read_error_fails_the_run_closed() {
+        let sources = Arc::new(CheckedSources {
+            list: Err(()),
+            get: Ok(()),
+            upserts: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let live = live(sources);
+
+        let error = live.sources().expect_err("a failed read is an error");
+        assert!(error.contains("disk"), "{error}");
+    }
+
+    /// F2: an unreadable `source` row is left alone — never recreated, which
+    /// would re-enable a Source the user disabled.
+    #[test]
+    fn an_unreadable_source_row_is_never_recreated() {
+        let sources = Arc::new(CheckedSources::failing_get());
+        let live = live(Arc::clone(&sources));
+
+        let listed = live.sources().expect("the sources still run");
+        assert!(!listed.is_empty(), "the built-in feeds are still listed");
+        assert_eq!(sources.upserts(), 0, "no row is created from a failed read");
+    }
+
+    /// F4: a retry replaces its failed lines and keeps the Sources the first
+    /// run reached, under the original run's id.
+    #[test]
+    fn a_retry_folds_into_the_report_it_retried() {
+        let previous = RunReport {
+            sources: vec![
+                SourceReport {
+                    source_id: "remotive".to_string(),
+                    name: "Remotive".to_string(),
+                    outcome: SourceOutcome::Ok,
+                    fetched: 4,
+                    new: 3,
+                    duplicates: 1,
+                    error: None,
+                },
+                SourceReport {
+                    source_id: "hn".to_string(),
+                    name: "Hacker News".to_string(),
+                    outcome: SourceOutcome::Failed,
+                    fetched: 0,
+                    new: 0,
+                    duplicates: 0,
+                    error: Some("HTTP 503".to_string()),
+                },
+            ],
+            ..report("run_1", false)
+        };
+        let retry = RunReport {
+            run_id: "retry_1".to_string(),
+            retry_of: Some("run_1".to_string()),
+            sources: vec![SourceReport {
+                source_id: "hn".to_string(),
+                name: "Hacker News".to_string(),
+                outcome: SourceOutcome::Ok,
+                fetched: 2,
+                new: 1,
+                duplicates: 1,
+                error: None,
+            }],
+            ranked: 1,
+            duration_ms: 5_000,
+            ..report("retry_1", false)
+        };
+
+        let merged = merge_retry(&previous, &retry);
+
+        assert_eq!(merged.run_id, "run_1", "one run, still the same report");
+        assert_eq!(merged.sources.len(), 2, "nothing is dropped");
+        assert_eq!(merged.sources[0].source_id, "remotive");
+        assert_eq!(merged.sources[0].fetched, 4);
+        assert_eq!(merged.sources[1].outcome, SourceOutcome::Ok);
+        assert_eq!(merged.sources[1].error, None);
+        assert_eq!(merged.ranked, previous.ranked + 1);
+        assert_eq!(merged.finished_at, retry.finished_at);
+        assert!(!merged.is_partial(), "the retry cleared the banner");
     }
 
     /// AC2: a stored report is what the screen reads back.
