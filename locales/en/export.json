@@ -1,1 +1,12 @@
-{}
+{
+  "title": "Export your data",
+  "intro": "Write your Profile, applications, seen jobs, documents and audit log to a folder you choose, in open formats that another tool can read.",
+  "warning.title": "This export is not encrypted",
+  "warning.body": "Anyone who can open the folder can read everything in it: your Profile, your applications, your documents and your audit log. Store it somewhere you control, and delete it when you are done.",
+  "warning.ack": "I understand this export is not encrypted.",
+  "choose": "Choose a folder…",
+  "no_folder": "No folder chosen yet.",
+  "action": "Export",
+  "done": "Wrote {files} files to {destination}.",
+  "error.action": "The export did not finish."
+}

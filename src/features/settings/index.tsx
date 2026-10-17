@@ -7,6 +7,7 @@ import SettingsApplyingRules from "./applying/rules";
 import SettingsNotifications from "./notifications";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyBackup from "./privacy/backup";
+import SettingsPrivacyExport from "./privacy/export";
 import SettingsPrivacySessions from "./privacy/sessions";
 import SettingsScoring from "./scoring";
 
@@ -23,6 +24,7 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
     Component: SettingsPrivacySessions,
   },
   { id: "privacy/backup", labelKey: "backup:title", Component: SettingsPrivacyBackup },
+  { id: "privacy/export", labelKey: "export:title", Component: SettingsPrivacyExport },
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
   { id: "ai-engine", labelKey: "ai_engine:title", Component: SettingsAiEngine },
   { id: "notifications", labelKey: "notifications:title", Component: SettingsNotifications },

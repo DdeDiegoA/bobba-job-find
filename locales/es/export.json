@@ -1,1 +1,12 @@
-{}
+{
+  "title": "Exporta tus datos",
+  "intro": "Guarda tu perfil, postulaciones, vacantes vistas, documentos y registro de auditoría en una carpeta que elijas, en formatos abiertos que otra herramienta puede leer.",
+  "warning.title": "Esta exportación no está cifrada",
+  "warning.body": "Cualquiera que pueda abrir la carpeta podrá leer todo lo que contiene: tu perfil, tus postulaciones, tus documentos y tu registro de auditoría. Guárdala en un lugar que controles y bórrala cuando termines.",
+  "warning.ack": "Entiendo que esta exportación no está cifrada.",
+  "choose": "Elige una carpeta…",
+  "no_folder": "Aún no has elegido una carpeta.",
+  "action": "Exportar",
+  "done": "Se escribieron {files} archivos en {destination}.",
+  "error.action": "La exportación no terminó."
+}

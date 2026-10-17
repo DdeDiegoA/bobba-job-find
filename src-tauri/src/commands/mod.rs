@@ -11,6 +11,7 @@ pub mod capabilities;
 pub mod daily_search;
 pub mod email;
 pub mod embeddings;
+pub mod export;
 pub mod ingest;
 pub mod kill_switch;
 pub mod offers;

@@ -1,0 +1,4 @@
+{
+  "errors.export.destination": "Elige una carpeta existente para exportar.",
+  "errors.export.internal": "La exportación no terminó. Puede que ya haya archivos en la carpeta; revísala antes de intentarlo de nuevo."
+}

@@ -10,6 +10,7 @@ pub mod browser;
 pub mod cli;
 pub mod clock;
 pub mod embedding;
+pub mod export;
 pub mod kill_switch;
 pub mod mail;
 pub mod notifier;

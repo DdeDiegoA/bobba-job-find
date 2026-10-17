@@ -673,6 +673,16 @@ export const commands = {
     typedError<ResetReportView, AppError_Serialize>(
       __TAURI_INVOKE("reset_everything", { confirmation }),
     ),
+  /**
+   *  Write the export into `destination` (AC1).
+   *
+   *  Runs on a blocking thread: the export reads every table and writes every
+   *  file, and none of that belongs on the event loop.
+   */
+  exportData: (destination: string) =>
+    typedError<ExportReportView, AppError_Serialize>(
+      __TAURI_INVOKE("export_data", { destination }),
+    ),
   /**  The completion state the first-launch gate reads. */
   onboardingStatus: () =>
     typedError<OnboardingStatus, AppError_Serialize>(__TAURI_INVOKE("onboarding_status")),
@@ -1483,6 +1493,14 @@ export type ExclusionView = {
    *  and is rendered as text, never as markup.
    */
   quote: string | null;
+};
+
+/**  What the export wrote, so the page can confirm where it went (AC1). */
+export type ExportReportView = {
+  /**  The folder the files were written into. */
+  destination: string;
+  /**  How many files were written (application folders included). */
+  files: number;
 };
 
 /**  A DOCX exported to `<app data>/exports/` (FR-78). */
