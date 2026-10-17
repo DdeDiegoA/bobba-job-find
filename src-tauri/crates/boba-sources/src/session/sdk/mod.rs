@@ -29,9 +29,10 @@ pub const WARNING_VERSION: &str = "v1";
 /// Pacing between two automated page loads on one Session Board Source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pacing {
-    /// The lowest delay between two page loads, in milliseconds.
+    /// The **floor**: no two page loads are ever closer than this, in ms.
     pub min_interval_ms: u64,
-    /// The jitter applied around `min_interval_ms`, in percent of it.
+    /// The jitter added above the floor, in percent of it — it only ever adds
+    /// delay, so a slow board is never loaded faster than the floor.
     pub jitter_pct: u64,
 }
 
@@ -39,19 +40,18 @@ impl Pacing {
     /// The delay before the `n`-th page load, drawn from `sample`.
     ///
     /// `sample` is any changing number (a counter, a timer-derived value); the
-    /// result stays inside `min_interval_ms ± jitter_pct`, so the pacing is
-    /// human-like without ever being faster than the floor.
+    /// result stays inside `min_interval_ms ..= min_interval_ms + jitter_pct`,
+    /// so the pacing is human-like and **never faster than the floor** (Diego
+    /// security ruling, 2026-10-17: the floor is 30 s, jitter only adds).
     pub fn delay_ms(&self, sample: u64) -> u64 {
         let span = self.min_interval_ms.saturating_mul(self.jitter_pct) / 100;
-        let low = self.min_interval_ms.saturating_sub(span);
-        let spread = span.saturating_mul(2) + 1;
-        low + sample % spread
+        self.min_interval_ms + sample % (span + 1)
     }
 }
 
-/// The conservative defaults every Session Board Source starts from: a mean of
-/// one page every 30 s, ±40 % — so the *floor* is 18 s and the ceiling 42 s.
-/// Low volume and human-like (FR-30), and never faster than the floor.
+/// The conservative defaults every Session Board Source starts from: **never
+/// faster than one page every 30 s**, with up to 40 % jitter on top (30–42 s).
+/// Low volume and human-like (FR-30).
 pub const DEFAULT_PACING: Pacing = Pacing {
     min_interval_ms: 30_000,
     jitter_pct: 40,
@@ -234,12 +234,38 @@ mod tests {
         };
         const { assert!(DEFAULT_PACING.jitter_pct > 0, "delays are not a metronome") };
         let delays: Vec<u64> = (0..64).map(|n| DEFAULT_PACING.delay_ms(n)).collect();
-        let floor = DEFAULT_PACING.min_interval_ms
-            - DEFAULT_PACING.min_interval_ms * DEFAULT_PACING.jitter_pct / 100;
+        // Security ruling 2026-10-17: 30 s is the FLOOR. Jitter only adds.
+        let floor = DEFAULT_PACING.min_interval_ms;
         let ceiling = DEFAULT_PACING.min_interval_ms
             + DEFAULT_PACING.min_interval_ms * DEFAULT_PACING.jitter_pct / 100;
         assert!(delays.iter().all(|d| (floor..=ceiling).contains(d)));
+        assert!(
+            delays.iter().all(|d| *d >= 30_000),
+            "no page load is ever faster than 30 s"
+        );
         assert!(delays.iter().any(|d| *d != delays[0]), "the delay varies");
+    }
+
+    #[test]
+    fn jitter_only_ever_adds_delay() {
+        // Ruling 2026-10-17: the interval is a floor, never a mean. No sample
+        // may produce a delay below it.
+        let pacing = Pacing {
+            min_interval_ms: 30_000,
+            jitter_pct: 40,
+        };
+        for sample in 0..2_000 {
+            let delay = pacing.delay_ms(sample);
+            assert!(
+                (30_000..=42_000).contains(&delay),
+                "sample {sample} produced {delay}"
+            );
+        }
+        let steady = Pacing {
+            min_interval_ms: 30_000,
+            jitter_pct: 0,
+        };
+        assert_eq!(steady.delay_ms(7), 30_000, "no jitter means the floor");
     }
 
     #[test]

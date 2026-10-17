@@ -397,7 +397,7 @@ mod tests {
     fn every_load_is_paced_like_a_person() {
         let core = Core::with(board(), 0);
         let mut run = SessionRun::open(core, "linkedin", 10).unwrap();
-        let floor = DEFAULT_PACING.min_interval_ms - DEFAULT_PACING.min_interval_ms * 40 / 100;
+        let floor = DEFAULT_PACING.min_interval_ms;
         let delays: Vec<u64> = (0..10)
             .map(|n| {
                 run.before_load("https://www.linkedin.com/jobs/search/", n)
