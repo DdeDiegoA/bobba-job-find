@@ -26,15 +26,24 @@ use serde_json::Value;
 
 use crate::eml;
 use crate::gmail::{GMAIL_SEND_SCOPE, GmailSecret};
-use crate::oauth::{self, OAuthError, ProviderEndpoints, TokenSet};
+use crate::oauth::{self, OAuthError, ProviderEndpoints};
 use crate::sync::{RawMessage, normalize_message_id};
 
 /// The scope that lets the reader list and get messages (AC1: only with the
 /// user's own client, until CASA).
 pub const GMAIL_READ_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readonly";
 
-/// How many messages one pass may ask the API to list.
+/// How many messages one pass may return.
 pub const READ_PAGE_SIZE: usize = 100;
+
+/// How many ids one listing call asks for while the reader walks down to the
+/// oldest end of the window.
+const SCAN_CHUNK: usize = 100;
+
+/// How far down the reader will walk to find the bottom of a window. Each round
+/// asks for the chunk below the previous one, so a busy mailbox settles in a
+/// couple of rounds instead of paging through thousands of unrelated messages.
+const MAX_DESCENT_ROUNDS: usize = 12;
 
 /// The largest answer accepted for one message. Gmail returns bodies inline with
 /// `format=full`, so a single oversized message is refused before a run holds it
@@ -59,16 +68,34 @@ pub fn requested_scopes(mode: EmailMode) -> Vec<&'static str> {
     }
 }
 
+/// Whether `account`'s grant covers `mode` (AC1, NFR-5).
+///
+/// Gmail's scopes are Google's, not Graph's: `Mail.Read` never appears in a
+/// Gmail grant and `gmail.readonly` never appears in an Outlook one, so the core
+/// asks this instead of [`EmailAccount::covers`] for a Gmail row. Reading also
+/// needs the user's own client (the bundled one stays send-only until CASA), so
+/// it is part of what read+send coverage means here.
+pub fn covers(account: &EmailAccount, mode: EmailMode) -> bool {
+    if account.provider != MailProvider::Gmail {
+        return false;
+    }
+    let has = |scope: &str| account.scopes.iter().any(|granted| granted == scope);
+    match mode {
+        EmailMode::SendOnly => has(GMAIL_SEND_SCOPE),
+        EmailMode::ReadSend => {
+            has(GMAIL_SEND_SCOPE)
+                && has(GMAIL_READ_SCOPE)
+                && account.client_id_kind == ClientIdKind::Byo
+        }
+    }
+}
+
 /// Whether this connection may read its mailbox through the Gmail API (AC1).
 ///
-/// All four must hold: the provider is Gmail, the user connected read+send, the
-/// client is the user's own, and the granted scopes include
-/// [`GMAIL_READ_SCOPE`]. The bundled client is refused outright until CASA.
+/// It must be connected read+send **and** its grant must cover that mode. The
+/// bundled client is refused outright until CASA.
 pub fn read_capable(account: &EmailAccount) -> bool {
-    account.provider == MailProvider::Gmail
-        && account.mode == EmailMode::ReadSend
-        && account.client_id_kind == ClientIdKind::Byo
-        && account.scopes.iter().any(|scope| scope == GMAIL_READ_SCOPE)
+    account.mode == EmailMode::ReadSend && covers(account, EmailMode::ReadSend)
 }
 
 /// The Gmail API reader. Holds no tokens: they are read from the keychain per
@@ -186,7 +213,8 @@ impl GmailReader {
         .map_err(|_| MailError::Reauthorize)?;
 
         let renewed = GmailSecret {
-            tokens: TokenSet::new(&response, &secret.tokens.scopes),
+            // A refresh that omits the refresh token keeps the stored one (AD-13).
+            tokens: secret.tokens.renewed(&response),
             client_secret: secret.client_secret,
         };
         self.secrets
@@ -195,20 +223,75 @@ impl GmailReader {
         Ok(renewed.tokens.access_token)
     }
 
-    /// The ids of the inbox messages received since `since`, oldest first.
+    /// The ids a pass reads: the **oldest** messages of the window, oldest
+    /// first, at most `limit`.
+    ///
+    /// Gmail lists newest-first and has no ascending order, so the bottom of the
+    /// window is found by walking down in chunks: list a chunk from the top of
+    /// the remaining window; while it is full, there may be older mail, so move
+    /// the window's top below its oldest message and list again. The chunk that
+    /// is not full (or one the budget stops at) holds the oldest messages the
+    /// pass can see, and its tail is what is read.
+    ///
+    /// Reading the old end is what keeps the sync safe: the pass cursor moves to
+    /// the newest message *returned*, so anything skipped stays newer than the
+    /// cursor and is looked at again on the next pass. Reading the newest page
+    /// instead would push the cursor past unread mail.
     async fn list_ids(
         &self,
         token: &str,
         since: i64,
         limit: usize,
     ) -> Result<Vec<String>, MailError> {
+        let mut before: Option<i64> = None;
+        let mut page = self.list_page(token, since, before, SCAN_CHUNK).await?;
+        let mut rounds = 0;
+        while page.len() == SCAN_CHUNK && rounds < MAX_DESCENT_ROUNDS {
+            let Some(oldest) = page.last() else { break };
+            let Some(date) = self.received_at(token, oldest).await? else {
+                break;
+            };
+            // Gmail's `before:` is second-granular but dates can disagree with
+            // the receipt time; a round that would not move is the bottom.
+            if before.is_some_and(|previous| date >= previous) {
+                break;
+            }
+            before = Some(date);
+            rounds += 1;
+            let deeper = self.list_page(token, since, before, SCAN_CHUNK).await?;
+            if deeper.is_empty() {
+                // The previous chunk *was* the bottom of the window.
+                break;
+            }
+            page = deeper;
+        }
+        // The page is newest-first: its tail is the oldest end, reversed to the
+        // order the sync reads.
+        let take = limit.min(page.len());
+        let mut oldest: Vec<String> = page.split_off(page.len() - take);
+        oldest.reverse();
+        Ok(oldest)
+    }
+
+    /// One listing call: at most `limit` ids of the inbox window, newest first.
+    async fn list_page(
+        &self,
+        token: &str,
+        since: i64,
+        before: Option<i64>,
+        limit: usize,
+    ) -> Result<Vec<String>, MailError> {
         let mut url = url::Url::parse(&format!("{}/users/me/messages", self.endpoints.api_base))
             .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?;
+        // Gmail's search takes epoch-second bounds; the sync filters by the
+        // cursor and the message date again, so a coarse bound is safe.
+        let query = match before {
+            Some(before) => format!("after:{since} before:{before}"),
+            None => format!("after:{since}"),
+        };
         url.query_pairs_mut()
             .append_pair("labelIds", "INBOX")
-            // Gmail's search takes an epoch-second bound; the sync filters by
-            // the cursor and the message date again, so a coarse bound is safe.
-            .append_pair("q", &format!("after:{since}"))
+            .append_pair("q", &query)
             .append_pair("maxResults", &limit.to_string());
         let body = self.request(url.as_str(), token, MAX_LIST_BYTES).await?;
         Ok(body
@@ -223,6 +306,21 @@ impl GmailReader {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// One message's receipt date (Unix seconds), read from a metadata answer
+    /// (`internalDate`), without fetching its body.
+    async fn received_at(&self, token: &str, id: &str) -> Result<Option<i64>, MailError> {
+        let mut url = url::Url::parse(&format!("{}/", self.endpoints.api_base))
+            .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?;
+        url.path_segments_mut()
+            .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?
+            .extend(["users", "me", "messages", id]);
+        url.query_pairs_mut().append_pair("format", "metadata");
+        let body = self.request(url.as_str(), token, MAX_LIST_BYTES).await?;
+        Ok(internal_date(&body)
+            .map(|milliseconds| milliseconds / 1000)
+            .filter(|timestamp| *timestamp > 0))
     }
 
     /// One message's headers and a bounded text body (`format=full`).
@@ -499,6 +597,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+    use crate::oauth::TokenSet;
 
     const NOW: i64 = 1_760_000_000;
     const DAY: i64 = 24 * 60 * 60;
@@ -759,6 +858,37 @@ mod tests {
         assert!(!read_capable(&outlook));
     }
 
+    /// R3: Gmail coverage is Google's scopes, not Graph's `Mail.Read`. The core
+    /// asks this before switching a connection's mode.
+    #[test]
+    fn gmail_coverage_is_googles_scopes_not_graphs() {
+        let mut send_only = account();
+        send_only.mode = EmailMode::SendOnly;
+        send_only.scopes = vec![GMAIL_SEND_SCOPE.to_string()];
+        assert!(covers(&send_only, EmailMode::SendOnly));
+        assert!(!covers(&send_only, EmailMode::ReadSend));
+
+        let read = account();
+        assert!(covers(&read, EmailMode::ReadSend));
+        assert!(
+            covers(&read, EmailMode::SendOnly),
+            "a read+send grant covers sending too"
+        );
+
+        let mut bundled = account();
+        bundled.client_id_kind = ClientIdKind::Bundled;
+        assert!(
+            !covers(&bundled, EmailMode::ReadSend),
+            "the bundled client never covers reading"
+        );
+
+        // An Outlook row carries Graph scopes; Gmail coverage says nothing about it.
+        let mut outlook = account();
+        outlook.provider = MailProvider::MicrosoftGraph;
+        outlook.scopes = vec!["Mail.Send".to_string()];
+        assert!(!covers(&outlook, EmailMode::SendOnly));
+    }
+
     #[test]
     fn the_mode_decides_the_scopes_a_gmail_connection_asks_for() {
         assert_eq!(
@@ -869,6 +999,68 @@ mod tests {
             renewed.client_secret.as_deref(),
             Some("GOCSPX-public-value"),
             "the public client secret is kept for the next pass"
+        );
+    }
+
+    /// R1: Google does not re-issue the refresh token on a refresh, so the one
+    /// in the keychain must survive — otherwise the next expiry asks the user to
+    /// authorise again, every hour.
+    #[tokio::test]
+    async fn a_refresh_that_omits_the_refresh_token_keeps_the_stored_one() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "at-2",
+                "expires_in": 1
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": [] })))
+            .mount(&server)
+            .await;
+
+        let expired = GmailSecret {
+            tokens: TokenSet {
+                access_token: "at-1".to_string(),
+                refresh_token: Some("rt-1".to_string()),
+                expires_at_unix: oauth::now_unix() - 1,
+                scopes: vec![GMAIL_SEND_SCOPE.to_string(), GMAIL_READ_SCOPE.to_string()],
+            },
+            client_secret: Some("GOCSPX-public-value".to_string()),
+        }
+        .to_json();
+        let secrets = FakeSecrets::with(REF, expired);
+        let reader = reader(&server, secrets.clone() as Arc<dyn SecretPort>);
+
+        // Two passes: the second one has to renew again, from the stored token.
+        for _ in 0..2 {
+            reader
+                .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+                .await
+                .expect("read");
+            assert_eq!(
+                GmailSecret::from_json(&secrets.value(REF).expect("stored"))
+                    .expect("json")
+                    .tokens
+                    .refresh_token
+                    .as_deref(),
+                Some("rt-1"),
+                "the refresh token must survive a refresh that omits it"
+            );
+        }
+
+        let requests = server.received_requests().await.expect("requests");
+        let refreshes = requests
+            .iter()
+            .filter(|request| request.url.path() == "/token")
+            .count();
+        assert_eq!(refreshes, 2, "the second pass renewed on its own");
+        assert!(
+            String::from_utf8_lossy(&requests[0].body).contains("refresh_token=rt-1"),
+            "the stored token is what is presented"
         );
     }
 
@@ -987,7 +1179,8 @@ mod tests {
             })))
             .mount(&server)
             .await;
-        for id in ["m1", "m2"] {
+        // The list is newest-first, so the two oldest are m4 and m3.
+        for id in ["m4", "m3"] {
             Mock::given(method("GET"))
                 .and(path(format!("/users/me/messages/{id}")))
                 .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -1012,7 +1205,8 @@ mod tests {
                 .iter()
                 .map(|m| m.provider_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["m1", "m2"]
+            vec!["m4", "m3"],
+            "the oldest two of the window, oldest first"
         );
         let requests = server.received_requests().await.expect("requests");
         let gets = requests
@@ -1020,6 +1214,139 @@ mod tests {
             .filter(|request| request.url.path() != "/users/me/messages")
             .count();
         assert_eq!(gets, 2, "a third message is never fetched");
+    }
+
+    /// R2: Gmail lists newest-first and offers no ascending order. A pass reads
+    /// the OLDEST messages of the window — otherwise the cursor jumps to the
+    /// newest one it saw and every message older than the page it read is
+    /// skipped for good.
+    #[tokio::test]
+    async fn a_pass_walks_to_the_oldest_messages_of_the_window() {
+        let server = MockServer::start().await;
+        let since = NOW - DAY;
+        let boundary = NOW - 5 * DAY;
+        let page: Vec<Value> = (0..SCAN_CHUNK)
+            .map(|index| json!({ "id": format!("n{index:03}") }))
+            .collect();
+        // A full page: there may be older mail, so the window's top moves below
+        // its oldest message (n099).
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param("q", format!("after:{since}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": page })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages/n099"))
+            .and(query_param("format", "metadata"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "n099",
+                "internalDate": (boundary * 1000).to_string()
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        // The bottom of the window: two messages, newest first.
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param("q", format!("after:{since} before:{boundary}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "messages": [{"id": "b1"}, {"id": "b0"}]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages/b0"))
+            .and(query_param("format", "full"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "b0",
+                "internalDate": ((NOW - 40 * DAY) * 1000).to_string(),
+                "payload": {"mimeType": "text/plain", "body": {"data": encoded("oldest")}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let messages = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, since, NOW, 1)
+        .await
+        .expect("read");
+
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b0"],
+            "the oldest message of the window is the one read"
+        );
+    }
+
+    /// A window that fits exactly in one page is its own bottom: the extra walk
+    /// finds nothing older and the page's tail is what is read — never a loop.
+    #[tokio::test]
+    async fn a_window_that_ends_at_the_page_boundary_reads_its_tail() {
+        let server = MockServer::start().await;
+        let since = NOW - DAY;
+        let boundary = NOW - 5 * DAY;
+        let page: Vec<Value> = (0..SCAN_CHUNK)
+            .map(|index| json!({ "id": format!("n{index:03}") }))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param("q", format!("after:{since}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": page })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages/n099"))
+            .and(query_param("format", "metadata"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "n099",
+                "internalDate": (boundary * 1000).to_string()
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param("q", format!("after:{since} before:{boundary}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": [] })))
+            .mount(&server)
+            .await;
+        for id in ["n098", "n099"] {
+            Mock::given(method("GET"))
+                .and(path(format!("/users/me/messages/{id}")))
+                .and(query_param("format", "full"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": id,
+                    "internalDate": ((NOW - 3 * DAY) * 1000).to_string(),
+                    "payload": {"mimeType": "text/plain", "body": {"data": encoded(id)}}
+                })))
+                .mount(&server)
+                .await;
+        }
+
+        let messages = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, since, NOW, 2)
+        .await
+        .expect("read");
+
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["n099", "n098"],
+            "the tail of the page, oldest first"
+        );
     }
 
     #[tokio::test]

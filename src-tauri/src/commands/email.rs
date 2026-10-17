@@ -728,6 +728,18 @@ fn connection_row(
     })
 }
 
+/// Whether the connection's grant covers `mode` (NFR-5).
+///
+/// Each provider names its scopes: Outlook carries Graph's `Mail.Read`/
+/// `Mail.Send`, Gmail carries Google's URLs (and reading also needs the user's
+/// own client), so the provider picks the rule instead of a shared list.
+fn mode_covered(account: &EmailAccount, mode: EmailMode) -> bool {
+    match account.provider {
+        MailProvider::Gmail => gmail_read::covers(account, mode),
+        MailProvider::MicrosoftGraph | MailProvider::ImapSmtp => account.covers(mode),
+    }
+}
+
 /// Switch a connection between send-only and read+send (AC3).
 ///
 /// Reading is only switched on when the granted scopes cover it (NFR-5): a
@@ -745,7 +757,7 @@ pub fn email_set_mode(
         .get_account(&id)
         .map_err(EmailFailure::Store)?
         .ok_or(EmailFailure::UnknownConnection)?;
-    if !account.covers(mode) {
+    if !mode_covered(&account, mode) {
         return Err(EmailFailure::NeedsReconsent.into());
     }
     accounts
@@ -1186,6 +1198,25 @@ mod tests {
         Arc::new(Store::open_with_key(config, key).expect("store opens"))
     }
 
+    /// A Gmail row as S8.5 stores it: the user's own client, read+send (or not).
+    fn gmail_account(mode: EmailMode) -> EmailAccount {
+        EmailAccount {
+            id: "01GMAIL".into(),
+            provider: MailProvider::Gmail,
+            address: "me@gmail.com".into(),
+            mode,
+            client_id: "me.apps.googleusercontent.com".into(),
+            client_id_kind: ClientIdKind::Byo,
+            scopes: vec![
+                gmail::GMAIL_SEND_SCOPE.to_string(),
+                gmail_read::GMAIL_READ_SCOPE.to_string(),
+            ],
+            secret_ref: "mail:01GMAIL".into(),
+            connected_at: "2026-10-17T00:00:00Z".into(),
+            updated_at: "2026-10-17T00:00:00Z".into(),
+        }
+    }
+
     fn connection() -> EmailAccount {
         EmailAccount {
             id: "01ACC".into(),
@@ -1571,6 +1602,36 @@ mod tests {
             gmail_mode(Some(EmailMode::ReadSend), ClientIdKind::Bundled),
             Err(EmailFailure::GmailReadNeedsByo)
         ));
+    }
+
+    /// R3: a Gmail row is covered by Google's scopes, not Graph's, so a mode
+    /// switch judges it with what was actually granted. Switching to reading
+    /// still needs a new consent (and the user's own client); switching back to
+    /// sending-only is allowed, exactly as it is for Outlook.
+    #[test]
+    fn a_gmail_mode_switch_is_judged_by_google_scopes() {
+        use boba_mail::gmail::GMAIL_SEND_SCOPE;
+        use boba_mail::gmail_read::{GMAIL_READ_SCOPE, covers};
+
+        let mut gmail = gmail_account(EmailMode::SendOnly);
+        gmail.scopes = vec![GMAIL_SEND_SCOPE.to_string()];
+        assert!(mode_covered(&gmail, EmailMode::SendOnly));
+        assert!(!mode_covered(&gmail, EmailMode::ReadSend));
+
+        let read = gmail_account(EmailMode::ReadSend);
+        assert!(mode_covered(&read, EmailMode::SendOnly));
+        assert!(mode_covered(&read, EmailMode::ReadSend));
+        assert!(covers(&read, EmailMode::ReadSend));
+
+        // The bundled client can never be switched to reading.
+        let mut bundled = gmail_account(EmailMode::SendOnly);
+        bundled.client_id_kind = ClientIdKind::Bundled;
+        bundled.scopes = vec![GMAIL_SEND_SCOPE.to_string(), GMAIL_READ_SCOPE.to_string()];
+        assert!(!mode_covered(&bundled, EmailMode::ReadSend));
+
+        // An Outlook row keeps the Graph rule: its grant must name Mail.Read.
+        let outlook = connection();
+        assert!(mode_covered(&outlook, EmailMode::ReadSend));
     }
 
     /// The refusal is a form error with its own key, so the UI can point the
