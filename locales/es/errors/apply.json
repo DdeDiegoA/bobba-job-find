@@ -1,0 +1,10 @@
+{
+  "errors.apply.store": "Boba no pudo leer esa postulación. Inténtalo de nuevo.",
+  "errors.apply.unknown_application": "Esa postulación ya no está en el Tracker.",
+  "errors.apply.unknown_offer": "La oferta a la que apunta esta postulación ya no existe.",
+  "errors.apply.missing_id": "No se indicó ninguna postulación.",
+  "errors.apply.invalid_id": "Ese id de postulación no parece válido.",
+  "errors.apply.export_path": "Boba no encontró una carpeta para el kit.",
+  "errors.apply.export_write": "Boba no pudo escribir los PDF. Revisa el disco e inténtalo otra vez.",
+  "errors.apply.not_ready": "Algunos documentos aún no están verificados. Abre el Studio, corrige las comprobaciones y vuelve a renderizarlos antes de postular."
+}

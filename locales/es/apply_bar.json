@@ -1,1 +1,35 @@
-{}
+{
+  "title": "Postular",
+  "loading": "Cargando cómo postular…",
+  "channels": {
+    "title": "Cómo postular",
+    "email_apply": "Postular por email",
+    "email_hint": "Escribe a {address} con tus documentos adjuntos.",
+    "ats_form": "Formulario ATS",
+    "ats_hint": "Completa el formulario de {provider} en el sitio de la empresa.",
+    "manual": "Manual",
+    "manual_hint": "Postula en la página de la empresa usando el kit de abajo."
+  },
+  "apply": "Abrir la página original",
+  "applied": "Postulada",
+  "mark_applied": "Marcar como postulada",
+  "mark_applied_hint": "Úsalo cuando ya hayas enviado tu postulación en su página.",
+  "kit": {
+    "title": "Kit para postular",
+    "documents": "PDF para adjuntar",
+    "no_documents": "Aún no hay PDF verificados. Renderiza tus documentos en el Studio primero.",
+    "export": "Guardar PDF",
+    "saved": "Guardado {file}",
+    "open": "Abrir",
+    "answers": "Tus respuestas aprobadas",
+    "no_answers": "Aún no hay respuestas aprobadas.",
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "pending": "Sin verificar aún: {kinds}. Corrige las comprobaciones y renderiza en el Studio.",
+  "kinds": {
+    "cv": "CV",
+    "cover_letter": "carta de presentación"
+  },
+  "failed": "Ese paso de la postulación no se completó."
+}

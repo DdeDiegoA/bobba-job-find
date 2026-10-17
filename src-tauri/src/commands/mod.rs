@@ -5,6 +5,7 @@
 //! owns `src-tauri/src/commands/<area>.rs`.
 
 pub mod agent;
+pub mod apply;
 pub mod email;
 pub mod ingest;
 pub mod offers;

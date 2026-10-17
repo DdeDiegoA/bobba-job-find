@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import type { StudioDocument, StudioKind } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
+import StudioApplyBar from "./apply-bar";
 import StudioCoverage from "./coverage";
 import StudioEditor, { type EditSlot } from "./editor";
 import StudioTrace, { type TraceSentence } from "./trace";
@@ -197,6 +198,10 @@ export default function StudioIndex() {
           <StudioCoverage requirements={studio.requirements} />
         </aside>
       </div>
+
+      {/* S9.2: how the Offer is applied to, and the manual kit. The core
+          re-checks Ready + verified before a card may say Applied (AD-14). */}
+      <StudioApplyBar applicationId={applicationId} />
     </section>
   );
 }

@@ -1,1 +1,35 @@
-{}
+{
+  "title": "Apply",
+  "loading": "Loading how to apply…",
+  "channels": {
+    "title": "How to apply",
+    "email_apply": "Email Apply",
+    "email_hint": "Write to {address} with your documents attached.",
+    "ats_form": "ATS Form",
+    "ats_hint": "Fill the {provider} form on the employer's site.",
+    "manual": "Manual",
+    "manual_hint": "Apply on the employer's page, using the kit below."
+  },
+  "apply": "Open original page",
+  "applied": "Applied",
+  "mark_applied": "Mark applied",
+  "mark_applied_hint": "Use this once you have sent your application on their page.",
+  "kit": {
+    "title": "Apply kit",
+    "documents": "PDFs to attach",
+    "no_documents": "No verified PDFs yet. Render your documents in the Studio first.",
+    "export": "Save PDFs",
+    "saved": "Saved {file}",
+    "open": "Open",
+    "answers": "Your approved answers",
+    "no_answers": "No approved answers yet.",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "pending": "Not verified yet: {kinds}. Fix the checks and render them in the Studio.",
+  "kinds": {
+    "cv": "CV",
+    "cover_letter": "cover letter"
+  },
+  "failed": "That apply step did not go through."
+}
