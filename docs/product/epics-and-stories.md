@@ -498,7 +498,7 @@ As a user, I want every Offer scored on Fit and Quality with evidence and confid
 - **Given** features, a Profile snapshot, Preferences and market data **When** `score()` runs **Then** factors F1–F6 and Q1–Q5 each emit `{score, weight, matched, missing, evidence, confidence}`, Rank = 0.65·Fit + 0.35·Quality, and the Verdict uses the PRD bands.
 - **Given** a missing factor input (no embeddings, no salary) **When** scoring runs **Then** the weight is renormalised and Confidence is lowered. Nothing is imputed.
 - **Given** a change to the Profile, Preferences or scoring model version **When** it happens **Then** affected ScoreCards are recomputed and earlier cards stay immutable.
-- **And** the golden ScoreCards include the offer-scoring.md §9 worked example (Rank 75.2 ±0.1), and scoring takes ≤ 50 ms per Offer.
+- **And** the golden ScoreCards include the offer-scoring.md §9 worked example: the axes §9 publishes rank 75.2 ±0.1 through the rank step, and the card this model computes from §9's inputs is pinned end to end (Fit 67.44, Quality 66.56, Rank 67.14, Good, Confidence Medium), because §9's factor column does not average to the axes beside it; and scoring takes ≤ 50 ms per Offer.
 
 ### Story 6.4: Today and Inbox
 **Phase:** MVP · **Depends on:** 6.3, 1.5 · **Files:** `src/features/today/matches/**`, `src/features/today/index.tsx`, `src/features/inbox/list/**`, `src/features/inbox/index.tsx`, `src-tauri/src/commands/offers.rs`, `locales/en/today.json`, `locales/es/today.json`, `locales/en/inbox.json`, `locales/es/inbox.json` · **Covers:** FR-63, FR-64, FR-60 (badges), EXPERIENCE §9.2, §9.3, §9.11
