@@ -94,6 +94,20 @@ ignore = [
     # zip only runs when a downloaded bundle is extracted.
     # Revisit: a non-yanked zip 4.x is published, or tauri-plugin-updater drops the zip dependency.
     { crate = "zip@4.6.1", reason = "Diego 2026-10-15: entire zip 4.x yanked; every tauri-plugin-updater release (<=3.0.0-alpha.3) requires zip ^4; reached only via updater bundle extraction, updater unused until S10.5. Revisit: a non-yanked zip 4.x appears or tauri-plugin-updater drops zip." },
+    # --- CH11 (2026-10-17): zbus family unmaintained, ignore scoped by id (Diego standing OK, recommended). ---
+    # zbus_names 4.3.4 (RUSTSEC-2026-0371), zvariant 5.15.0 (RUSTSEC-2026-0370),
+    # zvariant_derive 5.15.0 (RUSTSEC-2026-0372): all unmaintained, no known vulnerability.
+    # Path (Linux target only): tauri-plugin-opener 2.7.0 / tauri-plugin-single-instance 2.5.2 /
+    # notify-rust 4.18.1 (via tauri-plugin-notification 2.5.1) -> zbus ^5 -> zbus_names/zvariant.
+    # Not built on macOS: every dependent gates zbus on a Linux/BSD cfg (opener: linux+BSD,
+    # single-instance: linux, notify-rust: unix-not-macos), so `cargo tree -i zbus` is empty here.
+    # No safe upgrade: the crates were folded into zbus 6.0.0 (a semver-major); `cargo update -p zbus`
+    # keeps 5.19.0 because every dependent above requires zbus ^5, and no maintained release of them
+    # accepts zbus 6 yet. Unmaintained ≠ vulnerable: the advisories carry no CVE/patch.
+    # Revisit at S10.5: tauri-plugin-opener/-single-instance/notify-rust allow zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zvariant/zbus 5 (tauri Linux D-Bus deps); unmaintained, no vuln, no zbus 6 in dependents" },
 ]
 
 [licenses]
