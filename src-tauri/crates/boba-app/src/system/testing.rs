@@ -21,6 +21,9 @@ pub struct FakeSystemRepo {
     /// When set, every audit append fails: the store-under-stress case a panic
     /// control must keep working through (S9.8 H-1). Settings still work.
     audit_down: std::sync::atomic::AtomicBool,
+    /// When set, intent appends for **this action only** fail (S11.2 M2: the
+    /// attempt row must be on record before automation types anything).
+    fail_intent_action: Mutex<Option<String>>,
 }
 
 impl FakeSystemRepo {
@@ -45,6 +48,11 @@ impl FakeSystemRepo {
     pub fn fail_audit(&self) {
         self.audit_down
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Make intent appends for `action` (and only it) fail.
+    pub fn fail_intent_for(&self, action: &str) {
+        *self.fail_intent_action.lock().unwrap() = Some(action.to_string());
     }
 
     /// Every audit row, in append order (a use case's own event inspection).
@@ -145,6 +153,9 @@ impl SystemRepo for FakeSystemRepo {
     fn audit_append_intent(&self, intent: &NewIntent) -> Result<AuditRow, SystemRepoError> {
         if self.audit_down.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(SystemRepoError::new("audit log down"));
+        }
+        if self.fail_intent_action.lock().unwrap().as_deref() == Some(intent.action.as_str()) {
+            return Err(SystemRepoError::new("audit log rejected the row"));
         }
         Ok(self.append(AuditRow {
             seq: 0,

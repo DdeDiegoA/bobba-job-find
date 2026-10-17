@@ -1043,3 +1043,31 @@ fn a_source_without_a_daily_cap_has_no_budget_to_spend() {
     let key = boba_domain::session::loads_key("linkedin", NOW);
     assert_eq!(h.system.setting_get(&key).unwrap(), None);
 }
+
+// M2 (review round 3): when the attempt row cannot be written, the window is
+// closed and nothing was typed — no unaudited automation.
+#[test]
+fn a_failed_audit_write_types_nothing_and_closes_the_window() {
+    let h = ready_harness(vec![
+        field("boba-1", "Email address", PageFieldKind::Email, true),
+        field("boba-2", "Resume", PageFieldKind::File, true),
+    ]);
+    h.system.fail_intent_for(AUDIT_ACTION);
+
+    let error = h.service.start(&application(), &offer()).unwrap_err();
+
+    assert_eq!(error.message_key(), "errors.apply.store");
+    assert!(
+        h.browser.fills.lock().unwrap().is_empty(),
+        "nothing is typed"
+    );
+    assert!(
+        h.browser.attached.lock().unwrap().is_empty(),
+        "no PDF is attached"
+    );
+    assert_eq!(*h.browser.closes.lock().unwrap(), 1, "the window is closed");
+    assert!(
+        !h.system.rows().iter().any(|row| row.action == AUDIT_ACTION),
+        "no half-written attempt exists"
+    );
+}
