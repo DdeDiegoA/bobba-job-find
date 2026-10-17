@@ -574,6 +574,37 @@ fn store_report(system: &dyn SystemRepo, report: &RunReport) -> AppResult<()> {
     let _guard = REPORT_STORE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    write_report(system, report)
+}
+
+/// Store a retry's outcome, **reading the stored report at merge time**
+/// (reviewer-1 F6): the retry runs for minutes, and a scheduled run may have
+/// stored a newer report meanwhile.
+///
+/// The report being retried is read again under the write lock. When it is
+/// still the newest, the retry folds into it (F4): the retried Sources replace
+/// their failed lines and the Sources the first run reached keep theirs. When a
+/// newer run took over, the report being retried is no longer the one to touch
+/// — the retry is stored as **its own** report (`retry_of` names the run it
+/// followed) and the newer run's report is left byte for byte alone.
+fn store_retry(
+    system: &dyn SystemRepo,
+    retried_run_id: &str,
+    retry: &RunReport,
+) -> AppResult<RunReport> {
+    let _guard = REPORT_STORE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let stored = match latest_report(system) {
+        Some(latest) if latest.run_id == retried_run_id => merge_retry(&latest, retry),
+        _ => retry.clone(),
+    };
+    write_report(system, &stored)?;
+    Ok(stored)
+}
+
+/// The write itself; callers hold [`REPORT_STORE`].
+fn write_report(system: &dyn SystemRepo, report: &RunReport) -> AppResult<()> {
     let now = SystemClock.now_rfc3339();
     let json = serde_json::to_string(report).map_err(|error| {
         AppError::internal("errors.run_report.store").with_detail("reason", error.to_string())
@@ -681,8 +712,8 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
         ));
     }
 
-    let previous = report.clone();
     let run_id = report.run_id.clone();
+    let retried_run_id = report.run_id.clone();
     let thread_app = app.clone();
     let spawned = std::thread::Builder::new()
         .name("boba-daily-search-retry".to_string())
@@ -698,8 +729,11 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
                 // the first run reached keep theirs, so the newest view still
                 // shows the whole run (reviewer-1 F4).
                 Ok(execution) => {
-                    let merged = merge_retry(&previous, &execution.report);
-                    if let Err(error) = store_report(execution.system.as_ref(), &merged) {
+                    if let Err(error) = store_retry(
+                        execution.system.as_ref(),
+                        &retried_run_id,
+                        &execution.report,
+                    ) {
                         tracing::warn!(key = error.message_key, "retried report not stored");
                     }
                 }
@@ -1074,6 +1108,70 @@ mod tests {
         assert_eq!(merged.ranked, previous.ranked + 1);
         assert_eq!(merged.finished_at, retry.finished_at);
         assert!(!merged.is_partial(), "the retry cleared the banner");
+    }
+
+    /// F6: a newer run stored while the retry was in flight is never
+    /// overwritten — the retry lands as its own report instead.
+    #[test]
+    fn a_retry_does_not_overwrite_a_newer_run() {
+        let system = MemorySettings::default();
+        store_report(&system, &report("run_1", true)).expect("stored");
+        store_report(&system, &report("run_2", false)).expect("stored");
+
+        let retry = RunReport {
+            run_id: "retry_1".to_string(),
+            retry_of: Some("run_1".to_string()),
+            ..report("retry_1", false)
+        };
+        let stored = store_retry(&system, "run_1", &retry).expect("stored");
+
+        assert_eq!(stored.run_id, "retry_1", "the retry is its own report");
+        assert_eq!(
+            latest_report(&system).expect("latest").run_id,
+            "retry_1",
+            "the retry finished last, so it is the newest view"
+        );
+        let untouched = system
+            .setting_get("run_report.report.run_2")
+            .expect("read")
+            .expect("the newer run is still stored");
+        let unchanged: RunReport = serde_json::from_str(&untouched).expect("json");
+        assert_eq!(
+            unchanged,
+            report("run_2", false),
+            "left byte for byte alone"
+        );
+    }
+
+    /// F6's happy path: the report being retried is still the newest, so the
+    /// retried line replaces its failed one and the run keeps its id.
+    #[test]
+    fn a_retry_merges_into_the_still_newest_report() {
+        let system = MemorySettings::default();
+        let mut failed = report("run_1", true);
+        failed.sources[0].source_id = "hn".to_string();
+        store_report(&system, &failed).expect("stored");
+
+        let ok_line = SourceReport {
+            source_id: "hn".to_string(),
+            name: "Hacker News".to_string(),
+            outcome: SourceOutcome::Ok,
+            fetched: 3,
+            new: 2,
+            duplicates: 1,
+            error: None,
+        };
+        let retry = RunReport {
+            run_id: "retry_1".to_string(),
+            retry_of: Some("run_1".to_string()),
+            sources: vec![ok_line],
+            ..report("retry_1", false)
+        };
+
+        let stored = store_retry(&system, "run_1", &retry).expect("stored");
+        assert_eq!(stored.run_id, "run_1");
+        assert_eq!(stored.sources[0].outcome, SourceOutcome::Ok);
+        assert_eq!(latest_report(&system).expect("latest"), stored);
     }
 
     /// AC2: a stored report is what the screen reads back.
