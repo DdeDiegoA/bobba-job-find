@@ -1,67 +1,119 @@
-# Boba Job Find
+# Boba Job Find 🧋
 
-Local-first, AI-assisted desktop job search. Tauri v2 Rust core + React 19 UI.
-Personal use, free and open source. One SQLCipher database, no cloud.
+**A calm, local-first job search that runs itself every day, and keeps the decisions with you.**
 
-This repo is the **wave 1 scaffold** (slice S1.1): the crate workspace, the
-module skeleton, pinned dependencies, the command registry, the locale
-catalogues and placeholder screens. Later slices fill the stubs in place.
+Boba Job Find is a free, open-source desktop app for Windows, macOS and Linux. It looks
+through the job boards you choose, ranks every Offer by how well it fits you *and* how good
+it is, helps you tailor a CV and cover letter for each application, and applies for you in
+the way you pick: you review each one, or Boba sends the ones that clear your rules.
 
-## Prerequisites
+It is a productized, cross-platform take on the manual workflow in
+[MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search).
 
-| Tool | Version | Notes |
-|---|---|---|
-| Rust | 1.99 (pinned by `rust-toolchain.toml`; MSRV 1.92) | install via [rustup](https://rustup.rs) |
-| Node.js | 24 LTS | build only, not shipped |
-| pnpm | 11 | `corepack enable pnpm` |
-| Tauri Linux deps | see [Tauri prerequisites](https://tauri.app/start/prerequisites/) | `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev` on Ubuntu 24.04 |
+## What it does
 
-`rustup` fetches the pinned toolchain automatically on the first `cargo` call.
+- **Daily search.** A scheduled run fetches new Offers from your Sources, removes duplicates,
+  and tells you what is worth a look. Nothing new? It says so, calmly.
+- **Honest ranking.** Every Offer gets a **Fit Score** (can you get it?) and a **Quality Score**
+  (do you want it?), combined into a **Rank** and a **Verdict** (Strong, Good, Moderate, Weak,
+  Poor). You can see the breakdown and change the weights. Scam and ghost-posting badges
+  warn you early.
+- **Studio.** Tailored CV and cover letter per application, in English or Spanish to match the
+  posting. Every line is traced back to a fact in your Profile, so Boba does not invent
+  experience. Export ATS-friendly PDF or DOCX.
+- **Apply your way.** Email Apply from your own mailbox, ATS form assist in your own Chrome,
+  or an Apply kit for manual applications. **Review** mode keeps a human on every send;
+  **Auto** sends only what clears your Auto Rules.
+- **Tracker.** A kanban of your applications, follow-up nudges, a duplicate-application guard,
+  and reply reading (opt-in) that proposes status changes you confirm.
+- **Your tray, your schedule.** Runs in the background from the system tray, with native
+  notifications and quiet hours.
+- **English and Spanish** UI from day one, light and dark themes that follow your OS.
 
-## Dev command
+## Privacy: it stays on your machine
+
+- No account, no cloud, no telemetry, no billing.
+- Your data lives in one encrypted local database (SQLCipher). The key is held in your OS
+  keychain. If no keychain is available, Boba asks for a passphrase instead.
+- Update checks are **off** until you turn them on, and every network contact appears in
+  **Settings → Privacy → Network activity**.
+- Export your data in open formats, make a passphrase-encrypted backup, restore it, or
+  **Reset everything** at any time.
+
+Details: [Privacy, backup and reset](docs/user-guide/privacy-and-backup.md).
+
+## Supported platforms
+
+| OS | Installer |
+|---|---|
+| macOS 13+ (Apple Silicon and Intel) | Universal `.dmg` |
+| Windows 10/11 x64 | NSIS `-setup.exe` or `.msi` |
+| Linux x64 | `.AppImage`, `.deb`, `.rpm` |
+
+Builds are not signed by Apple or Microsoft yet, so the first launch needs a one-time
+approval. See [docs/install/](docs/install/README.md) and the
+[troubleshooting guide](docs/user-guide/troubleshooting.md).
+
+## The AI engine: bring your own agent CLI
+
+Boba does not bundle a model and has no AI account of its own. It detects the agent CLIs you
+already have installed (Claude Code, Codex, OpenCode, Gemini CLI, Aider) and lets you pick one
+plus a model during setup. A specialized job-search agent (prompts and skills in
+[`agent-pack/`](agent-pack/)) runs on that CLI.
+
+The agent only *proposes*. It talks to the app through a narrow, sandboxed tool shim, and the
+Rust core decides what actually happens: scoring, caps, sending, and everything else that
+matters. Tasks that read untrusted text, such as job postings, only run on a CLI whose tool
+lockdown Boba could verify for that run. If your CLI can't pass that check, Boba says so and
+keeps working in **Limited mode** (search, scoring and the Tracker still work).
+
+## Safety: Review, Auto, and the Kill Switch
+
+- **Review mode** is the default: Boba prepares, you press Send.
+- **Auto** is off until you add at least one Auto Rule and confirm. Each rule sets minimum
+  Rank/Fit/Confidence, the allowed channels, active hours and caps. Defaults: 5 a day per rule,
+  10 a day across all rules, 1 per company per 30 days; automatic sends are 5-20 minutes apart.
+- A new rule starts as a **dry run** that only reports what it would have sent.
+- Automatic sends wait in the **Outbox** first (hold between 5 minutes and 24 hours) so you can
+  edit or cancel.
+- The **Kill Switch** (in the app and in the tray) stops every automatic send immediately.
+- Only documents that passed Boba's checks (facts, layout, ATS text layer) can be sent.
+- Job boards without a public API (LinkedIn, Indeed) work only through *your own* signed-in
+  browser session, per Source, behind an explicit opt-in with a terms-of-service and ban-risk
+  warning, a separate opt-in for Auto, and much stricter limits.
+
+Read more in [Applying](docs/user-guide/applying.md).
+
+## Build from source
+
+Prerequisites: Rust 1.99 (pinned by `rust-toolchain.toml`, installed automatically by
+[rustup](https://rustup.rs)), Node.js 24 LTS, pnpm 11 (`corepack enable pnpm`), and the
+[Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS.
 
 ```sh
-pnpm install          # install JS deps (generates pnpm-lock.yaml)
-pnpm tauri dev        # opens the Boba window (runs Vite on http://localhost:1420)
+pnpm install          # JS dependencies
+pnpm tauri dev        # run the app (Vite on http://localhost:1420)
+pnpm tauri build      # production build and installers
 ```
 
-The first run compiles the Rust workspace; later runs are incremental.
+Dev builds use a separate keychain service and data directory, so they never touch your real
+data. The checks CI runs are listed in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Build and check
+## Docs map
 
-```sh
-pnpm typecheck        # tsc --noEmit
-pnpm build            # typecheck + vite build -> dist/
-cargo build           # whole Rust workspace
-cargo test            # unit + dependency-rule tests (AC2)
-cargo deny check      # supply chain / licences / advisories (optional locally)
-```
+| You want to… | Read |
+|---|---|
+| Use the app | [docs/user-guide/](docs/user-guide/getting-started.md) |
+| Install or update it | [docs/install/](docs/install/README.md) |
+| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md), [docs/contributing/](docs/contributing/) |
+| Report a security issue | [SECURITY.md](SECURITY.md), [docs/security/](docs/security/) |
+| Understand the design | [docs/architecture/](docs/architecture/ARCHITECTURE-SPINE.md), [docs/design/](docs/design/DESIGN.md) |
+| See what the product promises | [docs/product/PRD.md](docs/product/PRD.md) |
+| Everything, indexed | [docs/README.md](docs/README.md) |
+| See what changed | [CHANGELOG.md](CHANGELOG.md) |
 
-## Layout
+## License and credit
 
-- `src/` — React UI (thin typed-IPC client). Screens in `src/features/<area>/`,
-  router in `src/app/routes.tsx`, design tokens in `src/styles/tokens.css`.
-- `src-tauri/` — Tauri app (`src/lib.rs` registers every MVP plugin) and the
-  Rust core crates under `src-tauri/crates/`.
-- `locales/{en,es}/` — shared i18n catalogues, one file per namespace (AD-21);
-  core error keys sit one file per area under `errors/` (CH7).
-- `agent-pack/` — the portable Boba agent: `system.md` + `skills/<task>/SKILL.md`.
-- `templates/` — Typst CV/cover templates and fonts.
-- `tools/` — dev tools (fake agent CLI).
-
-Source of truth for architecture: `docs/architecture/ARCHITECTURE-SPINE.md`.
-Backlog and ownership conventions: `docs/product/backlog.md`.
-
-## Dependency rules (enforced by `cargo test`)
-
-- `boba-domain` depends only on `serde`, `thiserror`, `time`, `ulid`.
-- Adapters never depend on each other; cross-adapter work goes through `boba-app`.
-- `boba-app` never depends on an adapter or on Tauri.
-
-See `src-tauri/tests/dependency_rules.rs`.
-
-## Contributing
-
-Wave/slice ownership is fixed in `docs/product/backlog.md`. New commands go in
-`src-tauri/src/commands/<area>.rs` and append one path per line to
-`src-tauri/src/commands/registry.rs` (`.gitattributes` marks it `merge=union`).
+[MIT](LICENSE). Boba Job Find is inspired by and builds on the ideas of
+[MadsLorentzen/ai-job-search](https://github.com/MadsLorentzen/ai-job-search). Thank you to its
+author for the workflow this app productizes.
