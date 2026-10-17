@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>We Work Remotely: Remote jobs</title>
+    <link>https://weworkremotely.com/</link>
+    <description>Find the most qualified people in the most unexpected places</description>
+    <item>
+      <title>Boba Labs: Senior Rust Engineer</title>
+      <region>Anywhere in the World</region>
+      <category>Back-End Programming</category>
+      <type>Full-Time</type>
+      <description><![CDATA[<p>Build <b>payments</b> in Rust for our team.</p>]]></description>
+      <pubDate>Mon, 12 Oct 2026 08:00:00 +0000</pubDate>
+      <guid>https://weworkremotely.com/remote-jobs/boba-labs-senior-rust-engineer</guid>
+      <link>https://weworkremotely.com/remote-jobs/boba-labs-senior-rust-engineer</link>
+    </item>
+    <item>
+      <title>Tapioca Studio: Product Designer</title>
+      <region>Anywhere in the World</region>
+      <category>Design</category>
+      <type>Full-Time</type>
+      <description><![CDATA[<p>Design calm, warm interfaces.</p>]]></description>
+      <pubDate>Tue, 13 Oct 2026 09:30:00 +0000</pubDate>
+      <guid>http://weworkremotely.com/remote-jobs/tapioca-studio-product-designer</guid>
+      <link>http://weworkremotely.com/remote-jobs/tapioca-studio-product-designer</link>
+    </item>
+  </channel>
+</rss>

@@ -260,4 +260,23 @@ describe("Tracker card detail (AC3)", () => {
     expect(screen.getByText("referred by Ana")).toBeTruthy();
     expect(commands.trackerApplicationDetail).toHaveBeenCalledWith("app_01");
   });
+
+  it("links an https apply_url", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "Backend Engineer" }));
+
+    const link = await screen.findByRole("link", { name: "Open the offer" });
+    expect(link.getAttribute("href")).toBe("https://jobs.example.com/abc-1");
+  });
+
+  it("never links a non-https apply_url", async () => {
+    vi.mocked(commands.trackerApplicationDetail).mockImplementation(() =>
+      ok({ ...detail, apply_url: "javascript:alert(1)" }),
+    );
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "Backend Engineer" }));
+
+    expect(await screen.findByText("javascript:alert(1)")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open the offer" })).toBeNull();
+  });
 });

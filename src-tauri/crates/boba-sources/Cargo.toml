@@ -14,6 +14,9 @@ serde = { workspace = true, features = ["derive"] }
 # ATS payloads (S4.5) are parsed by field, never into a serde struct, so a
 # source adding a field never breaks a board.
 serde_json = { workspace = true }
+# RSS/Atom for the remote feeds (S4.6, WeWorkRemotely): tech-stack.md pins
+# feed-rs as the one feed parser in the tree.
+feed-rs = { workspace = true }
 thiserror = { workspace = true }
 # The shared outbound client (AD-10):
 reqwest = { workspace = true }
