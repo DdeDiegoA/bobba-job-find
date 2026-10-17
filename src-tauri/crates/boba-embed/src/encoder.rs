@@ -169,6 +169,21 @@ const VERIFIED_MARKER: &str = "boba-verified";
 /// parsed (reviewer-1 F2). `try_new` afterwards finds them cached and reads
 /// exactly the bytes [`verify_install`] hashed.
 fn download_model_files(cache_root: &Path) -> Result<(), EmbeddingError> {
+    // The network-activity view (S10.4, NFR-1) shows the attempt from the start,
+    // not only the success S6.9 records afterwards: an interrupted or failed
+    // download is still a destination Boba contacted on the user's behalf.
+    boba_app::network_log::record_host(
+        boba_app::network_log::Purpose::ModelDownload,
+        boba_app::network_log::MODEL_HOST,
+    );
+    // Own the cache directory here so a root that cannot exist fails before the
+    // network is touched, with an error that says which path is wrong.
+    std::fs::create_dir_all(cache_root).map_err(|error| {
+        EmbeddingError::Download(format!(
+            "cannot create the model cache at {}: {error}",
+            cache_root.display()
+        ))
+    })?;
     let api = hf_hub::api::sync::ApiBuilder::new()
         .with_cache_dir(cache_root.to_path_buf())
         .with_progress(false)
@@ -267,6 +282,31 @@ mod tests {
     fn it_reports_the_one_model_this_build_ships() {
         let (_dir, encoder) = encoder();
         assert_eq!(encoder.model_id(), "intfloat/multilingual-e5-small");
+    }
+
+    #[test]
+    fn a_failed_download_is_still_disclosed_in_the_network_log() {
+        // A cache root under a regular file cannot be created, so the attempt
+        // fails before any network call — and the row must exist anyway.
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let blocker = dir.path().join("not-a-directory");
+        std::fs::write(&blocker, b"x").expect("write the blocker");
+        let error = download_model_files(&blocker.join("cache")).expect_err("must fail");
+        assert!(matches!(error, EmbeddingError::Download(_)));
+
+        let activity = boba_app::network_log::snapshot(&[]);
+        let row = activity
+            .groups
+            .iter()
+            .find(|group| group.purpose == boba_app::network_log::Purpose::ModelDownload)
+            .and_then(|group| {
+                group
+                    .destinations
+                    .iter()
+                    .find(|destination| destination.name == boba_app::network_log::MODEL_HOST)
+            })
+            .expect("the failed download is listed");
+        assert!(row.last_seen.is_some());
     }
 
     #[test]
