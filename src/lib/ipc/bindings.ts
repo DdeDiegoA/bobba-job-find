@@ -685,6 +685,11 @@ export const commands = {
     typedError<NotificationSettings, AppError_Serialize>(
       __TAURI_INVOKE("notifications_save", { settings }),
     ),
+  /**  The launch-at-login state over IPC (FR-44). */
+  autostartStatus: () => __TAURI_INVOKE<AutostartStatus>("autostart_status"),
+  /**  Set launch at login over IPC (FR-44). */
+  autostartSet: (enabled: boolean) =>
+    typedError<AutostartStatus, AppError_Serialize>(__TAURI_INVOKE("autostart_set", { enabled })),
 };
 
 /** Events */
@@ -839,6 +844,12 @@ export type AttemptView = {
   message_id: string | null;
   created_at: string;
   sent_at: string | null;
+};
+
+/**  The launch-at-login state the UI reads. */
+export type AutostartStatus = {
+  /**  Whether the OS will start Boba at login right now. */
+  enabled: boolean;
 };
 
 /**  What a backup file says about itself. */

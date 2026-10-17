@@ -1,0 +1,3 @@
+{
+  "errors.autostart.unavailable": "Boba could not change the launch-at-login setting on this computer. Try again, or add Boba to your login items yourself."
+}

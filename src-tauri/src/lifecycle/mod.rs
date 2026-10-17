@@ -44,6 +44,11 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     // The one in-core scheduler (S5.1, AD-18): a login or a wake ticks at once,
     // which is how a slot missed while asleep still runs (FR-43).
     crate::scheduler::install(app);
+    // Launch at login (S5.4, FR-44): reconcile the OS with the stored choice,
+    // and hide the window when the OS launched us at login.
+    crate::autostart::install(app);
+    // The tray run controls and the state icon (S5.4, FR-42).
+    crate::tray::run_controls::install(app);
 }
 
 /// Bring Boba to the front (AC3): "Open" from the tray, and the second-instance
@@ -70,15 +75,8 @@ pub fn on_second_instance<R: Runtime>(app: &AppHandle<R>, _argv: Vec<String>, _c
 pub fn on_menu_action<R: Runtime>(app: &AppHandle<R>, picked: &str) {
     match menu::action(picked) {
         menu::Action::Open => focus_main(app),
-        menu::Action::ToggleSchedule => {
-            if let Some(state) = app.try_state::<TrayState>() {
-                state.toggle_schedule();
-            }
-            // AC2: the check mark on "Pause schedule" shows the new state.
-            if let Err(error) = tray::attach(app, ui_locale(app)) {
-                tracing::warn!(%error, "tray menu not refreshed");
-            }
-        }
+        // AC2: the flag, its check mark and the icon all come from S5.4.
+        menu::Action::ToggleSchedule => crate::tray::run_controls::toggle_schedule(app),
         menu::Action::Quit => app.exit(0),
         // The Kill Switch (S9.8, FR-86): the tray only ever stops automation.
         // Turning it back off is the header chip's job, where the user can see
@@ -88,10 +86,12 @@ pub fn on_menu_action<R: Runtime>(app: &AppHandle<R>, picked: &str) {
                 tracing::warn!(key = error.message_key, "tray: kill switch failed");
             }
         }
-        // Run now is wired in E5 (S5.1): it is on the menu, disabled, so the
-        // shape users learn does not change.
+        // Run now (S5.4, FR-41): start a Search Run; a locked store or a missing
+        // recovery backup is a typed error the tray reports, never a panic.
         menu::Action::RunNow => {
-            tracing::debug!(%picked, "tray action is wired in a later epic");
+            if let Err(error) = crate::tray::run_controls::run_now(app) {
+                tracing::warn!(key = error.message_key, "tray: Run now failed");
+            }
         }
         menu::Action::Ignore => {}
     }
@@ -201,10 +201,10 @@ mod tests {
         assert_eq!(locale_from(Some(""), Some("es")), Locale::Es);
     }
 
-    /// A menu pick is dispatched by the menu's own ids: the two actions a later
-    /// epic wires reach the log path, and an unknown id does nothing.
+    /// Every wired action survives a locked store (the launch state before
+    /// unlock), and an id from a newer build does nothing at all.
     #[test]
-    fn unwired_actions_do_nothing() {
+    fn menu_actions_survive_a_locked_store() {
         let app = tauri::test::mock_app();
         on_menu_action(app.handle(), menu::id::RUN_NOW);
         on_menu_action(app.handle(), menu::id::KILL_SWITCH);
@@ -236,12 +236,14 @@ mod tests {
     /// call (a language change re-localizing the menu) must not re-register the
     /// window handler. Without a tray icon the menu is skipped, not fatal.
     ///
-    /// The mock app carries the global-shortcut plugin, exactly as `lib.rs`
-    /// registers it: `install` reads that plugin's state (S9.8, FR-86).
+    /// The mock app carries the global-shortcut and notification plugins,
+    /// exactly as `lib.rs` registers them: `install` reads the first (S9.8,
+    /// FR-86) and the scheduler's first tick reads the second (S5.1).
     #[test]
     fn install_wires_what_is_there_and_only_the_window_handler_once() {
         let app = tauri::test::mock_builder()
             .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_notification::init())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app");
         let _window =

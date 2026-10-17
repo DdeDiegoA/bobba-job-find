@@ -30,7 +30,13 @@ pub fn run() {
             lifecycle::on_second_instance(app, argv, cwd);
         }))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_autostart::Builder::new().build())
+        // A login launch carries `--autostart` (S5.4, FR-44): that is how the
+        // app starts in the tray with no window instead of showing it.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg(autostart::LOGIN_ARG)
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())

@@ -115,6 +115,8 @@ macro_rules! boba_commands {
             crate::commands::capabilities::capabilities_snapshot,
             crate::notifications::commands::notifications_snapshot,
             crate::notifications::commands::notifications_save,
+            crate::autostart::autostart_status,
+            crate::autostart::autostart_set,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
