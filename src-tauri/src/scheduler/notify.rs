@@ -39,6 +39,14 @@ pub const LOCKED_TITLE: Entry = Entry {
 pub const LOCKED_BODY: Entry = Entry {
     message_key: "jobs:locked.body",
 };
+/// The Session Board pause notice (S11.1a, FR-30): the Source stops, the user
+/// decides when to resume it.
+pub const SESSION_CHALLENGE_TITLE: Entry = Entry {
+    message_key: "jobs:session_challenge.title",
+};
+pub const SESSION_CHALLENGE_BODY: Entry = Entry {
+    message_key: "jobs:session_challenge.body",
+};
 
 /// The `jobs.json` message for `locale`, by its `jobs:<key>` (or bare `<key>`) key.
 pub fn message(locale: Locale, key: &str) -> Option<&'static str> {
@@ -92,6 +100,10 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
         let locale = crate::lifecycle::ui_locale(&self.app);
         let (title, body) = match notification {
             Notification::LockedSearch => (text(locale, &LOCKED_TITLE), text(locale, &LOCKED_BODY)),
+            Notification::SessionChallengePaused => (
+                text(locale, &SESSION_CHALLENGE_TITLE),
+                text(locale, &SESSION_CHALLENGE_BODY),
+            ),
         };
         // A host without the notification plugin panics inside Tauri's accessor
         // rather than returning an error; a missing toast never kills the tick.
@@ -136,7 +148,12 @@ mod tests {
 
     #[test]
     fn the_entries_point_at_real_catalog_keys() {
-        for entry in [LOCKED_TITLE, LOCKED_BODY] {
+        for entry in [
+            LOCKED_TITLE,
+            LOCKED_BODY,
+            SESSION_CHALLENGE_TITLE,
+            SESSION_CHALLENGE_BODY,
+        ] {
             assert!(
                 message(Locale::En, entry.message_key).is_some(),
                 "en is missing {}",

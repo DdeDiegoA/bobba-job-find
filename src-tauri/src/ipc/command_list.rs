@@ -57,6 +57,11 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_ats_opt_in,
             crate::commands::apply::apply_ats_start,
             crate::commands::apply::apply_ats_confirm,
+            crate::commands::session::session_snapshot,
+            crate::commands::session::session_opt_in,
+            crate::commands::session::session_opt_out,
+            crate::commands::session::session_sign_out,
+            crate::commands::session::session_resume,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

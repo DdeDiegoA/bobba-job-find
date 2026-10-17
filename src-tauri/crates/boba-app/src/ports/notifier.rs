@@ -12,6 +12,10 @@ pub enum Notification {
     /// A scheduled slot was due while the store was locked: "Boba is locked.
     /// Open it to run today's search." (ADR-009 §3, AC4). One per slot.
     LockedSearch,
+    /// A Session Board Source hit a challenge (CAPTCHA, sign-in wall, unusual
+    /// activity, rate limit) and is paused until the user acts (FR-30, AD-10).
+    /// One per pause, never per retry: Boba does not retry around a wall.
+    SessionChallengePaused,
 }
 
 /// A notification the OS refused to show.
