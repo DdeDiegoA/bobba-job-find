@@ -13,7 +13,9 @@ use serde_json::Value;
 
 use boba_app::ports::repo::ingestion::{IngestionRepo, IngestionRepoError};
 use boba_domain::dedup::{DedupProbe, description_simhash, job_key_of, probe_matches};
-use boba_domain::posting::lifecycle::{ClosedWarning, PostingLifecycle, is_repost};
+use boba_domain::posting::lifecycle::{
+    ClosedWarning, PostingLifecycle, is_past_deadline, is_repost,
+};
 use boba_domain::posting::{ApplyHints, Money, Offer, PayPeriod, Provenance, WorkMode};
 use boba_domain::posting_features::{
     AgentRunRef, Claim, FeatureKind, FeatureSource, PendingPosting, PostingFeatures,
@@ -204,7 +206,12 @@ pub fn merge_provenance(
         }
         row.missing_runs = 0;
         row.disappeared_at = None;
-        row.possibly_closed_at = None;
+        // Back in its Source: open again — unless it is closed because its
+        // deadline passed. A re-sighting does not revise that date, so the
+        // closure (and the warning on saved Applications) stays put (FR-52).
+        if !is_past_deadline(&posting, now) {
+            row.possibly_closed_at = None;
+        }
         row.updated_at = now.to_string();
         upsert_lifecycle(&tx, &row)?;
     }
@@ -1573,6 +1580,72 @@ mod tests {
 
         let row = lifecycle(&conn, "pst_1").unwrap().expect("still tracked");
         assert_eq!(row.repost_at, None, "seven weeks is a new listing");
+    }
+
+    /// FR-52: a posting closed because its deadline passed stays closed when
+    /// its Source lists it again — the re-sight does not revise the date, so
+    /// the run cannot report it as newly closed a second time.
+    #[test]
+    fn a_deadline_closure_survives_a_resighting() {
+        let conn = connection();
+        let mut expired = offer("pst_expired");
+        expired.deadline = Some("2026-10-01T00:00:00Z".into());
+        expired.last_seen = "2026-10-16T00:00:00Z".into();
+        insert_offer(
+            &conn,
+            &expired,
+            &observed("pst_expired", "remotive", "abc-1", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_expired").unwrap().expect("opened");
+        row.possibly_closed_at = Some("2026-10-16T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_expired",
+            &observed("pst_expired", "remotive", "abc-1", "2026-10-17T00:00:00Z"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_expired")
+            .unwrap()
+            .expect("still tracked");
+        assert_eq!(
+            row.possibly_closed_at.as_deref(),
+            Some("2026-10-16T00:00:00Z"),
+            "the closure keeps its original instant"
+        );
+        assert_eq!(row.missing_runs, 0, "the posting is present again");
+    }
+
+    /// A posting not past its deadline is open again after a re-sighting: only
+    /// a deadline closure outlives the row being seen.
+    #[test]
+    fn a_missing_closure_is_reopened_by_a_resighting() {
+        let conn = connection();
+        insert_offer(
+            &conn,
+            &offer("pst_1"),
+            &observed("pst_1", "remotive", "abc-1", "2026-10-16T00:00:00Z"),
+        )
+        .unwrap();
+        let mut row = lifecycle(&conn, "pst_1").unwrap().expect("opened");
+        row.missing_runs = 2;
+        row.possibly_closed_at = Some("2026-10-16T00:00:00Z".into());
+        save_lifecycle(&conn, &row).unwrap();
+
+        merge_provenance(
+            &conn,
+            "pst_1",
+            &observed("pst_1", "remotive", "abc-1", "2026-10-17T00:00:00Z"),
+            "2026-10-17T00:00:00Z",
+        )
+        .unwrap();
+
+        let row = lifecycle(&conn, "pst_1").unwrap().expect("still tracked");
+        assert!(!row.is_possibly_closed());
     }
 
     /// The run sweep asks for the postings it did and did not see, of the

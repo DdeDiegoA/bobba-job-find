@@ -305,8 +305,8 @@ fn a_posting_past_its_deadline_is_closed_even_when_seen() {
     assert_eq!(row.possibly_closed_at.as_deref(), Some(day(5).as_str()));
 }
 
-/// A posting past its deadline stays closed: the next run that still lists it
-/// does not reopen it or report it as newly closed.
+/// A posting past its deadline stays closed: a re-sighting does not reopen it,
+/// and the next run neither reports it as newly closed nor moves its instant.
 #[test]
 fn a_deadline_closure_is_not_reopened_by_the_source_listing_it() {
     let repo = FakeIngestionRepo::default();
@@ -316,19 +316,21 @@ fn a_deadline_closure_is_not_reopened_by_the_source_listing_it() {
     expired.last_seen = day(5);
     repo.insert_offer(&expired, &provenance(id, &day(5)))
         .expect("stored");
-    finish_run(&repo, &window(&day(5), &day(5))).unwrap();
+    let first = finish_run(&repo, &window(&day(5), &day(5))).unwrap();
+    assert_eq!(first.possibly_closed, vec![id.to_string()]);
 
-    expired.last_seen = day(6);
-    repo.insert_offer(&expired, &provenance(id, &day(6)))
-        .expect("stored");
+    // The source lists it again: a re-sighting, not a new posting.
+    repo.merge_provenance(id, &provenance(id, &day(6)), &day(6))
+        .expect("re-seen");
     let outcome = finish_run(&repo, &window(&day(6), &day(6))).unwrap();
 
     assert_eq!(outcome.possibly_closed, Vec::<String>::new());
-    assert!(
-        repo.lifecycle(id)
-            .unwrap()
-            .expect("tracked")
-            .is_possibly_closed()
+    let row = repo.lifecycle(id).unwrap().expect("tracked");
+    assert!(row.is_possibly_closed());
+    assert_eq!(
+        row.possibly_closed_at.as_deref(),
+        Some(day(5).as_str()),
+        "the closure keeps the instant it was marked at"
     );
 }
 

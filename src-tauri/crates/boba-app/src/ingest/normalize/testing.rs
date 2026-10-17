@@ -9,7 +9,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use boba_domain::dedup::{DedupProbe, probe_matches};
-use boba_domain::posting::lifecycle::{ClosedWarning, PostingLifecycle, is_repost};
+use boba_domain::posting::lifecycle::{
+    ClosedWarning, PostingLifecycle, is_past_deadline, is_repost,
+};
 use boba_domain::posting::{Offer, Provenance};
 use boba_domain::posting_features::{Claim, PendingPosting, PostingFeatures};
 
@@ -185,7 +187,7 @@ impl IngestionRepo for FakeIngestionRepo {
         self.provenance.lock().unwrap().push(provenance.clone());
         // The store does the same two things on a re-sight (S4.4): the posting
         // is present again, and coming back inside the window is a repost.
-        if posting.is_some() {
+        if let Some(posting) = posting {
             let mut rows = self.lifecycle.lock().unwrap();
             if let Some(row) = rows.get_mut(posting_id) {
                 if let Some(disappeared_at) = row.disappeared_at.clone()
@@ -195,7 +197,10 @@ impl IngestionRepo for FakeIngestionRepo {
                 }
                 row.missing_runs = 0;
                 row.disappeared_at = None;
-                row.possibly_closed_at = None;
+                // Deadline closures stay closed; the store does the same.
+                if !is_past_deadline(&posting, now) {
+                    row.possibly_closed_at = None;
+                }
                 row.updated_at = now.to_string();
             }
         }
