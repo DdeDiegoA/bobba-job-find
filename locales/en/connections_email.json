@@ -40,6 +40,7 @@
   "gmail.send_only": "Sending only: Boba never reads your Gmail through this client. Reading Gmail uses IMAP or your own Google client.",
   "gmail.read_needs_client": "Reading Gmail needs your own Google client ID. Add it below, or stay send-only.",
   "gmail.read_local": "Boba reads only the replies about your applications, and keeps them on this device. Nothing else leaves your mailbox.",
+  "gmail.read_testing": "While your Google project is in “Testing”, Google expires the access after 7 days and you will reconnect. Publish your app to stop that.",
   "gmail.connect": "Connect Gmail",
   "scopes.gmail.send": "Send mail as you — nothing else",
   "scopes.gmail.readonly": "Read your mail — only messages that match your applications",

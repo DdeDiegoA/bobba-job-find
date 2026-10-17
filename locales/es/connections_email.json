@@ -40,6 +40,7 @@
   "gmail.send_only": "Solo envío: Boba no lee tu Gmail con este cliente. Para leer Gmail se usa IMAP o tu propio cliente de Google.",
   "gmail.read_needs_client": "Leer Gmail necesita tu propio client ID de Google. Añádelo abajo o quédate solo con el envío.",
   "gmail.read_local": "Boba lee solo las respuestas sobre tus candidaturas y las guarda en este dispositivo. Nada más sale de tu buzón.",
+  "gmail.read_testing": "Mientras tu proyecto de Google esté en «Pruebas», Google caduca el acceso a los 7 días y tendrás que reconectar. Publica tu app para evitarlo.",
   "gmail.connect": "Conectar Gmail",
   "scopes.gmail.send": "Enviar correo como tú — nada más",
   "scopes.gmail.readonly": "Leer tu correo — solo los mensajes que coinciden con tus candidaturas",

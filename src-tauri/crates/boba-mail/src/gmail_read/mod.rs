@@ -56,6 +56,16 @@ const MAX_LIST_BYTES: u64 = 2 * 1024 * 1024;
 /// start with a token that expires mid-flight.
 const REFRESH_SKEW_SECS: u64 = 60;
 
+/// How many times a 429 or 5xx is retried before the pass reports the failure.
+const MAX_RETRIES: usize = 3;
+
+/// The first backoff pause; each retry doubles it.
+const BACKOFF_BASE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The longest pause a `Retry-After` may ask for. A run waits out a rate limit,
+/// not an outage: anything longer is left to the next pass.
+const MAX_RETRY_PAUSE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The Google scopes a Gmail connection asks for, per mode (AC1, NFR-5).
 ///
 /// Send-only asks for `gmail.send` and nothing else. Read+send asks for the read
@@ -160,11 +170,11 @@ impl GmailReader {
             return Ok(Vec::new());
         }
 
-        let token = self.access_token(&account).await?;
-        let ids = self.list_ids(&token, since, limit).await?;
+        let mut token = self.access_token(&account).await?;
+        let ids = self.list_ids(&mut token, &account, since, limit).await?;
         let mut messages = Vec::with_capacity(ids.len());
         for id in ids.into_iter().take(limit) {
-            let body = self.get_message(&token, &id).await?;
+            let body = self.get_message(&mut token, &account, &id).await?;
             if let Some(message) = read_message(&body, now) {
                 messages.push(message);
             }
@@ -181,13 +191,25 @@ impl GmailReader {
             .map_err(|_| MailError::Reauthorize)?
             .ok_or(MailError::Reauthorize)?;
         let secret = GmailSecret::from_json(&stored).map_err(|_| MailError::Reauthorize)?;
-
         if !secret
             .tokens
             .is_expired(oauth::now_unix(), REFRESH_SKEW_SECS)
         {
             return Ok(secret.tokens.access_token);
         }
+        self.renew_access_token(account).await
+    }
+
+    /// Renew the access token from the stored refresh token, whether or not the
+    /// current one looks expired: a provider can retire a token early (a 401 says
+    /// so), and that is the one case the expiry cannot predict.
+    async fn renew_access_token(&self, account: &EmailAccount) -> Result<String, MailError> {
+        let stored = self
+            .secrets
+            .get(&account.secret_ref)
+            .map_err(|_| MailError::Reauthorize)?
+            .ok_or(MailError::Reauthorize)?;
+        let secret = GmailSecret::from_json(&stored).map_err(|_| MailError::Reauthorize)?;
         let refresh = secret
             .tokens
             .refresh_token
@@ -238,7 +260,8 @@ impl GmailReader {
     /// than return a page from the middle of the window.
     async fn list_ids(
         &self,
-        token: &str,
+        token: &mut String,
+        account: &EmailAccount,
         since: i64,
         limit: usize,
     ) -> Result<Vec<String>, MailError> {
@@ -246,7 +269,7 @@ impl GmailReader {
         let mut pages = 0;
         loop {
             let (page, next) = self
-                .list_page(token, since, page_token.as_deref(), SCAN_CHUNK)
+                .list_page(token, account, since, page_token.as_deref(), SCAN_CHUNK)
                 .await?;
             match next {
                 Some(next) => {
@@ -277,7 +300,8 @@ impl GmailReader {
     /// with the token of the page that follows (`None` on the last page).
     async fn list_page(
         &self,
-        token: &str,
+        token: &mut String,
+        account: &EmailAccount,
         since: i64,
         page_token: Option<&str>,
         limit: usize,
@@ -296,7 +320,9 @@ impl GmailReader {
                 query.append_pair("pageToken", page_token);
             }
         }
-        let body = self.request(url.as_str(), token, MAX_LIST_BYTES).await?;
+        let body = self
+            .request(url.as_str(), token, account, MAX_LIST_BYTES)
+            .await?;
         let ids = body
             .get("messages")
             .and_then(Value::as_array)
@@ -319,53 +345,109 @@ impl GmailReader {
     }
 
     /// One message's headers and a bounded text body (`format=full`).
-    async fn get_message(&self, token: &str, id: &str) -> Result<Value, MailError> {
+    async fn get_message(
+        &self,
+        token: &mut String,
+        account: &EmailAccount,
+        id: &str,
+    ) -> Result<Value, MailError> {
         let mut url = url::Url::parse(&format!("{}/", self.endpoints.api_base))
             .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?;
         url.path_segments_mut()
             .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?
             .extend(["users", "me", "messages", id]);
         url.query_pairs_mut().append_pair("format", "full");
-        self.request(url.as_str(), token, MAX_MESSAGE_BYTES).await
+        self.request(url.as_str(), token, account, MAX_MESSAGE_BYTES)
+            .await
     }
 
     /// A GET bounded in bytes and in error detail: no body is echoed (it can
     /// repeat the message), and no token ever appears (AD-13).
-    async fn request(&self, url: &str, token: &str, cap: u64) -> Result<Value, MailError> {
-        let response = self
-            .http
-            .get(url)
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|_| {
-                MailError::Transport("the mail provider could not be reached".to_string())
-            })?;
-        if !response.status().is_success() {
+    async fn request(
+        &self,
+        url: &str,
+        token: &mut String,
+        account: &EmailAccount,
+        cap: u64,
+    ) -> Result<Value, MailError> {
+        let mut renewed = false;
+        let mut attempt = 0;
+        loop {
+            let response = self
+                .http
+                .get(url)
+                .bearer_auth(&*token)
+                .send()
+                .await
+                .map_err(|_| {
+                    MailError::Transport("the mail provider could not be reached".to_string())
+                })?;
+            let status = response.status();
+            if status.is_success() {
+                return read_capped(response, cap).await;
+            }
+
+            // A 401 means the access token went away (revoked, or expired early).
+            // Renew once and repeat; a second 401 is the user's to fix.
+            if status == reqwest::StatusCode::UNAUTHORIZED && !renewed {
+                *token = self.renew_access_token(account).await?;
+                renewed = true;
+                continue;
+            }
+            // A 429 or a 5xx is worth waiting out, within a bound.
+            let retriable =
+                status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+            if retriable && attempt < MAX_RETRIES {
+                let pause = retry_after(&response).unwrap_or_else(|| backoff(attempt));
+                tokio::time::sleep(pause).await;
+                attempt += 1;
+                continue;
+            }
             return Err(MailError::Rejected(format!(
                 "the provider answered HTTP {}",
-                response.status().as_u16()
+                status.as_u16()
             )));
         }
-        let too_large = || MailError::Rejected("the inbox answer is too large".to_string());
-        if response.content_length().is_some_and(|length| length > cap) {
+    }
+}
+
+/// Read a successful answer under a byte cap (a provider may omit or lie about
+/// Content-Length, so the body is read in chunks under a running bound).
+async fn read_capped(response: reqwest::Response, cap: u64) -> Result<Value, MailError> {
+    let too_large = || MailError::Rejected("the inbox answer is too large".to_string());
+    if response.content_length().is_some_and(|length| length > cap) {
+        return Err(too_large());
+    }
+    let mut response = response;
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| MailError::Transport("the inbox answer was cut off".to_string()))?
+    {
+        if body.len() as u64 + chunk.len() as u64 > cap {
             return Err(too_large());
         }
-        let mut response = response;
-        let mut body: Vec<u8> = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| MailError::Transport("the inbox answer was cut off".to_string()))?
-        {
-            if body.len() as u64 + chunk.len() as u64 > cap {
-                return Err(too_large());
-            }
-            body.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice(&body)
-            .map_err(|_| MailError::Rejected("the inbox answer could not be read".to_string()))
+        body.extend_from_slice(&chunk);
     }
+    serde_json::from_slice(&body)
+        .map_err(|_| MailError::Rejected("the inbox answer could not be read".to_string()))
+}
+
+/// The pause a provider asks for, in seconds (`Retry-After`), capped so a run
+/// cannot be parked for hours by one answer.
+fn retry_after(response: &reqwest::Response) -> Option<std::time::Duration> {
+    let header = response.headers().get(reqwest::header::RETRY_AFTER)?;
+    let seconds: u64 = header.to_str().ok()?.trim().parse().ok()?;
+    Some(std::time::Duration::from_secs(seconds).min(MAX_RETRY_PAUSE))
+}
+
+/// The wait before retry `attempt` (0-based): 250 ms, 500 ms, 1 s.
+fn backoff(attempt: usize) -> std::time::Duration {
+    let factor = 1u32
+        .checked_shl(u32::try_from(attempt).unwrap_or(u32::MAX))
+        .unwrap_or(u32::MAX);
+    BACKOFF_BASE.saturating_mul(factor)
 }
 
 /// Map one `users.messages.get` answer onto the pipeline's shape. A message
@@ -1056,6 +1138,219 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&requests[0].body).contains("refresh_token=rt-1"),
             "the stored token is what is presented"
+        );
+    }
+
+    // --- Retries and pacing (S8.5 residuals) --------------------------------
+
+    /// A response script: each request takes the next answer, the last repeats.
+    #[derive(Clone)]
+    struct Script(Arc<ScriptInner>);
+
+    struct ScriptInner {
+        answers: Mutex<Vec<Value>>,
+        cursor: Mutex<usize>,
+    }
+
+    impl Script {
+        fn new(answers: Vec<Value>) -> Self {
+            Self(Arc::new(ScriptInner {
+                answers: Mutex::new(answers),
+                cursor: Mutex::new(0),
+            }))
+        }
+
+        fn next(&self) -> Value {
+            let answers = self.0.answers.lock().expect("answers");
+            let mut cursor = self.0.cursor.lock().expect("cursor");
+            let answer = match answers.get(*cursor) {
+                Some(answer) => answer.clone(),
+                None => answers.last().cloned().unwrap_or_default(),
+            };
+            if *cursor + 1 < answers.len() {
+                *cursor += 1;
+            }
+            answer
+        }
+    }
+
+    impl wiremock::Respond for Script {
+        fn respond(&self, _request: &wiremock::Request) -> ResponseTemplate {
+            let answer = self.next();
+            let status = answer
+                .get("status")
+                .and_then(Value::as_u64)
+                .and_then(|status| u16::try_from(status).ok())
+                .unwrap_or(200);
+            let mut response = ResponseTemplate::new(status);
+            if let Some(header) = answer.get("retry_after").and_then(Value::as_str) {
+                response = response.insert_header("retry-after", header);
+            }
+            if let Some(body) = answer.get("body") {
+                response = response.set_body_json(body.clone());
+            }
+            response
+        }
+    }
+
+    /// A 401 means the access token went away (revoked, or expired early): renew
+    /// once and repeat the request, never loop.
+    #[tokio::test]
+    async fn a_401_renews_the_token_once_and_retries_the_request() {
+        let server = MockServer::start().await;
+        let list = Script::new(vec![
+            json!({"status": 401}),
+            json!({"status": 200, "body": {"messages": [{"id": "m1"}]}}),
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param_is_missing("pageToken"))
+            .respond_with(list.clone())
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "at-2",
+                "expires_in": 3600
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages/m1"))
+            .and(header("authorization", "Bearer at-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "m1",
+                "internalDate": ((NOW - DAY) * 1000).to_string(),
+                "payload": {"mimeType": "text/plain", "body": {"data": encoded("hi")}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let secrets = FakeSecrets::with(REF, stored());
+        let messages = reader(&server, secrets.clone() as Arc<dyn SecretPort>)
+            .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+            .await
+            .expect("read");
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            GmailSecret::from_json(&secrets.value(REF).expect("stored"))
+                .expect("json")
+                .tokens
+                .access_token,
+            "at-2",
+            "the renewed token is what the retry carried and what is stored"
+        );
+    }
+
+    /// A 429 waits the pause the provider asks for, then repeats the request.
+    #[tokio::test]
+    async fn a_429_is_retried_after_the_pause_the_provider_asks_for() {
+        let server = MockServer::start().await;
+        let list = Script::new(vec![
+            json!({"status": 429, "retry_after": "0"}),
+            json!({"status": 200, "body": {"messages": []}}),
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param_is_missing("pageToken"))
+            .respond_with(list)
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let messages = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+        .await
+        .expect("read");
+        assert!(messages.is_empty());
+    }
+
+    /// A 5xx is retried too, with its own bounded backoff.
+    #[tokio::test]
+    async fn a_server_error_is_retried_and_then_reported() {
+        let server = MockServer::start().await;
+        // The first answer is a 503 without Retry-After: the reader backs off and
+        // tries again; the second is the success.
+        let list = Script::new(vec![
+            json!({"status": 503}),
+            json!({"status": 200, "body": {"messages": []}}),
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param_is_missing("pageToken"))
+            .respond_with(list)
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+        .await
+        .expect("read");
+    }
+
+    /// Retries are bounded: a provider that keeps failing is reported, not
+    /// hammered forever.
+    #[tokio::test]
+    async fn retries_are_bounded_and_the_last_status_is_reported() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .respond_with(ResponseTemplate::new(500).insert_header("retry-after", "0"))
+            .mount(&server)
+            .await;
+
+        let error = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+        .await
+        .expect_err("bounded");
+        assert_eq!(
+            error,
+            MailError::Rejected("the provider answered HTTP 500".to_string())
+        );
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(
+            requests.len(),
+            MAX_RETRIES + 1,
+            "one attempt and the bounded retries, nothing more"
+        );
+    }
+
+    /// A 403 is a decision, not a hiccup: it is reported straight away.
+    #[tokio::test]
+    async fn a_403_is_not_retried() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .respond_with(ResponseTemplate::new(403))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let error = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+        .await
+        .expect_err("rejected");
+        assert_eq!(
+            error,
+            MailError::Rejected("the provider answered HTTP 403".to_string())
         );
     }
 

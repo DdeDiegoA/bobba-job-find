@@ -366,6 +366,9 @@ function ConnectGmail() {
         <p className="mt-2 text-xs text-fg-subtle">
           {shownMode === "send_only" ? t("gmail.send_only") : t("gmail.read_local")}
         </p>
+        {shownMode === "read_send" ? (
+          <p className="mt-1 text-xs text-fg-subtle">{t("gmail.read_testing")}</p>
+        ) : null}
       </div>
 
       <label className="flex flex-col gap-1 text-sm text-fg">

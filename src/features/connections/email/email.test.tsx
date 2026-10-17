@@ -208,6 +208,8 @@ describe("connecting Gmail (AC1)", () => {
 
     // The read scope appears, in plain language, only once it can be asked for.
     expect(within(form).getByText(/Read your mail/)).toBeTruthy();
+    // And what a Testing-status Google project means for the connection.
+    expect(within(form).getByText(/expires the access after 7 days/)).toBeTruthy();
 
     fireEvent.click(within(form).getByRole("button", { name: "Connect Gmail" }));
     await waitFor(() =>
