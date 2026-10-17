@@ -277,8 +277,11 @@ impl<C: ClockPort> SessionBoardService<C> {
     /// Record one page load of a run: the local-day counter and the audit row
     /// (S11.1b R1, AD-12).
     ///
-    /// The detail carries the Source and the board page it opened — never a
-    /// cookie, a URL query that could hold a token, or a page body.
+    /// The counter only ever grows for the day: two overlapping runs each read
+    /// it when they opened, so the second write must never lower the total
+    /// (S11.1b review R-a). The detail carries the Source and the board page it
+    /// opened — never a cookie, a URL query that could hold a token, or a page
+    /// body.
     pub fn record_page_load(
         &self,
         source_id: &str,
@@ -286,27 +289,30 @@ impl<C: ClockPort> SessionBoardService<C> {
         loads_today: u32,
     ) -> Result<(), SessionBoardError> {
         self.session_source(source_id)?;
+        let now = self.clock.now_rfc3339();
+        let key = loads_key(source_id, &now);
+        let stored = self
+            .system
+            .setting_get(&key)?
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+        let total = stored.max(loads_today);
         let detail = serde_json::json!({
             "source_id": source_id,
             // R-b (S11.1b review): search keywords and locations stay out of
             // the audit log; the page itself is what the row is about.
             "url": page_url(url),
-            "loads_today": loads_today,
+            "loads_today": total,
         });
         self.audited(
             PAGE_LOAD_ACTION,
             source_id,
             detail,
             || {
-                let now = self.clock.now_rfc3339();
-                self.system.setting_put(
-                    &loads_key(source_id, &now),
-                    &loads_today.to_string(),
-                    &now,
-                )?;
+                self.system.setting_put(&key, &total.to_string(), &now)?;
                 Ok(())
             },
-            |_| serde_json::json!({ "loads_today": loads_today }),
+            |_| serde_json::json!({ "loads_today": total }),
         )?;
         Ok(())
     }
@@ -823,6 +829,25 @@ mod tests {
             h.system.setting_get(&loads_key("linkedin", NOW)).unwrap(),
             Some("3".to_string()),
             "the day's counter is what the next run reads"
+        );
+    }
+
+    #[test]
+    fn an_overlapping_run_never_lowers_the_days_total() {
+        // R-a (S11.1b review): both runs read the counter when they opened; a
+        // stale total must not overwrite the newer one.
+        let h = harness(CookieProtection::MacosKeychain);
+        let key = loads_key("linkedin", NOW);
+        h.system
+            .setting_put(&key, "5", NOW)
+            .expect("the day already spent 5");
+        h.service
+            .record_page_load("linkedin", "https://www.linkedin.com/jobs/search/", 3)
+            .unwrap();
+        assert_eq!(
+            h.system.setting_get(&key).unwrap(),
+            Some("5".to_string()),
+            "the stale write did not lower the day's total"
         );
     }
 
