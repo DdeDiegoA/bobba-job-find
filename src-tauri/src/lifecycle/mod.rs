@@ -39,6 +39,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     if let Err(error) = tray::attach(app, ui_locale(app)) {
         tracing::warn!(%error, "tray menu not installed");
     }
+    // The one in-core scheduler (S5.1, AD-18): a login or a wake ticks at once,
+    // which is how a slot missed while asleep still runs (FR-43).
+    crate::scheduler::install(app);
 }
 
 /// Bring Boba to the front (AC3): "Open" from the tray, and the second-instance

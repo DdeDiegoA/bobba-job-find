@@ -711,6 +711,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tauri-specta",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-util",
  "tracing",

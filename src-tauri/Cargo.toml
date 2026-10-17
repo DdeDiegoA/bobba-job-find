@@ -48,6 +48,9 @@ boba-sources = { path = "crates/boba-sources" }
 url = { workspace = true }
 # The OS locale, for the core-side tray strings (S1.6, AD-17/AD-21).
 sys-locale = { workspace = true }
+# The scheduler's run times are local wall clock (S5.1, FR-41): `local-offset`
+# gives it the current UTC offset, so a DST change moves the run with the clock.
+time = { workspace = true, features = ["local-offset"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
