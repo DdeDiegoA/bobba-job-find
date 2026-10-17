@@ -93,7 +93,9 @@ impl RunControl for SessionRunControl {
 /// Infallible on purpose: a run must keep going when the browser profile or a
 /// port is not there yet. The fallbacks fail every call with the reason, so a
 /// session board is one failed Source in the report — never the run's end.
-pub fn controls(app: &tauri::AppHandle) -> (Arc<dyn SessionPages>, Arc<dyn RunControl>) {
+pub fn controls<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> (Arc<dyn SessionPages>, Arc<dyn RunControl>) {
     match build(app) {
         Ok(pair) => pair,
         Err(error) => {
@@ -107,7 +109,9 @@ pub fn controls(app: &tauri::AppHandle) -> (Arc<dyn SessionPages>, Arc<dyn RunCo
     }
 }
 
-fn build(app: &tauri::AppHandle) -> AppResult<(Arc<dyn SessionPages>, Arc<dyn RunControl>)> {
+fn build<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<(Arc<dyn SessionPages>, Arc<dyn RunControl>)> {
     let base = app.path().app_data_dir().map_err(|error| {
         AppError::new(ErrorCode::Internal, "errors.session.store")
             .with_detail("reason", error.to_string())
