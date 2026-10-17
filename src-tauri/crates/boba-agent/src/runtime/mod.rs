@@ -25,6 +25,10 @@ use crate::supervisor::{CommandSpec, Stream, SupervisedProcess};
 /// How long to wait for a line before re-checking cancellation and limits.
 const POLL: Duration = Duration::from_millis(100);
 
+/// The network-activity label for a run (S10.4): the CLI's own provider is not
+/// a destination Boba chooses, so the row says what it is.
+const AGENT_CLI_LABEL: &str = "agent-cli";
+
 /// The concrete CLI invocation for a task. The runtime adds the run's
 /// workspace as `cwd` and its endpoint and token to `env` (AC1); callers that
 /// build the command themselves (tests, the composition root) pass one of
@@ -214,11 +218,21 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         let cancel = CancelToken::new();
         let (tx, events) = std::sync::mpsc::channel();
 
-        // The network-activity view (S10.4, NFR-1): which CLI ran, when. The
-        // CLI's own provider is its business; the label is never a URL.
-        let cli = task.cli.clone();
-        if !cli.trim().is_empty() {
-            boba_app::network_log::record_host(boba_app::network_log::Purpose::AgentCli, &cli);
+        // The network-activity view (S10.4, NFR-1): the run's destination is
+        // "agent CLI" — the provider is whatever the CLI itself is configured
+        // with, so Boba never claims a host it did not contact. Which CLI ran
+        // rides along as a note.
+        boba_app::network_log::record_host(
+            boba_app::network_log::Purpose::AgentCli,
+            AGENT_CLI_LABEL,
+        );
+        let cli = task.cli.trim();
+        if !cli.is_empty() {
+            boba_app::network_log::annotate(
+                boba_app::network_log::Purpose::AgentCli,
+                AGENT_CLI_LABEL,
+                cli,
+            );
         }
         // Open the run before spawning so a crash can be detected (AD-16).
         let _ = self.repo.start_run(NewAgentRun {

@@ -224,6 +224,43 @@ impl NetworkLog {
         Ok(())
     }
 
+    /// Record a contact the app learned about after the fact (the model
+    /// download's completion time, read back from the settings store): the row
+    /// gets that time, adds no request to this session's count, and keeps the
+    /// newest of the two if it is already there.
+    pub fn observe_at(
+        &self,
+        purpose: Purpose,
+        label: &str,
+        at: &str,
+        note: Option<&str>,
+    ) -> Result<(), NetworkLogError> {
+        let name = clean_label(label)?;
+        let mut entries = self.entries.lock().unwrap_or_else(|p| p.into_inner());
+        match entries.get_mut(&(purpose, name.clone())) {
+            Some(entry) => {
+                if at > entry.last_seen.as_str() {
+                    entry.last_seen = at.to_string();
+                }
+                if let Some(note) = note {
+                    entry.note = Some(note.to_string());
+                }
+            }
+            None => {
+                entries.insert(
+                    (purpose, name),
+                    Entry {
+                        last_seen: at.to_string(),
+                        requests: 0,
+                        note: note.map(str::to_string),
+                    },
+                );
+                trim(&mut entries);
+            }
+        }
+        Ok(())
+    }
+
     /// Add a note to a recorded row (the model id, the account label).
     pub fn annotate(&self, purpose: Purpose, label: &str, note: &str) {
         let Ok(name) = clean_label(label) else {
@@ -366,6 +403,12 @@ pub fn record_host(purpose: Purpose, label: &str) {
     let _ = global().record_host(purpose, label, &now);
 }
 
+/// Record a contact learned after the fact (S6.9's model download). Best
+/// effort, like every record: the view never fails an action.
+pub fn observe(purpose: Purpose, label: &str, at: &str, note: Option<&str>) {
+    let _ = global().observe_at(purpose, label, at, note);
+}
+
 /// Attach a non-secret note to the last recorded row. Best effort.
 pub fn annotate(purpose: Purpose, label: &str, note: &str) {
     global().annotate(purpose, label, note);
@@ -403,6 +446,33 @@ mod tests {
         let json = serde_json::to_string(&activity).expect("json");
         assert!(!json.contains("token"));
         assert!(!json.contains("/v1/boards"));
+    }
+
+    #[test]
+    fn no_query_no_token_and_no_path_ever_lands_in_the_log() {
+        let log = NetworkLog::new();
+        log.record(
+            Purpose::Email,
+            "https://graph.microsoft.com/v1.0/me/messages?$filter=from/emailAddress/address eq 'me@example.com'&access_token=SECRET",
+        )
+        .expect("valid");
+        log.record(
+            Purpose::Fx,
+            "https://api.frankfurter.dev/v1/latest?base=EUR&api_key=SECRET",
+        )
+        .expect("valid");
+
+        let json = serde_json::to_string(&log.snapshot(&[])).expect("json");
+        for secret in [
+            "SECRET",
+            "access_token",
+            "api_key",
+            "filter",
+            "me@example.com",
+        ] {
+            assert!(!json.contains(secret), "{secret} must never be recorded");
+        }
+        assert!(json.contains("graph.microsoft.com"));
     }
 
     #[test]

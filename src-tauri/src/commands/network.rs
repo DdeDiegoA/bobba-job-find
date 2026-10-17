@@ -76,15 +76,19 @@ pub fn network_activity(app: AppHandle) -> AppResult<NetworkActivity> {
         declared.push(Declared::new(Purpose::Update, UPDATE_HOST).map_err(declared_error)?);
     }
 
-    // The optional model download (S6.9) knows when it finished, so that row
-    // carries a real time even though nothing is re-downloaded this session.
+    // The optional model download (S6.9) already recorded when it finished, so
+    // it enters the log as an observed contact with a real time rather than as
+    // a configured row.
     if let Ok(embeddings) = wiring::port::<EmbeddingsService>(&app) {
         for entry in embeddings.network_activity().unwrap_or_default() {
-            declared.push(
-                Declared::new(Purpose::ModelDownload, MODEL_HOST)
-                    .map_err(declared_error)?
-                    .with_note(&entry.model_id)
-                    .with_last_seen(&entry.downloaded_at),
+            if entry.downloaded_at.trim().is_empty() {
+                continue;
+            }
+            network_log::observe(
+                Purpose::ModelDownload,
+                MODEL_HOST,
+                &entry.downloaded_at,
+                Some(&entry.model_id),
             );
         }
     }
