@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use boba_app::apply::engine::ApplyEngine;
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::cli::CliInstallsPort;
 use boba_app::ports::mail::MailPort;
@@ -19,6 +20,7 @@ use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::outbox::OutboxRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
@@ -67,6 +69,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     }
     // The apply area owns `application` + `status_event` (S9.1).
     mount_port::<dyn ApplyRepo>(app, store.clone());
+    // The apply outbox owns `apply_attempt` (S9.3): the evidence an Email Apply
+    // retry reads before it sends again.
+    mount_port::<dyn OutboxRepo>(app, store.clone());
     // The scoring owner reads `score_card` (S6.4 is its first reader: the Inbox
     // shows the newest card per Offer; the run slices write them).
     mount_port::<dyn ScoringRepo>(app, store.clone());
@@ -91,5 +96,36 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The detection seam (S3.2): the engine step's probe refreshes the
     // `cli_install` evidence ADR-010's gate reads (the step owns the choice).
     mount_port(app, Arc::new(agent::EngineProbe::new(store.clone())));
+    // A send that died mid-flight leaves `apply_attempt` pending (S9.3, AC2):
+    // nothing else resolves it, and the next send would refuse forever. This
+    // startup pass turns it `uncertain` — which the user's confirmation can
+    // clear — and closes its audit intent as AD-12 prescribes.
+    recover_interrupted_sends(app);
     // slices append ONE line above this comment; never reorder/remove
+}
+
+/// The Email Apply engine, built from the ports just mounted (startup pass only).
+fn recovery_engine<R: Runtime>(app: &AppHandle<R>) -> boba_app::error::AppResult<ApplyEngine> {
+    Ok(ApplyEngine::new(
+        super::port::<dyn ApplyRepo>(app)?,
+        super::port::<dyn DocumentsRepo>(app)?,
+        super::port::<dyn ProfileRepo>(app)?,
+        super::port::<dyn OutboxRepo>(app)?,
+        super::port::<dyn SystemRepo>(app)?,
+        super::port::<dyn MailPort>(app)?,
+        Arc::new(boba_app::system::SystemClock),
+    ))
+}
+
+/// Reconcile the sends a crash interrupted; a launch that cannot do it leaves
+/// the rows for the next one rather than failing to start.
+fn recover_interrupted_sends<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(engine) = recovery_engine(app) else {
+        return;
+    };
+    match engine.recover() {
+        Ok(0) => {}
+        Ok(recovered) => tracing::info!(recovered, "apply: interrupted sends reconciled"),
+        Err(error) => tracing::warn!(key = error.message_key(), "apply: reconcile failed"),
+    }
 }

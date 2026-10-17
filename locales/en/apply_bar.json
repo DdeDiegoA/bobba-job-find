@@ -26,6 +26,22 @@
     "copy": "Copy",
     "copied": "Copied"
   },
+  "email": {
+    "title": "Send by email",
+    "loading": "Preparing the email…",
+    "unavailable": "The email draft could not be prepared.",
+    "to": "To",
+    "from": "Send from",
+    "no_account": "Connect a mailbox in Connections to send applications.",
+    "subject": "Subject",
+    "body": "Message",
+    "attachments": "Attachments",
+    "no_attachments": "No verified PDFs yet — send after rendering your documents.",
+    "send": "Send application",
+    "send_anyway": "Send anyway",
+    "not_ready": "Fix the documents below in the Studio before sending.",
+    "sent": "Sent. Your application moved to Applied (message {id})."
+  },
   "pending": "Not verified yet: {kinds}. Fix the checks and render them in the Studio.",
   "kinds": {
     "cv": "CV",

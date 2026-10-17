@@ -9,6 +9,7 @@ pub mod apply;
 pub mod documents;
 pub mod email;
 pub mod ingestion;
+pub mod outbox;
 pub mod profile;
 pub mod scoring;
 pub mod sources;
