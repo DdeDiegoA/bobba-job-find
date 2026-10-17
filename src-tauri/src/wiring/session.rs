@@ -89,7 +89,25 @@ impl RunControl for SessionRunControl {
 
 /// The two run-side handles a daily search hands to the Session Board adapters
 /// (S11.1b): the user's Chrome, and the core gate/audit/pause.
-pub fn run_side(app: &tauri::AppHandle) -> AppResult<(Arc<dyn SessionPages>, Arc<dyn RunControl>)> {
+///
+/// Infallible on purpose: a run must keep going when the browser profile or a
+/// port is not there yet. The fallbacks fail every call with the reason, so a
+/// session board is one failed Source in the report — never the run's end.
+pub fn controls(app: &tauri::AppHandle) -> (Arc<dyn SessionPages>, Arc<dyn RunControl>) {
+    match build(app) {
+        Ok(pair) => pair,
+        Err(error) => {
+            let reason = error.to_string();
+            tracing::warn!(%reason, "session boards left out of the run");
+            (
+                Arc::new(UnavailablePages(reason.clone())),
+                Arc::new(UnavailableControl(reason)),
+            )
+        }
+    }
+}
+
+fn build(app: &tauri::AppHandle) -> AppResult<(Arc<dyn SessionPages>, Arc<dyn RunControl>)> {
     let base = app.path().app_data_dir().map_err(|error| {
         AppError::new(ErrorCode::Internal, "errors.session.store")
             .with_detail("reason", error.to_string())
@@ -108,4 +126,34 @@ pub fn run_side(app: &tauri::AppHandle) -> AppResult<(Arc<dyn SessionPages>, Arc
     let system = wiring::port::<dyn SystemRepo>(app)?;
     let control: Arc<dyn RunControl> = SessionRunControl::new(service, system);
     Ok((pages, control))
+}
+
+/// A [`SessionPages`] that answers every call with why it is not there.
+struct UnavailablePages(String);
+
+impl SessionPages for UnavailablePages {
+    fn read(&self, _source_id: &str, _url: &str, _script: &str) -> Result<String, String> {
+        Err(self.0.clone())
+    }
+
+    fn close(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A [`RunControl`] that refuses every step with why it is not there.
+struct UnavailableControl(String);
+
+impl RunControl for UnavailableControl {
+    fn board(&self, _source_id: &str) -> Result<(BoardView, u32), String> {
+        Err(self.0.clone())
+    }
+
+    fn page_loaded(&self, _source_id: &str, _url: &str, _cap: u32) -> Result<LoadSpend, String> {
+        Err(self.0.clone())
+    }
+
+    fn pause(&self, _source_id: &str, _kind: ChallengeKind) -> Result<(), String> {
+        Err(self.0.clone())
+    }
 }

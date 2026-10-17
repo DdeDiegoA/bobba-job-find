@@ -104,17 +104,12 @@ pub async fn sources_catalogue(app: tauri::AppHandle) -> AppResult<Vec<SourceTil
     // The Session Board Sources are seeded the same lazy way, so Connections
     // and Settings → Privacy can list them before the per-Source opt-in
     // (S11.1b, FR-30). Their rows stay disabled until that opt-in.
-    for manifest in [
-        boba_sources::session::linkedin::manifest(),
-        boba_sources::session::indeed::manifest(),
-    ] {
+    for record in boba_sources::session::records(&now) {
         if sources
-            .get_source(&manifest.id)
+            .get_source(&record.id)
             .map_err(store_error)?
             .is_none()
         {
-            let mut record = record_from_manifest(&manifest, &now);
-            record.enabled = false;
             sources.upsert_source(&record).map_err(store_error)?;
         }
     }
