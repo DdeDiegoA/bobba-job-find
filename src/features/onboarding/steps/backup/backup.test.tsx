@@ -22,11 +22,11 @@ const status = (over: Partial<BackupStatusView> = {}): BackupStatusView => ({
   ...over,
 });
 
-function renderStep(setAnswer = vi.fn()) {
+function renderStep(setAnswer = vi.fn(), answers: Record<string, unknown> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <BackupStep answers={{}} setAnswer={setAnswer} />
+      <BackupStep answers={answers} setAnswer={setAnswer} />
     </QueryClientProvider>,
   );
 }
@@ -42,6 +42,16 @@ describe("Backup step — the forced recovery backup (AC3, FR-111, ADR-009)", ()
     renderStep(setAnswer);
     expect(await screen.findByText(/Create a recovery backup to finish setup/)).toBeTruthy();
     expect(backupStepIsValid({})).toBe(false);
+    await waitFor(() => expect(setAnswer).toHaveBeenCalledWith("recoveryPresent", false));
+  });
+
+  it("never trusts a stored 'backup exists' answer the core has not confirmed", async () => {
+    // A resumed draft can carry recoveryPresent: true; until backup_status
+    // answers, Next must stay blocked (the core refuses completion too).
+    vi.mocked(commands.backupStatus).mockReturnValue(new Promise(() => undefined));
+    const setAnswer = vi.fn();
+    renderStep(setAnswer, { recoveryPresent: true });
+
     await waitFor(() => expect(setAnswer).toHaveBeenCalledWith("recoveryPresent", false));
   });
 

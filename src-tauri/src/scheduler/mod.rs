@@ -152,12 +152,15 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
 /// backup exists, because an update can lose the keychain entry that unlocks
 /// this machine's data. The backup port is mounted by every production wiring;
 /// an app that has none (tests, headless) has no requirement to read.
+///
+/// A mounted port whose status cannot be read fails **closed** (S3.8 review
+/// F1): a backup-state error must never let a run start unbacked.
 fn recovery_backup_required<R: Runtime>(app: &AppHandle<R>) -> bool {
     match wiring::port::<dyn BackupPort>(app) {
         Ok(port) => port
             .status()
             .map(|status| status.recovery_required)
-            .unwrap_or(false),
+            .unwrap_or(true),
         Err(_) => false,
     }
 }
@@ -711,7 +714,10 @@ mod tests {
         let app = mock_app();
         let handle = app.handle().clone();
         // No backup yet: the run gate must refuse before any job is recorded.
-        handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup { required: true }));
+        handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: true,
+            unreadable: false,
+        }));
 
         assert!(recovery_backup_required(&handle));
         let error = run_now(&handle).expect_err("a run without a recovery backup");
@@ -721,7 +727,10 @@ mod tests {
         // jobs repo, which is the next thing run_now reads).
         let fresh = mock_app();
         let fresh_handle = fresh.handle().clone();
-        fresh_handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup { required: false }));
+        fresh_handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: false,
+            unreadable: false,
+        }));
         assert!(!recovery_backup_required(&fresh_handle));
     }
 
@@ -733,13 +742,35 @@ mod tests {
         assert!(!recovery_backup_required(app.handle()));
     }
 
+    #[test]
+    fn an_unreadable_backup_status_keeps_the_run_gate_closed() {
+        use tauri::Manager;
+        use tauri::test::mock_app;
+
+        let app = mock_app();
+        let handle = app.handle().clone();
+        // The port is there but cannot say whether a backup exists: fail closed.
+        handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: false,
+            unreadable: true,
+        }));
+
+        assert!(recovery_backup_required(&handle));
+        let error = run_now(&handle).expect_err("a run with an unreadable backup status");
+        assert_eq!(error.message_key, "errors.backup.recovery_required");
+    }
+
     /// A backup port that only answers the recovery requirement.
     struct FakeBackup {
         required: bool,
+        unreadable: bool,
     }
 
     impl BackupPort for FakeBackup {
         fn status(&self) -> Result<BackupStatus, BackupError> {
+            if self.unreadable {
+                return Err(BackupError::Internal);
+            }
             Ok(BackupStatus {
                 recovery_created_at: None,
                 recovery_path: None,

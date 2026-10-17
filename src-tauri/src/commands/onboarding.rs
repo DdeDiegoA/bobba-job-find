@@ -7,6 +7,7 @@
 //! Registration lives in [`crate::ipc::command_list`] (AD-3, merge=union).
 
 use boba_app::error::{AppError, AppResult};
+use boba_app::ports::backup::BackupPort;
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;
@@ -36,11 +37,16 @@ pub fn onboarding_status(app: tauri::AppHandle) -> AppResult<OnboardingStatus> {
 
 /// Record that setup finished. Idempotent: the first completion time wins, so
 /// a retried call (or a double effect) never moves it.
+///
+/// AC3 is enforced here, not only in the wizard: setup cannot be marked
+/// complete while `backup_status` says a recovery backup is required (S3.8
+/// review F2). An unreadable backup status refuses too, for the same reason.
 #[tauri::command]
 #[specta::specta]
 pub fn onboarding_complete(app: tauri::AppHandle) -> AppResult<OnboardingStatus> {
     let system = wiring::port::<dyn SystemRepo>(&app)?;
-    complete(system.as_ref(), &SystemClock.now_rfc3339())
+    let backup = wiring::port::<dyn BackupPort>(&app)?;
+    complete(system.as_ref(), backup.as_ref(), &SystemClock.now_rfc3339())
 }
 
 fn read(system: &dyn SystemRepo) -> AppResult<OnboardingStatus> {
@@ -51,7 +57,20 @@ fn read(system: &dyn SystemRepo) -> AppResult<OnboardingStatus> {
     })
 }
 
-fn complete(system: &dyn SystemRepo, now: &str) -> AppResult<OnboardingStatus> {
+fn complete(
+    system: &dyn SystemRepo,
+    backup: &dyn BackupPort,
+    now: &str,
+) -> AppResult<OnboardingStatus> {
+    // AC3: no recovery backup, no completion — fail closed when the core
+    // cannot say (S3.8 review F1/F2).
+    let required = backup
+        .status()
+        .map_err(|error| AppError::internal(error.message_key()))?
+        .recovery_required;
+    if required {
+        return Err(AppError::conflict("errors.backup.recovery_required"));
+    }
     if let Some(completed_at) = system.setting_get(COMPLETED_KEY).map_err(store_error)? {
         return Ok(OnboardingStatus {
             completed: true,
@@ -79,6 +98,9 @@ mod tests {
     use boba_domain::audit::{AuditOutcome, AuditRow, ChainStatus};
 
     use super::*;
+    use boba_app::ports::backup::{
+        BackupError, BackupMeta, BackupPort, BackupStatus, ResetReport, RestoreReport,
+    };
     use boba_app::ports::repo::system::{NewIntent, SettingRecord, SystemRepoError};
 
     /// A `setting` table with every other area unimplemented.
@@ -167,8 +189,12 @@ mod tests {
     #[test]
     fn finishing_is_recorded_and_the_first_time_wins() {
         let system = FakeSystem::default();
+        let backup = FakeBackup {
+            required: false,
+            unreadable: false,
+        };
 
-        let first = complete(&system, "2026-10-17T09:00:00Z").expect("complete");
+        let first = complete(&system, &backup, "2026-10-17T09:00:00Z").expect("complete");
         assert_eq!(
             first,
             OnboardingStatus {
@@ -177,8 +203,82 @@ mod tests {
             }
         );
         // A second call never moves the completion time.
-        let again = complete(&system, "2026-10-18T10:00:00Z").expect("complete again");
+        let again = complete(&system, &backup, "2026-10-18T10:00:00Z").expect("complete again");
         assert_eq!(again.completed_at.as_deref(), Some("2026-10-17T09:00:00Z"));
         assert_eq!(read(&system).expect("status"), again);
+    }
+
+    #[test]
+    fn finishing_is_refused_without_a_recovery_backup() {
+        let system = FakeSystem::default();
+        let backup = FakeBackup {
+            required: true,
+            unreadable: false,
+        };
+
+        let error = complete(&system, &backup, "2026-10-17T09:00:00Z").expect_err("no backup");
+        assert_eq!(error.message_key, "errors.backup.recovery_required");
+        // Refused means refused: no completion row was written (AC3).
+        assert!(!read(&system).expect("status").completed);
+        assert!(system.settings.lock().unwrap().get(COMPLETED_KEY).is_none());
+    }
+
+    #[test]
+    fn an_unreadable_backup_status_blocks_completion() {
+        let system = FakeSystem::default();
+        let backup = FakeBackup {
+            required: false,
+            unreadable: true,
+        };
+
+        let error = complete(&system, &backup, "2026-10-17T09:00:00Z").expect_err("unreadable");
+        assert_eq!(error.message_key, "errors.backup.internal");
+        assert!(!read(&system).expect("status").completed);
+    }
+
+    /// A backup port that only answers the recovery requirement.
+    struct FakeBackup {
+        required: bool,
+        unreadable: bool,
+    }
+
+    impl BackupPort for FakeBackup {
+        fn status(&self) -> Result<BackupStatus, BackupError> {
+            if self.unreadable {
+                return Err(BackupError::Internal);
+            }
+            Ok(BackupStatus {
+                recovery_created_at: None,
+                recovery_path: None,
+                recovery_present: !self.required,
+                recovery_required: self.required,
+            })
+        }
+
+        fn create(
+            &self,
+            _dest: &std::path::Path,
+            _passphrase: &str,
+            _now: &str,
+        ) -> Result<BackupMeta, BackupError> {
+            Err(BackupError::Internal)
+        }
+
+        fn restore(
+            &self,
+            _src: &std::path::Path,
+            _passphrase: &str,
+        ) -> Result<RestoreReport, BackupError> {
+            Err(BackupError::Internal)
+        }
+
+        fn reset(
+            &self,
+            _service: &str,
+            _profiles: &[std::path::PathBuf],
+            _confirmation: &str,
+        ) -> Result<ResetReport, BackupError> {
+            Err(BackupError::Internal)
+        }
     }
 }

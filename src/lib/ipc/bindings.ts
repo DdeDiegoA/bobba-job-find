@@ -604,6 +604,10 @@ export const commands = {
   /**
    *  Record that setup finished. Idempotent: the first completion time wins, so
    *  a retried call (or a double effect) never moves it.
+   *
+   *  AC3 is enforced here, not only in the wizard: setup cannot be marked
+   *  complete while `backup_status` says a recovery backup is required (S3.8
+   *  review F2). An unreadable backup status refuses too, for the same reason.
    */
   onboardingComplete: () =>
     typedError<OnboardingStatus, AppError_Serialize>(__TAURI_INVOKE("onboarding_complete")),

@@ -39,10 +39,11 @@ export default function BackupStep({ answers, setAnswer }: StepProps) {
 
   // The wizard validator reads answers only, so the core's verdict is copied
   // there once per real change (never in a loop: equal values do not setState).
+  // Until the core answers — including when it cannot — the answer is "no": a
+  // resumed draft's stored `true` must never unlock Next on its own (AC3).
   useEffect(() => {
-    if (!data) return;
     if (answers.recoveryPresent !== present) setAnswer("recoveryPresent", present);
-  }, [data, answers.recoveryPresent, present, setAnswer]);
+  }, [answers.recoveryPresent, present, setAnswer]);
 
   const choose = async () => {
     const path = await save({
