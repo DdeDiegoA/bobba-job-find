@@ -14,6 +14,7 @@ pub mod ingest;
 pub mod jobs;
 pub mod narration;
 pub mod network_log;
+pub mod offers;
 pub mod ports;
 pub mod posting_features;
 pub mod profile;

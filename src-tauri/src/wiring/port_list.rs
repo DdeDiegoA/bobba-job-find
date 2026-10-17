@@ -17,6 +17,7 @@ use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
+use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::secret::SecretPort;
@@ -59,6 +60,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     }
     // The apply area owns `application` + `status_event` (S9.1).
     mount_port::<dyn ApplyRepo>(app, store.clone());
+    // The scoring owner reads `score_card` (S6.4 is its first reader: the Inbox
+    // shows the newest card per Offer; the run slices write them).
+    mount_port::<dyn ScoringRepo>(app, store.clone());
     // The one outbound HTTP client (AD-10): the manual intake fetch (S4.7) is
     // its first caller, and the source adapters share this instance. Mounted as
     // the concrete type: there is no trait to abstract (one client, one

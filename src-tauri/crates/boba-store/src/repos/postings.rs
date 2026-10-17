@@ -213,6 +213,28 @@ pub fn get_offer(conn: &Connection, id: &str) -> Result<Option<Offer>, StoreErro
         .optional()?)
 }
 
+/// One page of the whole table, newest first (S6.4, FR-63). `id` breaks a tie so
+/// two postings seen in the same second keep a stable order across pages.
+pub fn offers(conn: &Connection, limit: usize, offset: usize) -> Result<Vec<Offer>, StoreError> {
+    let sql = format!("{SELECT} ORDER BY first_seen DESC, id ASC LIMIT ?1 OFFSET ?2");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit as i64, offset as i64], row)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// The Sources one posting was seen on, each once (AD-19, FR-64). The card shows
+/// where an Offer came from, not each observation's payload; the order is by
+/// source id so two reads of the same rows draw the same line (a re-seen source
+/// refreshes its row, so "first seen" is not a column to sort by).
+pub fn offer_sources(conn: &Connection, posting_id: &str) -> Result<Vec<String>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT source_id FROM posting_source WHERE posting_id = ?1 \
+         GROUP BY source_id ORDER BY source_id",
+    )?;
+    let rows = stmt.query_map(params![posting_id], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn provenance_for(conn: &Connection, posting_id: &str) -> Result<Vec<Provenance>, StoreError> {
     let mut stmt = conn.prepare(
         "SELECT posting_id, source_id, external_id, url, raw, fetched_at FROM posting_source \
@@ -470,6 +492,17 @@ impl IngestionRepo for Store {
         self.read(move |conn| get_offer(conn, &id)).map_err(map_err)
     }
 
+    fn offers(&self, limit: usize, offset: usize) -> Result<Vec<Offer>, IngestionRepoError> {
+        self.read(move |conn| offers(conn, limit, offset))
+            .map_err(map_err)
+    }
+
+    fn offer_sources(&self, posting_id: &str) -> Result<Vec<String>, IngestionRepoError> {
+        let posting_id = posting_id.to_string();
+        self.read(move |conn| offer_sources(conn, &posting_id))
+            .map_err(map_err)
+    }
+
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| provenance_for(conn, &posting_id))
@@ -651,6 +684,67 @@ mod tests {
             description_simhash(LONG),
             "and the simhash later runs compare against"
         );
+    }
+
+    // S6.4/FR-63: the Inbox reads a page, newest first, with a stable tiebreak.
+    #[test]
+    fn a_page_of_offers_is_newest_first_and_stable() {
+        let conn = connection();
+        for (id, seen) in [
+            ("pst_old", "2026-10-01T00:00:00Z"),
+            ("pst_new", "2026-10-03T00:00:00Z"),
+            ("pst_mid", "2026-10-02T00:00:00Z"),
+        ] {
+            let mut stored = offer(id);
+            stored.first_seen = seen.into();
+            insert_offer(&conn, &stored, &provenance(id, "remotive", id)).unwrap();
+        }
+        // Same second, different ids: `id` decides, so pages never drift.
+        for id in ["pst_tie_a", "pst_tie_b"] {
+            let mut stored = offer(id);
+            stored.first_seen = "2026-10-04T00:00:00Z".into();
+            insert_offer(&conn, &stored, &provenance(id, "remotive", id)).unwrap();
+        }
+
+        let ids = |offers: Vec<Offer>| -> Vec<String> {
+            offers.into_iter().map(|offer| offer.id).collect()
+        };
+        assert_eq!(
+            ids(offers(&conn, 10, 0).unwrap()),
+            vec!["pst_tie_a", "pst_tie_b", "pst_new", "pst_mid", "pst_old"]
+        );
+        assert_eq!(
+            ids(offers(&conn, 2, 0).unwrap()),
+            vec!["pst_tie_a", "pst_tie_b"]
+        );
+        assert_eq!(
+            ids(offers(&conn, 2, 2).unwrap()),
+            vec!["pst_new", "pst_mid"]
+        );
+        assert!(offers(&conn, 10, 10).unwrap().is_empty());
+    }
+
+    // S6.4/FR-64: the card's Sources line — one entry per source, without
+    // reading any payload (AD-19).
+    #[test]
+    fn offer_sources_lists_each_source_once() {
+        let conn = connection();
+        let stored = offer("pst_1");
+        insert_offer(&conn, &stored, &provenance("pst_1", "remotive", "abc-1")).unwrap();
+        let mut second = provenance("pst_1", "himalayas", "him-9");
+        second.fetched_at = "2026-10-16T01:00:00Z".into();
+        merge_provenance(&conn, "pst_1", &second, "2026-10-16T01:00:00Z").unwrap();
+        // The same source seen again refreshes its row; it is still one Source.
+        let mut again = provenance("pst_1", "remotive", "abc-1");
+        again.fetched_at = "2026-10-16T02:00:00Z".into();
+        merge_provenance(&conn, "pst_1", &again, "2026-10-16T02:00:00Z").unwrap();
+
+        assert_eq!(
+            offer_sources(&conn, "pst_1").unwrap(),
+            vec!["himalayas".to_string(), "remotive".to_string()],
+            "each source once, in source-id order"
+        );
+        assert!(offer_sources(&conn, "pst_missing").unwrap().is_empty());
     }
 
     #[test]

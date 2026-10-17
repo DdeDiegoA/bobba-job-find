@@ -1,1 +1,16 @@
-{}
+{
+  "title": "Today",
+  "matches.title": "Matches",
+  "matches.loading": "Loading your matches…",
+  "matches.error.load": "Boba could not load your matches.",
+  "matches.retry": "Try again",
+  "matches.empty": "No matches yet",
+  "matches.empty.hint": "Run a search and the Offers closest to you land here.",
+  "matches.open_inbox": "Open Inbox",
+  "matches.top": "Closest to you",
+  "matches.fit": "Fit {fit}",
+  "matches.ranking_soon": "Ranking starts with your next run.",
+  "band.strong": "Strong",
+  "band.good": "Good",
+  "band.moderate": "Moderate"
+}

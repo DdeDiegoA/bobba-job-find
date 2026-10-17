@@ -100,6 +100,30 @@ impl IngestionRepo for FakeIngestionRepo {
         Ok(self.offers.lock().unwrap().get(id).cloned())
     }
 
+    /// The fake holds the whole table, so a page is the same sort the store's
+    /// `ORDER BY first_seen DESC, id ASC` gives, plus a window.
+    fn offers(&self, limit: usize, offset: usize) -> Result<Vec<Offer>, IngestionRepoError> {
+        let mut all: Vec<Offer> = self.offers.lock().unwrap().values().cloned().collect();
+        all.sort_by(|a, b| b.first_seen.cmp(&a.first_seen).then(a.id.cmp(&b.id)));
+        Ok(all.into_iter().skip(offset).take(limit).collect())
+    }
+
+    /// One entry per Source, in source-id order (as the store's
+    /// `GROUP BY source_id ORDER BY source_id` gives them).
+    fn offer_sources(&self, posting_id: &str) -> Result<Vec<String>, IngestionRepoError> {
+        let mut sources: Vec<String> = self
+            .provenance
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.posting_id == posting_id)
+            .map(|p| p.source_id.clone())
+            .collect();
+        sources.sort();
+        sources.dedup();
+        Ok(sources)
+    }
+
     fn provenance(&self, posting_id: &str) -> Result<Vec<Provenance>, IngestionRepoError> {
         Ok(self
             .provenance
