@@ -46,6 +46,12 @@ export function useDismissOffer() {
       if (outcome.suggestion) suggest(outcome.suggestion);
       void queryClient.invalidateQueries({ queryKey: inboxKey });
     },
+    // A batch that failed halfway still dismissed the Offers before the
+    // failure: re-read, or the screen keeps showing cards the core no longer
+    // has (S6.6 R-1).
+    onError: () => {
+      void queryClient.invalidateQueries({ queryKey: inboxKey });
+    },
   });
 }
 

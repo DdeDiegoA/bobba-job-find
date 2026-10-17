@@ -1779,8 +1779,9 @@ export type SalaryFloor = {
 };
 
 /**
- *  What Save did (FR-66). `created = false` means the Offer already had an
- *  Application in `Saved`: Save is idempotent, never a second card.
+ *  What Save did (FR-66). `created = false` means this Offer already had an
+ *  Application — in any status, not only `Saved`. Save is idempotent: it never
+ *  creates a second card for one Offer.
  */
 export type SaveOutcome = {
   application_id: string;

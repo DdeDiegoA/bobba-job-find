@@ -263,6 +263,11 @@ impl TrackerService {
 
     /// The only way a status may change (AC4): validate, write one
     /// `status_event`, return the updated card.
+    ///
+    /// A row's *birth* is the one event this cannot write: the application must
+    /// exist first. That first event (`from_status: None`) is written with the
+    /// row by the owner that creates it — Save in the Inbox (S6.6) — through
+    /// `ApplyRepo::application_create`, in the same transaction.
     pub fn transition(&self, input: TransitionInput) -> Result<ApplicationDetail, TrackerError> {
         let from = AppStatus::parse(&input.from_status)
             .ok_or_else(|| TrackerError::UnknownStatus(input.from_status.clone()))?;

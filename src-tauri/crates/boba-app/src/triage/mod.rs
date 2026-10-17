@@ -78,8 +78,9 @@ impl TriageError {
     }
 }
 
-/// What Save did (FR-66). `created = false` means the Offer already had an
-/// Application in `Saved`: Save is idempotent, never a second card.
+/// What Save did (FR-66). `created = false` means this Offer already had an
+/// Application — in any status, not only `Saved`. Save is idempotent: it never
+/// creates a second card for one Offer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct SaveOutcome {
     pub application_id: String,
@@ -144,7 +145,8 @@ impl TriageService {
 
     /// Save an Offer: create an Application in `Saved`, born with its first
     /// status event so the Tracker timeline never starts mid-story (FR-66).
-    /// Saving an Offer that already has an Application returns that one.
+    /// Saving an Offer that already has an Application — in any status — returns
+    /// that one and creates nothing.
     pub fn save(&self, posting_id: &str) -> Result<SaveOutcome, TriageError> {
         let offer = self.offer(posting_id)?;
         if let Some(existing) = self

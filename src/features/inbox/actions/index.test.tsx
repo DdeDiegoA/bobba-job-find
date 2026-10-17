@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfferCardView, SuggestionView } from "@/lib/ipc/bindings";
 import { commands } from "@/lib/ipc/bindings";
 import "@/lib/i18n";
+import { inboxKey } from "../list/offers";
 import { InboxBulkBar, OfferActions, SuggestionBanner, UNDO_WINDOW_MS } from ".";
 import { useBulkStore } from "./bulk-store";
 import { useSuggestionStore } from "./suggestion-store";
@@ -62,7 +63,8 @@ function card(overrides: Partial<OfferCardView> = {}): OfferCardView {
 
 function renderWith(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  const result = render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  return { ...result, client };
 }
 
 beforeEach(() => {
@@ -129,6 +131,27 @@ describe("Dismiss (AC1)", () => {
 
     options.action.onClick();
     await vi.waitFor(() => expect(commands.inboxUndoDismiss).toHaveBeenCalledWith("pst_01"));
+  });
+
+  // S6.6 R-1: a batch that failed halfway still dismissed some Offers.
+  it("re-reads the Inbox when a dismissal fails halfway", async () => {
+    vi.mocked(commands.inboxDismiss).mockReturnValue(
+      Promise.resolve({
+        status: "error" as const,
+        error: {
+          code: "internal",
+          message_key: "errors.inbox_actions.store",
+          details: null,
+        },
+      }) as never,
+    );
+    const { client } = renderWith(<OfferActions card={card()} />);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "The company" }));
+
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKey }));
   });
 
   it("keeps the card when the core refuses the dismissal", async () => {
