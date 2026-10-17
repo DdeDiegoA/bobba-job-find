@@ -24,8 +24,11 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .invoke_handler(ipc.invoke_handler())
-        // Must be the first plugin registered.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        // Must be the first plugin registered. A second launch lands on the
+        // running window instead of starting again (S1.6, AC3).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            lifecycle::on_second_instance(app, argv, cwd);
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -60,6 +63,10 @@ pub fn run() {
                     tray = tray.icon(icon.clone());
                 }
                 tray.build(app)?;
+
+                // The menu, close-to-tray and the tray actions (S1.6) live in
+                // `lifecycle`; this one call keeps later slices out of this file.
+                lifecycle::install(app.handle());
 
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;

@@ -1,1 +1,9 @@
-{}
+{
+  "menu.open": "Abrir",
+  "menu.runNow": "Ejecutar ahora",
+  "menu.pauseSchedule": "Pausar programación",
+  "menu.killSwitch": "Kill Switch",
+  "menu.quit": "Salir",
+  "close.title": "Boba sigue en marcha",
+  "close.body": "Ocultamos la ventana, no a Boba. Sigue trabajando desde la bandeja: sal desde el menú de la bandeja cuando termines."
+}

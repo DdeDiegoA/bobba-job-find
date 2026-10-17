@@ -41,6 +41,8 @@ boba-mail = { path = "crates/boba-mail" }
 boba-sources = { path = "crates/boba-sources" }
 # Resolving a pasted URL and a redirect's `Location` (S4.7).
 url = { workspace = true }
+# The OS locale, for the core-side tray strings (S1.6, AD-17/AD-21).
+sys-locale = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
