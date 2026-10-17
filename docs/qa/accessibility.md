@@ -18,11 +18,11 @@ pnpm test -- e2e/a11y        # the six automated files (~5s)
 | File | What it proves |
 |---|---|
 | `axe.ts` | axe-core (4.10.2, MPL-2.0, devDependency) over the same rendered DOM: WCAG 2.2 A/AA rules for ARIA validity, roles, list/table structure and duplicates. `color-contrast` is disabled here — jsdom has no layout — and covered by `contrast.test.ts` instead. |
-| `screens.test.tsx` | Each AC1 screen, rendered with real components over a faked IPC seam, has an accessible name on every control, labelled fields, ordered headings, unique ids, resolvable `aria-labelledby`, no positive tabindex, no focusable element under `aria-hidden`, and no nested interactive controls. Also: the Auto confirmation opens with a labelled checkbox, Verdicts and Stages render as words, the Kill Switch carries `aria-keyshortcuts`. |
+| `screens.test.tsx` | Each AC1 screen, rendered with real components over a faked IPC seam, has an accessible name on every control, labelled fields, ordered headings, unique ids, resolvable `aria-labelledby`, no positive tabindex, no focusable element under `aria-hidden`, and no nested interactive controls. Also: the Auto confirmation opens with a labelled checkbox and traps focus, Verdicts and Stages render as words, tabs expose their panels, the Kill Switch carries `aria-keyshortcuts`. |
 | `keyboard.test.tsx` | The skip link targets `<main tabindex="-1">`; navigation links are native links; the Kill Switch is a native focusable button that activates; a Tracker card moves with Cmd/Ctrl + ←/→; the wizard takes focus into its dialog on open. |
-| `contrast.test.ts` | Every normal-text token pair the app uses is ≥ 4.5:1 in both themes, re-derived from `src/styles/tokens.css` (not from the design mock). |
+| `contrast.test.ts` | Every normal-text token pair the app uses is ≥ 4.5:1 in both themes, re-derived from `src/styles/tokens.css` (not from the design mock) — including `--fg-subtle` on all five backgrounds it lands on. |
 | `reduced-motion.test.ts` | The global `prefers-reduced-motion: reduce` rule exists, covers `*`/`::before`/`::after`, cuts durations to a frame, disables smooth scroll, and is not overridden with `!important`. |
-| `zoom.test.ts` | Pins the shell's 960 px floor against the window's 940 px minimum and the 200% zoom arithmetic (finding A11Y-6). |
+| `zoom.test.ts` | The shell never hides; it reflows into a compact layout below 960 px, which is where the 940-px window minimum and 200% zoom (720 CSS px on a 1440-px window) both land (A11Y-6). |
 
 The hand-written rules in `audit.ts` stay alongside axe: they state the floor in
 terms this repo controls (and say *why* each one exists), while axe widens the net.
@@ -32,7 +32,8 @@ MPL-2.0** (file-level copyleft; it is not linked into the product).
 Findings that belong to another slice are pinned, never fixed here (S10.6 AC3):
 `KNOWN` in `screens.test.tsx` suppresses exactly one violation per follow-up, with
 the owner's ID in the comment, so it cannot grow silently and disappears the day
-the owner ships the fix.
+the owner ships the fix. CH14 fixed A11Y-1..8, so `KNOWN` is now empty; the
+allowance and its matching assertions stay in place for the next pass.
 
 ## What was executed, and what was not
 
@@ -58,33 +59,34 @@ A–D until a host with a screen reader runs them once per release.
 
 | Surface | Automated audit | Verdicts / Stages as text | Keyboard | Screen reader | 200% zoom |
 |---|---|---|---|---|---|
-| Wizard | clean | step counter is text (`Step N of M`), `aria-current="step"` | focus starts in the dialog, Tab is trapped (S3.1 tests) | script B/C | script D |
-| Today | clean except A11Y-3 | band counts + Verdict words, but read as "Strong78" (A11Y-5) | links native | script B/C | **A11Y-6** |
-| Offer detail | A11Y-1 | Verdict + Confidence words | Fit/Quality are buttons with hints | script B/C | **A11Y-6** |
-| Studio | clean | tab text; checks are words | native controls | script B/C | **A11Y-6** |
-| Tracker | A11Y-2 | Stage column headings are text | Cmd/Ctrl + ←/→ moves a card | script B/C | **A11Y-6** |
-| Applying | clean | Auto/Review state is a word | confirmation is a labelled checkbox | script B/C | **A11Y-6** |
-| Kill Switch | clean | engaged state is `role="status"` text | native button + `aria-keyshortcuts` | script B/C | **A11Y-6** |
+| Wizard | clean | step counter is text (`Step N of M`), `aria-current="step"` | focus starts in the dialog, Tab is trapped (S3.1 tests) | script B/C | compact shell |
+| Today | clean (A11Y-3, A11Y-5 fixed) | band counts + Verdict words, read as "Strong 78" | links native | script B/C | compact shell |
+| Offer detail | clean (A11Y-1 fixed) | Verdict + Confidence words | Fit/Quality are buttons with hints | script B/C | compact shell |
+| Studio | clean (A11Y-8 fixed) | tab text; checks are words; tabs expose their panel | native controls + arrow-key tabs | script B/C | compact shell, panels stack |
+| Tracker | clean (A11Y-2, A11Y-8 fixed) | Stage column headings are text | grip button drags; Cmd/Ctrl + ←/→ moves a card; arrow-key tabs | script B/C | compact shell |
+| Applying | clean (A11Y-7 fixed) | Auto/Review state is a word | confirmation moves focus in, traps Tab, Esc closes, focus returns | script B/C | compact shell |
+| Kill Switch | clean | engaged state is `role="status"` text | native button + `aria-keyshortcuts` | script B/C | compact shell |
 
 Reduced motion: the global rule covers every animated element (skeletons,
 spinners, dnd-kit is JS transform only). Content appears in its final state.
 Hands-on confirmation is script E.
 
-## Findings
+## Findings — all fixed in CH14 (2026-10-17)
 
-Filed against the slice that owns the screen, for the orquestador to schedule as
-follow-up slices. This pass changed nothing under `src/`.
+Filed by S10.6 against the slice that owned each screen. CH14 fixed all eight
+and turned each one into a passing assertion; nothing is pinned as a known
+failure any more (`KNOWN` in `screens.test.tsx` is empty).
 
-| ID | Severity | Surface | Owner | Summary |
-|---|---|---|---|---|
-| **A11Y-1** | High | Offer detail | S6.3 | `aria-labelledby="offer-title"` points at an id that does not exist — the page has no name |
-| **A11Y-2** | High | Tracker | S9.1 | Each card is a `role="button"` containing another `<button>` |
-| **A11Y-3** | Medium | Today | S6.4 | "Open Inbox" is a `<Button>` inside a `<Link>` (a button inside a link) |
-| **A11Y-4** | High (systemic) | 32 files | UX + per-slice | Text painted in `--fg-subtle`, which DESIGN.md reserves for decoration; it measures 4.11:1 (light) / 3.65:1 (dark) |
-| **A11Y-5** | Medium | Today | S6.4 | Verdict and Rank run together in the accessibility tree ("Strong78") |
-| **A11Y-6** | High | Shell, all screens | S1.5 + DESIGN §10.4 | Below 960 CSS px the shell is replaced by a resize notice; the window itself opens at 940 px, and 200% zoom on a 1440-px display lands at 720 px |
-| **A11Y-7** | Medium | Applying | S9.6 / S9.7 | The Auto confirmation declares `aria-modal="true"` but neither moves focus nor traps it |
-| **A11Y-8** | Low | Tracker, Studio | S9.1 / S7.7 | `role="tab"` buttons with no `aria-controls`, no tabpanel and no arrow-key handling |
+| ID | Severity | Surface | Owner | Summary | Fix shipped |
+|---|---|---|---|---|---|
+| **A11Y-1** | High | Offer detail | S6.3 | `aria-labelledby="offer-title"` points at an id that does not exist — the page has no name | `id="offer-title"` on the `<h1>` |
+| **A11Y-2** | High | Tracker | S9.1 | Each card is a `role="button"` containing another `<button>` | dnd-kit handles moved to a grip button; `<li>` is a plain list item |
+| **A11Y-3** | Medium | Today | S6.4 | "Open Inbox" is a `<Button>` inside a `<Link>` (a button inside a link) | one `<Link>` styled with `buttonVariants` |
+| **A11Y-4** | High (systemic) | 32 files | UX + per-slice | Text painted in `--fg-subtle` measured 4.11:1 (light) / 3.65:1 (dark) | token re-tuned to `#756249` / `#A6907F`; all text pairs ≥ 4.5:1 |
+| **A11Y-5** | Medium | Today | S6.4 | Verdict and Rank run together in the accessibility tree ("Strong78") | a real space between them ("Strong 78") |
+| **A11Y-6** | High | Shell, all screens | S1.5 + DESIGN §10.4 | Below 960 CSS px the shell was replaced by a resize notice; the window opens at 940 px, and 200% zoom on a 1440-px display lands at 720 px | the shell reflows into a compact layout at every width; the notice is gone |
+| **A11Y-7** | Medium | Applying | S9.6 / S9.7 | The Auto confirmation declared `aria-modal="true"` but neither moved focus nor trapped it | focus moves in, Tab is trapped, Esc closes, focus returns to the trigger |
+| **A11Y-8** | Low | Tracker, Studio | S9.1 / S7.7 | `role="tab"` buttons with no `aria-controls`, no tabpanel and no arrow-key handling | `aria-controls` + `role="tabpanel"`, roving tabindex, ←/→/Home/End |
 
 ### A11Y-1 — Offer detail has a dangling label reference
 
@@ -92,88 +94,92 @@ follow-up slices. This pass changed nothing under `src/`.
 `aria-labelledby="offer-title"`, but `Header` renders the `<h1>` without an id
 (`src/features/offer/sections.tsx:316`). Screen readers announce an unnamed region.
 
-**Fix:** `id="offer-title"` on the `<h1>` (one attribute).
-**Evidence:** `e2e/a11y/screens.test.tsx` — `KNOWN` entry A11Y-1.
+**Fixed (CH14):** `id="offer-title"` on the `<h1>`.
+**Evidence:** `e2e/a11y/screens.test.tsx` — "names the page region after the offer title".
 
 ### A11Y-2 — Tracker cards nest a button inside a button
 
-`src/features/tracker/board/card.tsx` spreads dnd-kit's `attributes` onto the
-`<li>`, which gives it `role="button"` and `tabindex="0"`; the card's own open
-control is a real `<button>` inside it. Two activation targets share one name
-family, and NVDA/VoiceOver report a button inside a button (WCAG 4.1.2).
+`src/features/tracker/board/card.tsx` spread dnd-kit's `attributes` onto the
+`<li>`, which gave it `role="button"` and `tabindex="0"`; the card's own open
+control is a real `<button>` inside it. Two activation targets shared one name
+family, and NVDA/VoiceOver reported a button inside a button (WCAG 4.1.2).
 
-**Fix:** take the drag handle off the list item's role — e.g. keep the `<li>`
-presentational and give the drag handle (or the open button) the keyboard
-affordances, or move the open action onto a single control.
-**Evidence:** `KNOWN` entry A11Y-2; the duplicate query in `keyboard.test.tsx`
-(`findAllByRole` matching two nodes) is the same defect.
+**Fixed (CH14):** the `<li>` is a plain list item again; dnd-kit's `attributes`
+and `listeners` live on a native grip button ("Move {title}"), the open control
+stays a button ("Open {title}"), and the Cmd/Ctrl + ←/→ handler stays on the card
+so both controls drive it.
+**Evidence:** `screens.test.tsx` — "keeps a card a list item with its own open and drag controls";
+`keyboard.test.tsx` — the card still moves from its open button.
 
 ### A11Y-3 — Today nests a button inside a link
 
-`src/features/today/matches/index.tsx` renders
+`src/features/today/matches/index.tsx` rendered
 `<Link to="/inbox"><Button>Open Inbox</Button></Link>`. Invalid containment, and
-several screen readers announce only one of the two controls.
+several screen readers announced only one of the two controls.
 
-**Fix:** style the link like a button (`Button asChild` + `Link`) instead of
-wrapping.
+**Fixed (CH14):** a single `<Link>` styled with `buttonVariants({ variant: "outline", size: "sm" })`.
+**Evidence:** `screens.test.tsx` — "makes Open Inbox a single link control".
 
 ### A11Y-4 — `--fg-subtle` is painted on text
 
-DESIGN.md §2.4 (line 239) is explicit: `--fg-subtle` is 4.11:1 light / 3.65:1 dark
-and is **decorative only — never body copy, labels or meaningful icons**. The app
-still uses `text-fg-subtle` for visible text in **32 files / 78 occurrences**
-(inbox cards, tracker detail, offer sections, the palette, the wizard steps,
-`empty-state`, the topbar, …). Normal-size text at those ratios fails WCAG AA.
+DESIGN.md §2.4 called `--fg-subtle` (4.11:1 light / 3.65:1 dark) **decorative
+only**, but the app paints visible text with it in 32 files / 78 occurrences.
+Normal-size text at those ratios failed WCAG AA.
 
-**Fix (per owner):** swap every text use to `text-fg-muted` (6.45:1 light /
-8.33:1 dark) and keep `--fg-subtle` for dividers and glyphs, or darken the token
-(which would make it the same as `--fg-muted`). The mechanical part is one chore;
-the design call belongs to UX.
-**Evidence:** `it.todo` pairs in `contrast.test.ts` (A11Y-4) hold the two failing
-pairs until the owner's fix moves them into `PAIRS`.
+**Fixed (CH14):** the token was re-tuned rather than the 32 files: light
+`#756249`, dark `#A6907F`, both still warm. Measured ratios (light / dark):
+bg 5.66 / 6.09 · surface 5.83 / 5.60 · surface-muted 4.99 / 5.08 ·
+surface-sunken 4.66 / 6.23 · primary-soft (selected option) 4.81 / 4.52.
+**Evidence:** `contrast.test.ts` — `PAIRS` now carries five `--fg-subtle` pairs in
+both themes; DESIGN.md §2.4 records the values and ratios.
 
 ### A11Y-5 — "Strong78" is read as one word
 
-`src/features/today/matches/index.tsx` puts the Verdict word and the Rank number
-in one span separated only by layout (`gap-1`). Text content is `Strong78`; a
-screen reader says it as one token.
+`src/features/today/matches/index.tsx` put the Verdict word and the Rank number
+in one span separated only by layout (`gap-1`). Text content was `Strong78`; a
+screen reader said it as one token.
 
-**Fix:** a space or a visually-hidden separator (`{" "}`, `<span className="sr-only">·</span>`).
-**Evidence:** `it.fails` in `screens.test.tsx` (A11Y-5) — delete the pin when the
-space lands.
+**Fixed (CH14):** a real `{" "}` between them; the accessibility tree reads "Strong 78".
+**Evidence:** `screens.test.tsx` — the A11Y-5 case is now a normal passing test.
 
 ### A11Y-6 — 200% zoom replaces the app with a resize notice
 
-`src/styles/index.css` hides `.shell` at `max-width: 959.98px` and shows
+`src/styles/index.css` hid `.shell` at `max-width: 959.98px` and showed
 `.resize-floor` instead. `src-tauri/tauri.conf.json` allows the window down to
 **940 px**, already inside that range. At 200% zoom a 1440-px window becomes
-720 CSS px: content and function are lost, which EXPERIENCE §7 and NFR-15 forbid.
+720 CSS px: content and function were lost, which EXPERIENCE §7 and NFR-15 forbid.
 
-**Fix (owner S1.5 with DESIGN §10.4):** either lower the floor to a width that
-reflows (the board already scrolls horizontally), or keep the floor and raise
-`minWidth` above it *and* exclude webview zoom — the current pair is wrong in
-both directions.
-**Evidence:** `zoom.test.ts` (3 passing assertions + 1 `it.fails` pin).
+**Fixed (CH14):** the hide rule and the notice are gone; below 960 px the shell
+reflows (56 px labelled icon rail, tighter topbar gutter), and the Studio's
+inspector stacks under the editor. The sidebar keeps every destination reachable.
+**Evidence:** `zoom.test.ts` — the shell is never `display: none`, the compact rule
+covers 940 px and 720 CSS px, and the content column stays ≥ 320 px at both.
+**Residual:** DESIGN.md §10.4 still describes a "< 960 floor screen" row; UX must
+update that row to the compact layout (behaviour changed by this finding's fix).
 
 ### A11Y-7 — The Auto confirmation claims to be a modal but is not one
 
-`src/features/settings/applying/rules/index.tsx` (around line 153) renders the
-"Turn on auto-apply?" panel with `role="dialog" aria-modal="true"` inline in the
-page: focus stays on the trigger, Tab walks the whole screen, and the content
-behind is not inert. `aria-modal="true"` promises the opposite to assistive tech.
+`src/features/settings/applying/rules/index.tsx` renders the "Turn on auto-apply?"
+panel with `role="dialog" aria-modal="true"` inline in the page; focus stayed on
+the trigger and Tab walked the whole screen.
 
-**Fix:** either make it a real modal (move focus in, trap Tab, restore focus —
-the wizard and palette already implement this) or drop `aria-modal` and keep it
-as a labelled region. Given the confirmation's weight (Auto starts sending), the
-modal is the right shape.
+**Fixed (CH14):** the confirmation is a real modal — focus moves to the acceptance
+checkbox on open, Tab wraps inside it, Escape closes it, and focus returns to
+"Enable Auto" (or to the screen title when Auto turned on and that button left).
+**Evidence:** `screens.test.tsx` — "is a real modal: focus moves in, Tab is trapped,
+Esc closes and restores focus".
 
 ### A11Y-8 — Tab lists are tabs in name only
 
 Tracker (`src/features/tracker/index.tsx`) and Studio (`src/features/studio/index.tsx`)
-render `role="tablist"` with `role="tab"` buttons but no `aria-controls`, no
-`role="tabpanel"`, no roving tabindex and no ←/→ handling. They remain operable
-(every tab is in the Tab order), so this is a pattern-compliance finding, not a
-blocker.
+rendered `role="tablist"` with `role="tab"` buttons but no `aria-controls`, no
+`role="tabpanel"`, no roving tabindex and no ←/→ handling.
+
+**Fixed (CH14):** each tab carries `aria-controls` and a roving `tabindex`, the
+content region is a `role="tabpanel"` named by the selected tab, and
+←/→/Home/End move the selection and the focus.
+**Evidence:** `screens.test.tsx` — "exposes the view tabs as a complete tab pattern"
+and the Studio equivalent.
 
 ## Manual scripts
 
@@ -190,17 +196,20 @@ Escape and the documented shortcuts.
   dialog; Next/Back work; the step counter is announced when it changes.
 - **Today:** Tab reaches the Inbox link and each top match; Enter opens the Offer.
 - **Offer detail:** Fit and Quality are reachable and scroll to their factor group.
-- **Studio:** CV/cover tabs switch with Enter; the editor is reachable; Export is
-  reachable; the apply bar's controls are all reachable.
-- **Tracker:** Tab reaches a card; Cmd/Ctrl + ←/→ moves it; the confirmation for
-  Applied is keyboard-operable; the stage collapse buttons are `aria-expanded`.
-- **Applying:** Enable Auto opens the confirmation, the checkbox toggles with
-  Space, the confirm button is disabled until checked.
+- **Studio:** CV/cover tabs switch with Enter and with ←/→; the editor is
+  reachable; Export is reachable; the apply bar's controls are all reachable.
+- **Tracker:** Tab reaches a card's open control and its grip; the grip lifts
+  with Space and moves with the arrows; Cmd/Ctrl + ←/→ moves a card; the
+  confirmation for Applied is keyboard-operable; the stage collapse buttons are
+  `aria-expanded`.
+- **Applying:** Enable Auto opens the confirmation with focus on the checkbox,
+  Space toggles it, Tab stays inside, Escape closes it and focus returns to
+  Enable Auto; the confirm button is disabled until checked.
 - **Kill Switch:** reachable in the header and via Cmd/Ctrl+Shift+K; Enter engages
   it; the engaged chip is announced (`role="status"`).
 
-Expected: no focus trap (except the wizard), no lost focus after an action, a
-visible focus ring on every stop.
+Expected: no focus trap (except the wizard and the Auto confirmation), no lost
+focus after an action, a visible focus ring on every stop.
 
 ### B. VoiceOver (macOS, ~30 min)
 
@@ -224,8 +233,10 @@ app (WebView2). Use `NVDA+↓` to read by line, `H` for headings, `B` for button
 3. For each surface: content is visible, no content column scrolls horizontally,
    every action remains reachable.
 
-Expected today: **A11Y-6** — the resize notice replaces the app. This script is
-the acceptance test for that finding's fix.
+Expected after CH14: the compact layout (56 px icon rail, stacked Studio
+inspector) keeps every surface usable at 200% zoom and at the 940-px window
+minimum; no resize notice appears. This script confirms what `zoom.test.ts`
+pins statically.
 
 ### E. Reduced motion (~10 min)
 

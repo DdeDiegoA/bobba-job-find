@@ -19,6 +19,7 @@
   "column.collapse": "Hide {stage}",
   "column.expand": "Show {stage}",
   "card.open": "Open {title}",
+  "card.move": "Move {title}",
   "card.keys": "Move with Cmd/Ctrl + ← →",
   "confirm.applied": "Mark {title} as Applied?",
   "confirm.yes": "Move to Applied",

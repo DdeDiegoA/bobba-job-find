@@ -246,7 +246,7 @@ describe("Tracker moves (AC2/AC4)", () => {
 describe("Tracker card detail (AC3)", () => {
   it("shows the snapshot, the package, the timeline, the next action and notes", async () => {
     renderBoard();
-    fireEvent.click(await screen.findByRole("button", { name: "Backend Engineer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Backend Engineer" }));
 
     expect(await screen.findByText("Offer snapshot")).toBeTruthy();
     expect(screen.getByText("Package sent")).toBeTruthy();
@@ -263,7 +263,7 @@ describe("Tracker card detail (AC3)", () => {
 
   it("links an https apply_url", async () => {
     renderBoard();
-    fireEvent.click(await screen.findByRole("button", { name: "Backend Engineer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Backend Engineer" }));
 
     const link = await screen.findByRole("link", { name: "Open the offer" });
     expect(link.getAttribute("href")).toBe("https://jobs.example.com/abc-1");
@@ -274,7 +274,7 @@ describe("Tracker card detail (AC3)", () => {
       ok({ ...detail, apply_url: "javascript:alert(1)" }),
     );
     renderBoard();
-    fireEvent.click(await screen.findByRole("button", { name: "Backend Engineer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Backend Engineer" }));
 
     expect(await screen.findByText("javascript:alert(1)")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Open the offer" })).toBeNull();

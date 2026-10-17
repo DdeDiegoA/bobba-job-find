@@ -48,18 +48,22 @@ body {
   transform: none;
 }
 
-/* Window floor (DESIGN.md §10.4): below 960 px the shell is replaced. */
-.resize-floor {
-  display: none;
-}
-
+/* Compact layout (A11Y-6): the shell reflows, never hides. The window floor is
+   940 px and 200% zoom on a 1440-px window is 720 CSS px — both below the 960-px
+   DESIGN.md §10.4 breakpoint, where hiding the app lost content and function.
+   The sidebar keeps its labelled icon rail and the content keeps its gutter. */
 @media (max-width: 959.98px) {
   .shell {
-    display: none;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
   }
 
-  .resize-floor {
-    display: grid;
+  .shell > aside {
+    padding-inline: 0.5rem;
+  }
+
+  .shell > div > header {
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
   }
 }
 

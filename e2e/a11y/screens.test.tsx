@@ -60,6 +60,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyOutboxView: vi.fn(),
     runReportLatest: vi.fn(),
     runReportRetry: vi.fn(),
+    statsFunnel: vi.fn(() => new Promise(() => undefined)),
   },
   events: {
     runReportProgressed: { listen: vi.fn(() => Promise.resolve(() => undefined)) },
@@ -332,44 +333,10 @@ function providers(children: ReactNode, path = "/") {
  * Findings that belong to another slice (S10.6 AC3 files them as follow-ups
  * instead of fixing them here). Each entry is one line in
  * `docs/qa/accessibility.md` → Findings; remove it when the owner ships the fix.
+ * Empty since CH14 fixed A11Y-1, A11Y-2 and A11Y-3; keep the list so a future
+ * pass can pin a new defect without ever growing it silently.
  */
-const KNOWN: KnownDefect[] = [
-  {
-    // A11Y-1 (docs/qa/accessibility.md): the page's `aria-labelledby` points at
-    // `offer-title`, but the `<h1>` it means ships without that id. Owned by the
-    // Offer detail slice (E6); fixed there, not here.
-    rule: "aria-labelledby-target",
-    element: "<section.flex.flex-col.gap-6>",
-    followUp: "A11Y-1",
-  },
-  {
-    // A11Y-2: dnd-kit gives the card's `<li>` role="button", and the card's
-    // open control is a real `<button>` inside it. Owned by the Tracker slice.
-    rule: "nested-interactive",
-    element: "<li.flex.cursor-grab.flex-col>",
-    followUp: "A11Y-2",
-  },
-  {
-    // A11Y-2, seen by axe: the same `role="button"` on the `<li>` makes the
-    // column's `<ul>` a list whose children are not list items.
-    rule: "list",
-    element: ".w-56",
-    followUp: "A11Y-2",
-  },
-  {
-    // A11Y-2, axe's target for the same card (the dnd-kit class).
-    rule: "nested-interactive",
-    element: ".cursor-grab",
-    followUp: "A11Y-2",
-  },
-  {
-    // A11Y-3: "Open Inbox" is a `<Button>` inside a router `<Link>` (a button
-    // inside a link). Owned by the Today slice.
-    rule: "nested-interactive",
-    element: "<a.ml-auto>",
-    followUp: "A11Y-3",
-  },
-];
+const KNOWN: KnownDefect[] = [];
 
 async function audit(
   children: ReactNode,
@@ -429,18 +396,19 @@ describe("Today (AC1)", () => {
     expect(await findByText("Strong")).toBeTruthy();
   });
 
-  it.fails(
-    "separates the Verdict word from the Rank number for a screen reader (A11Y-5)",
-    async () => {
-      // The pair renders as "Strong78" today: the elements are laid out with a
-      // gap, but nothing separates them in the accessibility tree. Pinned as a
-      // failing test owned by the Today slice; it must be deleted, not fixed
-      // here (S10.6 AC3).
-      const { findByText } = render(providers(<TodayIndex />));
-      const link = (await findByText("Senior Data Engineer")).closest("a");
-      expect(link?.textContent).toMatch(/Strong\s+78/);
-    },
-  );
+  it("makes Open Inbox a single link control (A11Y-3)", async () => {
+    render(providers(<TodayIndex />));
+    const link = await screen.findByRole("link", { name: /Open Inbox/ });
+    expect(link.tagName).toBe("A");
+    expect(link.querySelector("button")).toBeNull();
+  });
+
+  it("separates the Verdict word from the Rank number for a screen reader (A11Y-5)", async () => {
+    // "Strong 78" in the accessibility tree, not "Strong78".
+    const { findByText } = render(providers(<TodayIndex />));
+    const link = (await findByText("Senior Data Engineer")).closest("a");
+    expect(link?.textContent).toMatch(/Strong\s+78/);
+  });
 });
 
 describe("Offer detail (AC1)", () => {
@@ -468,6 +436,18 @@ describe("Offer detail (AC1)", () => {
     expect(await findByText("Strong")).toBeTruthy();
     expect(await findByText("Medium")).toBeTruthy();
   });
+
+  it("names the page region after the offer title (A11Y-1)", async () => {
+    render(
+      providers(
+        <Routes>
+          <Route path="/offer/:postingId" element={<OfferDetail />} />
+        </Routes>,
+        "/offer/pst_01",
+      ),
+    );
+    expect(await screen.findByRole("region", { name: "Senior Data Engineer" })).toBeTruthy();
+  });
 });
 
 describe("Studio (AC1)", () => {
@@ -477,6 +457,22 @@ describe("Studio (AC1)", () => {
         screen.findByRole("region", { name: "CV" }),
       ),
     );
+  });
+
+  it("exposes the document tabs as a complete tab pattern (A11Y-8)", async () => {
+    render(providers(<StudioIndex />, "/studio?app=app_1"));
+    const cv = await screen.findByRole("tab", { name: "CV" });
+    const cover = screen.getByRole("tab", { name: "Cover letter" });
+    expect(cv.getAttribute("aria-controls")).toBe("studio-document-panel");
+    expect(cv.getAttribute("tabindex")).toBe("0");
+    expect(cover.getAttribute("tabindex")).toBe("-1");
+    const panel = document.getElementById("studio-document-panel");
+    expect(panel?.getAttribute("role")).toBe("tabpanel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("studio-tab-cv");
+
+    fireEvent.keyDown(cv, { key: "ArrowRight" });
+    expect(cover.getAttribute("aria-selected")).toBe("true");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("studio-tab-cover_letter");
   });
 });
 
@@ -496,6 +492,30 @@ describe("Tracker (AC1)", () => {
     for (const stage of ["Saved", "Preparing", "Applied", "Interviewing", "Offer"]) {
       expect(names).toContain(stage);
     }
+  });
+
+  it("keeps a card a list item with its own open and drag controls (A11Y-2)", async () => {
+    const { container } = render(providers(<TrackerIndex />));
+    await screen.findByRole("button", { name: "Open Backend Engineer" });
+    // No element carries both role="button" and the card's contents.
+    expect(container.querySelector('li[role="button"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "Move Backend Engineer" })).toBeTruthy();
+  });
+
+  it("exposes the view tabs as a complete tab pattern (A11Y-8)", async () => {
+    render(providers(<TrackerIndex />));
+    const board = await screen.findByRole("tab", { name: "Board" });
+    const stats = screen.getByRole("tab", { name: "Stats" });
+    expect(board.getAttribute("aria-controls")).toBe("tracker-panel");
+    expect(board.getAttribute("tabindex")).toBe("0");
+    expect(stats.getAttribute("tabindex")).toBe("-1");
+    const panel = document.getElementById("tracker-panel");
+    expect(panel?.getAttribute("role")).toBe("tabpanel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("tracker-tab-board");
+
+    fireEvent.keyDown(board, { key: "ArrowRight" });
+    expect(stats.getAttribute("aria-selected")).toBe("true");
+    expect(panel?.getAttribute("aria-labelledby")).toBe("tracker-tab-stats");
   });
 });
 
@@ -523,6 +543,28 @@ describe("Applying (AC1)", () => {
     ).toBe(true);
 
     expectClean(unexpected(auditTree(container), KNOWN));
+  });
+
+  it("is a real modal: focus moves in, Tab is trapped, Esc closes and restores focus (A11Y-7)", async () => {
+    render(providers(<SettingsApplyingRules />));
+    const enable = await screen.findByRole("button", { name: "Enable Auto" });
+    fireEvent.click(enable);
+
+    const dialog = await screen.findByRole("dialog");
+    const accept = screen.getByRole("checkbox");
+    const cancel = screen.getByRole("button", { name: "Keep Auto off" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    // Tab from the last control wraps to the first, and Shift+Tab back again.
+    cancel.focus();
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(accept);
+    fireEvent.keyDown(accept, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancel);
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(enable);
   });
 });
 

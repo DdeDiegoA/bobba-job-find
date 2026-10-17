@@ -19,6 +19,7 @@
   "column.collapse": "Ocultar {stage}",
   "column.expand": "Mostrar {stage}",
   "card.open": "Abrir {title}",
+  "card.move": "Mover {title}",
   "card.keys": "Mueve con Cmd/Ctrl + ← →",
   "confirm.applied": "¿Marcar {title} como Postulada?",
   "confirm.yes": "Mover a Postulada",

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -30,6 +30,10 @@ function useApplications() {
 function errorText(error: unknown, fallback: string, t: (key: string) => string): string {
   return isAppError(error) ? renderAppError(error, t) : fallback;
 }
+
+/** Focusable controls inside the confirmation, in tab order. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Settings → Applying (FR-83, FR-87, FR-108, EXPERIENCE §9.12).
@@ -76,6 +80,41 @@ export default function SettingsApplyingRules() {
   const [applicationId, setApplicationId] = useState("");
   const [channel, setChannel] = useState("email");
   const [decision, setDecision] = useState<DecisionView | null>(null);
+  const acceptRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  // A11Y-7: the confirmation is a real modal. Focus moves into it, Esc closes
+  // it, Tab stays inside, and focus returns to the control that opened it.
+  useEffect(() => {
+    if (!confirming) return;
+    acceptRef.current?.focus();
+    return () => {
+      const trigger = document.querySelector<HTMLButtonElement>('[data-slot="enable-auto"]');
+      if (trigger?.isConnected) trigger.focus();
+      else titleRef.current?.focus();
+    };
+  }, [confirming]);
+
+  const onConfirmKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setConfirming(false);
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (!first || !last) return;
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === event.currentTarget)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const cards =
     applications.data?.columns.flatMap((column) =>
@@ -92,7 +131,12 @@ export default function SettingsApplyingRules() {
 
   return (
     <section className="flex flex-col gap-6 p-6" aria-labelledby="settings-applying-title">
-      <h1 id="settings-applying-title" className="font-display text-2xl text-fg">
+      <h1
+        id="settings-applying-title"
+        ref={titleRef}
+        tabIndex={-1}
+        className="font-display text-2xl text-fg"
+      >
         {t("title")}
       </h1>
 
@@ -136,6 +180,7 @@ export default function SettingsApplyingRules() {
               ) : (
                 <Button
                   type="button"
+                  data-slot="enable-auto"
                   disabled={setAuto.isPending || snapshot.rules.length === 0}
                   onClick={() => {
                     setUnderstood(false);
@@ -155,6 +200,8 @@ export default function SettingsApplyingRules() {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="auto-confirm-title"
+                tabIndex={-1}
+                onKeyDown={onConfirmKeyDown}
                 className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-muted p-4"
               >
                 <h3 id="auto-confirm-title" className="font-medium text-fg">
@@ -167,6 +214,7 @@ export default function SettingsApplyingRules() {
                 <p className="text-sm text-fg-muted">{t("confirm.review_first")}</p>
                 <label className="flex items-center gap-2 text-sm text-fg">
                   <input
+                    ref={acceptRef}
                     type="checkbox"
                     checked={understood}
                     onChange={(event) => setUnderstood(event.target.checked)}

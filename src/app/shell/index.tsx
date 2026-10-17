@@ -110,7 +110,6 @@ export function Shell() {
           </main>
         </div>
       </div>
-      <ResizeFloor />
       {/* S6.7's leaf (EXPERIENCE §6): the command palette, opened by Cmd/Ctrl+K. */}
       <CommandPalette />
     </>
@@ -121,17 +120,4 @@ export function Shell() {
 export function NotFound() {
   const { t } = useTranslation();
   return <EmptyState title={t("shell:empty.title")} description={t("shell:empty.body")} />;
-}
-
-/** Below the 960 px window floor (DESIGN.md §10.4). */
-function ResizeFloor() {
-  const { t } = useTranslation();
-  return (
-    <div className="resize-floor h-full place-items-center p-6 text-center">
-      <div className="flex flex-col gap-2">
-        <p className="font-display text-xl text-fg">{t("shell:shell.resizeTitle")}</p>
-        <p className="text-sm text-fg-muted">{t("shell:shell.resizeBody")}</p>
-      </div>
-    </div>
-  );
 }

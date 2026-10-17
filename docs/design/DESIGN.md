@@ -236,9 +236,20 @@ normal text):
 | warning text | 6.33 | 10.11 |
 | info text | 8.40 | 8.15 |
 
-`--fg-subtle` (`#8A7866` light / `#7E6B5C` dark) does **not** meet 4.5:1 and is therefore
-**non-text / decorative only** — never use it for body copy, labels, or icon-only controls that
-carry meaning.
+`--fg-subtle` is a **text** token (A11Y-4 re-tuned it from the decorative-only
+`#8A7866` / `#7E6B5C`): light `#756249`, dark `#A6907F`. It is the lowest-emphasis text
+level and meets 4.5:1 on every background it lands on:
+
+| `--fg-subtle` on | Light | Dark |
+|---|---:|---:|
+| bg | 5.66 | 6.09 |
+| surface | 5.83 | 5.60 |
+| surface-muted | 4.99 | 5.08 |
+| surface-sunken | 4.66 | 6.23 |
+| primary-soft (selected option) | 4.81 | 4.52 |
+
+Below 4.5:1 is no longer allowed for text: use `--fg-muted` for anything that must read
+comfortably, and keep `--border` / `--border-strong` for dividers and purely decorative glyphs.
 
 ### 2.5 Theme switching
 

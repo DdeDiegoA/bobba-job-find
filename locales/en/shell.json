@@ -24,8 +24,6 @@
   "sidebar.language.toggle": "Language: {locale}. Activate to switch.",
   "sidebar.tapi": "Tapi is idle",
   "shell.skipToContent": "Skip to content",
-  "shell.resizeTitle": "Resize to continue",
-  "shell.resizeBody": "Boba needs a window at least 960 px wide.",
   "empty.title": "Nothing here yet",
   "empty.body": "This screen fills in as you use Boba."
 }
