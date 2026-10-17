@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import TodayMatches from "./matches";
 import TodayOutbox from "./outbox";
+import TodayRunReport from "./run-report";
 
 /**
  * Today (S6.4 owns the container, backlog convention 7). The sitemap (§2.2) puts
@@ -11,6 +12,7 @@ import TodayOutbox from "./outbox";
 const TODAY_PANELS: readonly { id: string; Component: () => React.JSX.Element }[] = [
   { id: "matches", Component: TodayMatches },
   { id: "outbox", Component: TodayOutbox },
+  { id: "run-report", Component: TodayRunReport },
 ];
 
 export default function TodayIndex() {

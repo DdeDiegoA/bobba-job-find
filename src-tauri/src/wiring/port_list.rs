@@ -133,6 +133,11 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         ),
         Err(error) => tracing::error!(?error, "session store left unmounted"),
     }
+    // The daily search (S5.2): the sources a run queries behind `SourcePort`,
+    // and the scheduler's handler for the job it runs.
+    if let Err(error) = crate::commands::daily_search::mount(app) {
+        tracing::error!(%error, "daily search wiring left unmounted");
+    }
     // slices append ONE line above this comment; never reorder/remove
 }
 

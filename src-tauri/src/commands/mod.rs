@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod apply;
+pub mod daily_search;
 pub mod email;
 pub mod ingest;
 pub mod offers;

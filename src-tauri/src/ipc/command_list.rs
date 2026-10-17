@@ -85,6 +85,8 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_outbox_activate_rule,
             crate::commands::apply::apply_outbox_set_dry_run,
             crate::commands::apply::apply_outbox_release_due,
+            crate::commands::daily_search::run_report_latest,
+            crate::commands::daily_search::run_report_retry,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
@@ -97,6 +99,7 @@ macro_rules! boba_events {
         tauri_specta::collect_events![
             crate::events::TaskProgressed,
             crate::events::TaskFinished,
+            crate::commands::daily_search::RunReportProgressed,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

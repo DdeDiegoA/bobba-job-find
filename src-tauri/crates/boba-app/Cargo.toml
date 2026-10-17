@@ -22,6 +22,8 @@ html2text = { workspace = true }
 ammonia = { workspace = true }
 lingua = { workspace = true, default-features = false, features = ["english", "spanish"] }
 time = { workspace = true, features = ["local-offset"] }
+# Run ids (S5.2): every row this crate opens (a `source_run`) gets its own ULID.
+ulid = { workspace = true }
 fastembed = { workspace = true, optional = true }
 # Master CV import (S3.5): the user's own PDF, DOCX and LinkedIn export ZIP are
 # read here (never written), so the use case owns its extraction.
