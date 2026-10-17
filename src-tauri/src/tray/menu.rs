@@ -29,7 +29,7 @@ const ES: &str = include_str!(concat!(
 pub mod id {
     /// Show and focus the window.
     pub const OPEN: &str = "tray.open";
-    /// Start a Search Run (disabled until E5).
+    /// Start a Search Run (S5.4).
     pub const RUN_NOW: &str = "tray.run_now";
     /// Pause or resume the schedule.
     pub const PAUSE_SCHEDULE: &str = "tray.pause_schedule";
@@ -51,8 +51,8 @@ pub struct Entry {
     pub enabled: bool,
 }
 
-/// The tray menu, in the order FR-42 lists it (AC2). "Run now" stays disabled
-/// until the scheduler (S5.1) wires it; the Kill Switch is live since S9.8.
+/// The tray menu, in the order FR-42 lists it (AC2). Every entry is live: the
+/// scheduler (S5.1) runs "Run now" since S5.4, and the Kill Switch since S9.8.
 pub const ENTRIES: [Entry; 5] = [
     Entry {
         id: id::OPEN,
@@ -62,7 +62,7 @@ pub const ENTRIES: [Entry; 5] = [
     Entry {
         id: id::RUN_NOW,
         message_key: "tray:menu.runNow",
-        enabled: false,
+        enabled: true,
     },
     Entry {
         id: id::PAUSE_SCHEDULE,
@@ -195,9 +195,9 @@ mod tests {
         );
     }
 
-    /// AC2: only "Run now" is still disabled; the Kill Switch is live (S9.8).
+    /// AC2: every entry can be picked; nothing on the menu is a dead click.
     #[test]
-    fn only_the_unwired_items_are_disabled() {
+    fn every_entry_is_enabled() {
         let enabled = |id: &str| {
             ENTRIES
                 .iter()
@@ -209,7 +209,7 @@ mod tests {
         assert!(enabled(id::PAUSE_SCHEDULE));
         assert!(enabled(id::QUIT));
         assert!(enabled(id::KILL_SWITCH), "the Kill Switch is live (S9.8)");
-        assert!(!enabled(id::RUN_NOW), "Run now waits for E5 (S5.1)");
+        assert!(enabled(id::RUN_NOW), "Run now is live (S5.4)");
     }
 
     /// The labels the PRD keeps in English on purpose ("Kill Switch" is its
