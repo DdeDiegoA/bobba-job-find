@@ -16,6 +16,7 @@ use crate::applications::testing::FakeApplyRepo;
 use crate::ports::browser::{
     BrowserError, Confirmation, PageField, PageFieldKind, Screenshot, Upload,
 };
+use crate::ports::notifier::{Notification, NotifierError, NotifierPort};
 use crate::ports::repo::documents::fake::FakeDocumentsRepo;
 use crate::ports::repo::sources::{SourcesRepo, SourcesRepoError};
 use crate::profile::testing::FakeProfileRepo;
@@ -417,11 +418,25 @@ fn seed_answer(
 
 struct Harness {
     apply: Arc<FakeApplyRepo>,
+    notifier: Arc<CountingNotifier>,
     documents: Arc<FakeDocumentsRepo>,
     system: Arc<FakeSystemRepo>,
     browser: Arc<FakeSessionBrowser>,
     sources: Arc<FakeSources>,
     service: SessionApplyService,
+}
+
+/// The notifications a challenge raised (S11.3 F1, AC3).
+#[derive(Default)]
+struct CountingNotifier {
+    sent: Mutex<Vec<Notification>>,
+}
+
+impl NotifierPort for CountingNotifier {
+    fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
+        self.sent.lock().unwrap().push(notification);
+        Ok(())
+    }
 }
 
 fn harness(fields: Vec<PageField>) -> Harness {
@@ -434,6 +449,7 @@ fn build_harness(fields: Vec<PageField>, opted_in: bool, kill_switch: Option<boo
     let system = Arc::new(FakeSystemRepo::default());
     let sources = Arc::new(FakeSources::with_board("linkedin", opted_in));
     let browser = Arc::new(FakeSessionBrowser::with_page(page(fields)));
+    let notifier = Arc::new(CountingNotifier::default());
     let service = SessionApplyService::new(
         apply.clone(),
         documents.clone(),
@@ -445,9 +461,11 @@ fn build_harness(fields: Vec<PageField>, opted_in: bool, kill_switch: Option<boo
     )
     .with_kill_switch(
         kill_switch.map(|engaged| Arc::new(FakeKillSwitch(engaged)) as Arc<dyn KillSwitchPort>),
-    );
+    )
+    .with_notifier(Some(notifier.clone()));
     Harness {
         apply,
+        notifier,
         documents,
         system,
         browser,
@@ -1080,8 +1098,20 @@ fn a_challenge_pauses_the_source_and_stops_the_next_attempt() {
         "seven full days from the challenge"
     );
 
+    // AC3 (S11.3 F1): the user is told Auto stopped on this Source, once.
+    assert_eq!(
+        *h.notifier.sent.lock().unwrap(),
+        vec![Notification::SessionChallengePaused],
+        "a challenge notifies exactly once"
+    );
+
     let error = h.service.start(&application(), &offer()).unwrap_err();
     assert_eq!(error.message_key(), "errors.apply.session_paused");
+    assert_eq!(
+        h.notifier.sent.lock().unwrap().len(),
+        1,
+        "a blocked retry adds no second notice"
+    );
 }
 
 // M4: a package that stopped being Ready between steps stops the next fill.

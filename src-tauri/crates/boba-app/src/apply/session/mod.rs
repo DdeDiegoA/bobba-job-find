@@ -37,6 +37,7 @@ use crate::apply::manual::{ManualError, ManualService, PdfExport};
 use crate::ports::browser::{BrowserError, Upload};
 use crate::ports::clock::ClockPort;
 use crate::ports::kill_switch::KillSwitchPort;
+use crate::ports::notifier::{Notification, NotifierPort};
 use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use crate::ports::repo::documents::{DocumentsRepo, DocumentsRepoError};
 use crate::ports::repo::profile::{ProfileRepo, ProfileRepoError};
@@ -309,6 +310,9 @@ pub struct SessionApplyService {
     /// The Kill Switch (S9.8). Unmounted means not engaged, the same seam
     /// S9.7 uses, so the feature ships before S9.8's adapter is mounted.
     kill_switch: Option<Arc<dyn KillSwitchPort>>,
+    /// The one notice a challenge raises (S11.3 F1, FR-91). Optional like the
+    /// Kill Switch: a host without a notifier still records the pause.
+    notifier: Option<Arc<dyn NotifierPort>>,
 }
 
 impl SessionApplyService {
@@ -331,12 +335,19 @@ impl SessionApplyService {
             browser,
             clock,
             kill_switch: None,
+            notifier: None,
         }
     }
 
     /// Attach the Kill Switch once S9.8's adapter is mounted.
     pub fn with_kill_switch(mut self, kill_switch: Option<Arc<dyn KillSwitchPort>>) -> Self {
         self.kill_switch = kill_switch;
+        self
+    }
+
+    /// Attach the notifier a challenge raises its pause through (S11.3 F1).
+    pub fn with_notifier(mut self, notifier: Option<Arc<dyn NotifierPort>>) -> Self {
+        self.notifier = notifier;
         self
     }
 
@@ -720,6 +731,11 @@ impl SessionApplyService {
             .set_auto_paused_until(source_id, until.as_deref(), &now)?;
         self.system
             .audit_append_outcome(&intent, AuditOutcome::Ok, "{}", &now)?;
+        // AC3 (S11.3 F1): the user is told Auto stopped on this Source. A
+        // missing toast never undoes the pause, which is already recorded.
+        if let Some(notifier) = &self.notifier {
+            let _ = notifier.notify(Notification::SessionChallengePaused);
+        }
         Ok(())
     }
 

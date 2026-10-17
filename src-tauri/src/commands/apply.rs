@@ -412,7 +412,12 @@ fn session_service(app: &tauri::AppHandle) -> AppResult<SessionApplyService> {
     )
     // S9.8 mounted the switch: a locked store fails the command rather than
     // silently skipping a safety check.
-    .with_kill_switch(Some(wiring::port::<dyn KillSwitchPort>(app)?)))
+    .with_kill_switch(Some(wiring::port::<dyn KillSwitchPort>(app)?))
+    // S11.3 F1 (AC3): a challenge met while filling pauses Auto and tells the
+    // user, exactly as the session run does.
+    .with_notifier(Some(std::sync::Arc::new(
+        crate::scheduler::notify::TauriNotifier::new(app.clone()),
+    ))))
 }
 
 /// Map a Session Board apply failure onto the typed IPC error (AD-3).
