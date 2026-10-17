@@ -44,6 +44,10 @@ macro_rules! boba_commands {
             crate::commands::apply::apply_view,
             crate::commands::apply::apply_mark_applied,
             crate::commands::apply::apply_export_pdfs,
+            crate::commands::agent::agent_engine_snapshot,
+            crate::commands::agent::agent_engine_choose,
+            crate::commands::agent::agent_test_call,
+            crate::commands::agent::agent_models,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

@@ -281,6 +281,70 @@ fn command_builder(
     }
 }
 
+/// The detection seam (S3.2, FR-2): the engine step asks this to probe the
+/// machine and refresh the `cli_install` rows ADR-010's gate is decided from.
+///
+/// The composition root owns those rows (ADR-012): a slice's command layer can
+/// read ports, never the store, so detection is mounted as a port of its own.
+/// Probing refreshes the evidence — upsert what was found, drop rows for
+/// installs that are gone — so a CLI that was uninstalled or upgraded loses the
+/// lockdown it no longer has. A failed write leaves the old rows in place,
+/// which is a refusal at the gate, never a silent pass.
+pub struct EngineProbe {
+    store: Arc<Store>,
+}
+
+impl EngineProbe {
+    pub fn new(store: Arc<Store>) -> Self {
+        Self { store }
+    }
+
+    /// Probe every known CLI, in `CliKind::ALL` order, and store the evidence.
+    pub fn detect_and_store(&self) -> Vec<boba_agent::detect::CliStatus> {
+        let statuses = boba_agent::detect::detect_all();
+        if let Err(error) = self.store_evidence(&statuses) {
+            tracing::warn!(%error, "cli_install evidence not refreshed");
+        }
+        statuses
+    }
+
+    /// Upsert every installed CLI and delete rows for installs that are gone.
+    fn store_evidence(&self, statuses: &[boba_agent::detect::CliStatus]) -> Result<(), String> {
+        let probed: Vec<(String, String, String, String)> = statuses
+            .iter()
+            .filter_map(|status| match status {
+                boba_agent::detect::CliStatus::Installed(install) => Some((
+                    install.kind.id().to_string(),
+                    install.path.display().to_string(),
+                    install.version.clone(),
+                    install.capabilities.to_json(),
+                )),
+                boba_agent::detect::CliStatus::NotInstalled { .. } => None,
+            })
+            .collect();
+        self.store
+            .execute(move |conn| {
+                let store_error = |error: String| boba_store::db::StoreError::Sqlite(error);
+                let existing = cli_install::list(conn).map_err(|e| store_error(e.to_string()))?;
+                for row in existing {
+                    let still_installed = probed
+                        .iter()
+                        .any(|(kind, path, ..)| *kind == row.kind && *path == row.path);
+                    if !still_installed {
+                        cli_install::delete(conn, &row.id)
+                            .map_err(|e| store_error(e.to_string()))?;
+                    }
+                }
+                for (kind, path, version, capabilities) in &probed {
+                    cli_install::upsert(conn, kind, path, version, capabilities)
+                        .map_err(|e| store_error(e.to_string()))?;
+                }
+                Ok(())
+            })
+            .map_err(|error| error.to_string())
+    }
+}
+
 /// ADR-010's gate, in the shape the runtime takes it: the composition root
 /// supplies the probed `cli_install` evidence, and `boba-agent` decides. The
 /// runtime consults it before a run gets a workspace, a token or a CLI, so no
@@ -700,6 +764,7 @@ const UNOWNED: &str = "no slice owns it yet (unassigned)";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boba_agent::drivers::{CliInstall, HealthStatus};
     use boba_agent::mcp::config::Workspace;
     use boba_app::ports::agent::InputTrust;
     use serde_json::json;
@@ -871,6 +936,38 @@ mod tests {
             })
             .expect("store the probed install");
         store
+    }
+
+    /// S3.2: a probe refreshes the evidence the gate reads — it upserts what
+    /// was found and drops installs that are gone, so an uninstalled CLI loses
+    /// the lockdown it no longer has.
+    #[test]
+    fn probing_refreshes_the_cli_install_evidence() {
+        let store = store_with_cli(
+            "evidence",
+            CliKind::Aider,
+            "0.86.0",
+            Capabilities::default(),
+        );
+        let probe = EngineProbe::new(Arc::clone(&store));
+        let statuses = vec![boba_agent::detect::CliStatus::Installed(CliInstall {
+            kind: CliKind::ClaudeCode,
+            path: "/usr/local/bin/claude".into(),
+            version: "2.1.301 (Claude Code)".to_string(),
+            health: HealthStatus::Healthy,
+            capabilities: claude_caps(),
+        })];
+        probe.store_evidence(&statuses).expect("store the evidence");
+
+        let rows = store
+            .read(|conn| {
+                boba_store::repos::cli_install::list(conn)
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("read the evidence");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, "claude_code");
+        assert_eq!(rows[0].version, "2.1.301 (Claude Code)");
     }
 
     #[test]

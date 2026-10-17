@@ -208,6 +208,35 @@ export const commands = {
     typedError<ExportedFile[], AppError_Serialize>(
       __TAURI_INVOKE("apply_export_pdfs", { applicationId }),
     ),
+  /**
+   *  Every known CLI, probed now (the probe also refreshes the `cli_install`
+   *  evidence ADR-010's gate reads), and the stored choice (FR-2, FR-17).
+   */
+  agentEngineSnapshot: () =>
+    typedError<EngineSnapshot, AppError_Serialize>(__TAURI_INVOKE("agent_engine_snapshot")),
+  /**
+   *  Store the engine the user picked (AC1, FR-17). Settings calls the same
+   *  command, so a later change keeps every other row untouched.
+   */
+  agentEngineChoose: (cli: string, model: string | null) =>
+    typedError<EngineChoice, AppError_Serialize>(
+      __TAURI_INVOKE("agent_engine_choose", { cli, model }),
+    ),
+  /**  Run the round-trip test on the picked CLI and model (FR-3). */
+  agentTestCall: (cli: string, model: string | null) =>
+    typedError<TestCallResult, AppError_Serialize>(
+      __TAURI_INVOKE("agent_test_call", { cli, model }),
+    ),
+  /**
+   *  The models a CLI can list, when its own `--help` documents a subcommand for
+   *  it (FR-3: "listed where the CLI exposes them; otherwise free text").
+   *
+   *  Only OpenCode documents one (`models`); the other four take a model name but
+   *  never list them, so they always answer with an empty list and the step shows
+   *  a free-text field.
+   */
+  agentModels: (cli: string) =>
+    typedError<string[], AppError_Serialize>(__TAURI_INVOKE("agent_models", { cli })),
 };
 
 /** Events */
@@ -505,6 +534,45 @@ export type EmailMode =
   | "send_only"
   /**  Read and send. */
   | "read_send";
+
+/**  One agent CLI the probe looked at (FR-2). */
+export type EngineCard = {
+  /**  A `CliKind` id; the value the user picks. */
+  cli: string;
+  /**  Human-readable name. */
+  name: string;
+  installed: boolean;
+  /**  The version the `--version` probe reported (empty when not installed). */
+  version: string;
+  /**  The binary the probe found (absent when not installed). */
+  path: string | null;
+  /**  `healthy` | `auth_required` | `unhealthy`. */
+  health: string;
+  /**  Where to get the CLI when it is missing (FR-2: "Not installed" + link). */
+  install_url: string;
+  /**
+   *  Task ids ADR-010's gate refuses on this CLI. Empty means every task can
+   *  run (the engine step says which tasks stay unavailable when it is not).
+   */
+  unsupported_tasks: string[];
+};
+
+/**  The engine the user picked, as stored in [`ENGINE_KEY`]. */
+export type EngineChoice = {
+  /**  A `CliKind` id, e.g. `claude_code`. */
+  cli: string;
+  /**  The model the user typed, or the CLI's own default when absent. */
+  model: string | null;
+};
+
+/**
+ *  What the engine step and Settings show: every known CLI in registry order,
+ *  and the choice already stored (if any).
+ */
+export type EngineSnapshot = {
+  engines: EngineCard[];
+  chosen: EngineChoice | null;
+};
 
 /**  Stable, machine-readable error category. Adding a variant is additive. */
 export type ErrorCode =
@@ -1080,6 +1148,29 @@ export type TemplateView = {
   id: string;
   kind: StudioKind;
   default: boolean;
+};
+
+/**  The result of the round-trip test call (FR-3). */
+export type TestCallResult = {
+  ok: boolean;
+  /**  The CLI and model the run started with, as the run reported them. */
+  cli: string;
+  model: string | null;
+  /**
+   *  Round-trip time, measured from dispatch to the run's last event. A
+   *  millisecond count stays far below 2^53, so it crosses IPC as a JS number
+   *  (specta forbids BigInt-style types).
+   */
+  latency_ms: number;
+  /**
+   *  The CLI's own text output (trimmed and capped). On failure this is where
+   *  the CLI's error message lives.
+   */
+  reply: string;
+  /**  `FailureReason::id` when the run failed. */
+  failure_reason: string | null;
+  /**  The i18n key the step shows for that failure (AD-3). */
+  message_key: string | null;
 };
 
 /**  What an ATS reads back out of the rendered PDF (S7.6, FR-77). */
