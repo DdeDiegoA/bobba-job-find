@@ -48,3 +48,15 @@
 - No invented features found: InfoJobs is correctly listed as v1.1 (`prd-addendum.md`), session boards are described with their opt-in gates, Limited mode wording matches `limitedBody`.
 - No secrets, no real personal data, no private emails in the docs (the only address in code, `hiring@boba.dev`, is fixture data and is not quoted).
 - README and SECURITY agree with `docs/security/security-model.md` on Kill Switch, caps, OAuth loopback and session boards.
+
+## Re-review at `142db51`
+
+- **Changed since `0ebf94e`:** `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `docs/README.md`, `docs/user-guide/{getting-started,privacy-and-backup,troubleshooting}.md`. No code changed (no `.rs`, `.ts`, `.tsx`, `.json` in the diff).
+- **Must-fix 1 (privacy list):** closed. Privacy page and README now name the optional extras: GitHub update checks, the Hugging Face on-device model download, and api.frankfurter.dev salary exchange rates. Matches `boba-embed/src/encoder.rs` and `boba-app/src/network_log/fx.rs`.
+- **Must-fix 2 (1.0.0 claim):** closed. CHANGELOG section is now "Unreleased, targeting 1.0.0" with the "not yet tagged" line, and the `v1.0.0` release link is gone.
+- **Must-fix 3 (broken links):** closed for `docs/contributing/`. The links are dropped from README, CONTRIBUTING and docs/README.
+- **Remaining, expected:** `docs/security/` links in README, SECURITY and docs/README resolve only after FD1 merges. Merge FD1 first (FD1 approved at `093d8d2`, content `a28ceec`).
+- **Nits:** closed for the Windows/Linux Gatekeeper wording and the Sources sentence. Two line-length nits remain (getting-started step 6, privacy "Network" bullet): reflow when convenient.
+- **Checked:** workflow policy pass; no emails, keys or tokens added; relative links pass except the FD1-dependent `docs/security/` set.
+
+**Verdict: APPROVED** at `142db51` (content), pending FD1 merge for the `docs/security/` links.
