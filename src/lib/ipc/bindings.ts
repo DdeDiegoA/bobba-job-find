@@ -303,6 +303,40 @@ export const commands = {
     typedError<AtsOutcome, AppError_Serialize>(
       __TAURI_INVOKE("apply_ats_confirm", { applicationId, attemptId }),
     ),
+  /**
+   *  Every Session Board Source, its opt-in and pause, and this platform's
+   *  cookie protection (AC2/AC4).
+   */
+  sessionSnapshot: () =>
+    typedError<SessionSnapshotView, AppError_Serialize>(__TAURI_INVOKE("session_snapshot")),
+  /**
+   *  Record the per-Source opt-in after the user read the warning (AC1/AC2).
+   *
+   *  `weak_cookie_ack` is the separate, extra acknowledgement the Linux
+   *  keyring-less case requires; the core refuses without it (AC2).
+   */
+  sessionOptIn: (sourceId: string, warningVersion: string, weakCookieAck: boolean) =>
+    typedError<SessionBoardView, AppError_Serialize>(
+      __TAURI_INVOKE("session_opt_in", { sourceId, warningVersion, weakCookieAck }),
+    ),
+  /**
+   *  Turn a Session Board Source off and drop its opt-in; cookies stay until
+   *  "Sign out / clear session" (AC4).
+   */
+  sessionOptOut: (sourceId: string) =>
+    typedError<SessionBoardView, AppError_Serialize>(
+      __TAURI_INVOKE("session_opt_out", { sourceId }),
+    ),
+  /**  Delete that Source's browser session and cookies, and audit it (AC3). */
+  sessionSignOut: (sourceId: string) =>
+    typedError<SessionBoardView, AppError_Serialize>(
+      __TAURI_INVOKE("session_sign_out", { sourceId }),
+    ),
+  /**  Clear a challenge pause after the user acted on it (FR-30). */
+  sessionResume: (sourceId: string) =>
+    typedError<SessionBoardView, AppError_Serialize>(
+      __TAURI_INVOKE("session_resume", { sourceId }),
+    ),
 };
 
 /** Events */
@@ -1303,6 +1337,40 @@ export type SendRequest = {
 
 /**  Target seniority (FR-7). */
 export type Seniority = "intern" | "junior" | "mid" | "senior" | "lead" | "principal";
+
+/**  One Session Board Source on the opt-in and privacy screens. */
+export type SessionBoardView = {
+  source_id: string;
+  name: string;
+  enabled: boolean;
+  opted_in: boolean;
+  accepted_at: string | null;
+  accepted_warning_version: string | null;
+  pause: SessionPauseView | null;
+  weak_ack: boolean;
+};
+
+/**  A challenge that keeps one Source paused (FR-30, AD-10). */
+export type SessionPauseView = {
+  /**  `captcha`, `login_wall`, `unusual_activity` or `rate_limited`. */
+  kind: string;
+  /**  When the challenge was seen (UTC RFC 3339). */
+  since: string;
+};
+
+/**
+ *  The whole session surface: the warning version, how cookies are protected on
+ *  this platform, and every Session Board Source (AC2/AC4).
+ */
+export type SessionSnapshotView = {
+  /**  The warning copy version this build accepts. */
+  warning_version: string;
+  /**  `macos_keychain`, `windows_dpapi`, `linux_keyring` or `linux_weak`. */
+  cookie_protection: string;
+  /**  True on Linux without a keyring: the separate acknowledgement is required. */
+  requires_extra_ack: boolean;
+  boards: SessionBoardView[];
+};
 
 /**  How serious a finding is; the studio ranks by this. */
 export type Severity = "high" | "medium" | "low";

@@ -1,4 +1,6 @@
 {
   "locked.title": "Boba está bloqueado",
-  "locked.body": "Ábrelo para ejecutar la búsqueda de hoy."
+  "locked.body": "Ábrelo para ejecutar la búsqueda de hoy.",
+  "session_challenge.title": "Se ha pausado un portal de sesión",
+  "session_challenge.body": "Boba lo detuvo tras un desafío. Abre Ajustes → Privacidad para revisarlo."
 }

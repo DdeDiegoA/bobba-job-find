@@ -10,6 +10,7 @@ pub mod posting;
 pub mod posting_features;
 pub mod profile;
 pub mod scoring;
+pub mod session;
 pub mod source;
 pub mod untrusted;
 pub mod validator;

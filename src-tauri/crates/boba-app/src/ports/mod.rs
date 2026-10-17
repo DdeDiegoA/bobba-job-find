@@ -14,5 +14,6 @@ pub mod notifier;
 pub mod render;
 pub mod repo;
 pub mod secret;
+pub mod session;
 pub mod source;
 pub mod verify;

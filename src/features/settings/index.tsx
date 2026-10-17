@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
 import SettingsPreferences from "./preferences";
+import SettingsPrivacySessions from "./privacy/sessions";
 
 /**
  * Settings container (S3.7 owns it, backlog convention 7): a sub-page list plus
@@ -11,6 +12,11 @@ import SettingsPreferences from "./preferences";
  */
 const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: ComponentType }[] = [
   { id: "preferences", labelKey: "preferences:title", Component: SettingsPreferences },
+  {
+    id: "privacy/sessions",
+    labelKey: "session_optin:privacy.title",
+    Component: SettingsPrivacySessions,
+  },
 ];
 
 export default function SettingsIndex() {

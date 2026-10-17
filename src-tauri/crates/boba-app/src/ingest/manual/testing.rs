@@ -78,6 +78,10 @@ impl SourcesRepo for FakeSourcesRepo {
         Ok(None)
     }
 
+    fn remove_optin(&self, _source_id: &str) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+
     fn opted_in_ids(&self) -> Result<Vec<String>, SourcesRepoError> {
         Ok(Vec::new())
     }

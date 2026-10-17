@@ -126,6 +126,15 @@ pub fn get_optin(conn: &Connection, source_id: &str) -> Result<Option<OptInRecor
         .optional()?)
 }
 
+/// Remove a per-source opt-in (S11.1a: disabling a Source closes the gate).
+pub fn remove_optin(conn: &Connection, source_id: &str) -> Result<(), StoreError> {
+    conn.execute(
+        "DELETE FROM source_optin WHERE source_id = ?1",
+        params![source_id],
+    )?;
+    Ok(())
+}
+
 pub fn opted_in_ids(conn: &Connection) -> Result<Vec<String>, StoreError> {
     let mut stmt = conn.prepare("SELECT source_id FROM source_optin ORDER BY source_id")?;
     let rows = stmt.query_map([], |r| r.get(0))?;
@@ -210,6 +219,12 @@ impl SourcesRepo for Store {
     fn get_optin(&self, source_id: &str) -> Result<Option<OptInRecord>, SourcesRepoError> {
         let source_id = source_id.to_string();
         self.read(move |conn| get_optin(conn, &source_id))
+            .map_err(map_err)
+    }
+
+    fn remove_optin(&self, source_id: &str) -> Result<(), SourcesRepoError> {
+        let source_id = source_id.to_string();
+        self.execute(move |conn| remove_optin(conn, &source_id))
             .map_err(map_err)
     }
 

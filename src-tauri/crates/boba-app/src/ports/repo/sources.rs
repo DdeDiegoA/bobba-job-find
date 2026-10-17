@@ -34,6 +34,9 @@ pub trait SourcesRepo: Send + Sync {
 
     fn get_optin(&self, source_id: &str) -> Result<Option<OptInRecord>, SourcesRepoError>;
 
+    /// Remove the opt-in (the user turned the Source off); idempotent.
+    fn remove_optin(&self, source_id: &str) -> Result<(), SourcesRepoError>;
+
     /// Ids of every source with a recorded opt-in; the registry gates on this.
     fn opted_in_ids(&self) -> Result<Vec<String>, SourcesRepoError>;
 

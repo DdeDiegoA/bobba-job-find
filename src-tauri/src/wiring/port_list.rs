@@ -27,6 +27,7 @@ use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::secret::SecretPort;
+use boba_app::ports::session::SessionStore;
 use boba_app::ports::verify::VerifyPort;
 use boba_docs::TypstRenderer;
 use boba_mail::graph::GraphMail;
@@ -110,6 +111,15 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
             Arc::new(boba_browser::driver::ChromeDriver::new(data)),
         ),
         Err(error) => tracing::error!(?error, "browser port left unmounted"),
+    }
+    // The Session Board profiles (S11.1a, AD-10): one Chrome profile per
+    // source, deleted by "Sign out / clear session".
+    match app.path().app_data_dir() {
+        Ok(data) => mount_port::<dyn SessionStore>(
+            app,
+            Arc::new(boba_browser::session::ProfileSessions::new(data)),
+        ),
+        Err(error) => tracing::error!(?error, "session store left unmounted"),
     }
     // slices append ONE line above this comment; never reorder/remove
 }

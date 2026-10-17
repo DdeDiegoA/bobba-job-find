@@ -15,7 +15,7 @@
 //! `install` is called once from [`crate::lifecycle::install`], which is where
 //! `lib.rs` hands the app to later slices (backlog ownership convention 8).
 
-mod notify;
+pub mod notify;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};

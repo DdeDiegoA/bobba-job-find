@@ -1,4 +1,6 @@
 {
   "locked.title": "Boba is locked",
-  "locked.body": "Open it to run today's search."
+  "locked.body": "Open it to run today's search.",
+  "session_challenge.title": "A Session Board paused",
+  "session_challenge.body": "Boba stopped it after a challenge. Open Settings → Privacy to review it."
 }
