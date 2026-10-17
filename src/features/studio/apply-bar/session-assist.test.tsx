@@ -26,6 +26,7 @@ function session(overrides: Partial<SessionApplyView> = {}): SessionApplyView {
     attached: ["cv"],
     unanswered: [],
     handoff: null,
+    duplicate: null,
     ...overrides,
   };
 }

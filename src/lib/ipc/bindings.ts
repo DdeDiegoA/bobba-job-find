@@ -895,6 +895,11 @@ export type AtsSessionView = {
   attached: string[];
   unanswered: UnansweredField[];
   handoff: Handoff | null;
+  /**
+   *  An application to the same company and a similar role inside 30 days
+   *  (S9.5, FR-92). The assist panel warns before the user submits.
+   */
+  duplicate: DuplicateGuardView | null;
 };
 
 /**  One reviewed attachment, as the view shows it. */
@@ -1276,6 +1281,14 @@ export type DryRunView = {
   complete: boolean;
 };
 
+/**  The warning an apply screen shows before it sends (FR-92). */
+export type DuplicateGuardView = {
+  /**  The role of the application already sent, as it was stored. */
+  role: string;
+  /**  Whole UTC days since that application was created. */
+  days_ago: number;
+};
+
 /**
  *  Another place the same Offer was seen: one provenance row dedup merged into
  *  the posting (AD-19). It is shown, never deleted.
@@ -1330,6 +1343,11 @@ export type EmailApplyView = {
   ready: boolean;
   /**  The newest attempt at sending this application, if any (AC2 evidence). */
   last_attempt: AttemptView | null;
+  /**
+   *  An application to the same company and a similar role inside 30 days
+   *  (S9.5, FR-92). The review screen warns before the send.
+   */
+  duplicate: DuplicateGuardView | null;
 };
 
 /**  Whether a connection may read the mailbox or only send (FR-37, AC3). */
@@ -1801,6 +1819,11 @@ export type ManualView = {
    *  every other Source, so the apply bar knows whether to offer it.
    */
   session_board: string | null;
+  /**
+   *  An application to the same company and a similar role inside 30 days
+   *  (S9.5, FR-92). The bar warns before anything is sent.
+   */
+  duplicate: DuplicateGuardView | null;
 };
 
 /**  Salary period (AD-17). */
@@ -2410,6 +2433,11 @@ export type SessionApplyView = {
   attached: string[];
   unanswered: UnansweredField[];
   handoff: SessionHandoff | null;
+  /**
+   *  An application to the same company and a similar role inside 30 days
+   *  (S9.5, FR-92). The assist panel warns before the user submits.
+   */
+  duplicate: DuplicateGuardView | null;
 };
 
 /**  One Session Board Source on the opt-in and privacy screens. */

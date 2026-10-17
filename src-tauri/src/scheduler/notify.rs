@@ -36,6 +36,14 @@ const OUTBOX_ES: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../locales/es/outbox.json"
 ));
+const NUDGES_EN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../locales/en/nudges.json"
+));
+const NUDGES_ES: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../locales/es/nudges.json"
+));
 
 /// One notification's catalog entry: its `jobs:<key>` message key, in the UI's
 /// spelling, so `scripts/check-i18n.mjs` sees every key the core emits (AD-21).
@@ -100,6 +108,41 @@ pub fn outbox_message(locale: Locale, key: &str) -> Option<&'static str> {
     outbox_catalog(locale).get(key).map(String::as_str)
 }
 
+/// The follow-up nudge notice (S9.5, FR-95): the wording lives in `nudges.json`,
+/// the slice that owns the feature.
+pub const NUDGE_CHECK_IN_TITLE: Entry = Entry {
+    message_key: "nudges:notification.check_in.title",
+};
+pub const NUDGE_CHECK_IN_BODY: Entry = Entry {
+    message_key: "nudges:notification.check_in.body",
+};
+pub const NUDGE_NO_RESPONSE_TITLE: Entry = Entry {
+    message_key: "nudges:notification.no_response.title",
+};
+pub const NUDGE_NO_RESPONSE_BODY: Entry = Entry {
+    message_key: "nudges:notification.no_response.body",
+};
+
+/// The `nudges.json` message for `locale`, by its `nudges:<key>` key.
+pub fn nudges_message(locale: Locale, key: &str) -> Option<&'static str> {
+    let key = key.strip_prefix("nudges:").unwrap_or(key);
+    nudges_catalog(locale).get(key).map(String::as_str)
+}
+
+/// The label of a nudge entry in `locale`; the key is the fallback.
+pub fn nudges_text(locale: Locale, entry: &Entry) -> &'static str {
+    nudges_message(locale, entry.message_key).unwrap_or(entry.message_key)
+}
+
+fn nudges_catalog(locale: Locale) -> &'static HashMap<String, String> {
+    static CATALOG_EN: OnceLock<HashMap<String, String>> = OnceLock::new();
+    static CATALOG_ES: OnceLock<HashMap<String, String>> = OnceLock::new();
+    match locale {
+        Locale::En => CATALOG_EN.get_or_init(|| parse(NUDGES_EN, "en")),
+        Locale::Es => CATALOG_ES.get_or_init(|| parse(NUDGES_ES, "es")),
+    }
+}
+
 /// The label of an outbox entry in `locale`; the key is the fallback.
 pub fn outbox_text(locale: Locale, entry: &Entry) -> &'static str {
     outbox_message(locale, entry.message_key).unwrap_or(entry.message_key)
@@ -152,14 +195,16 @@ fn parse(raw: &str, lang: &str) -> HashMap<String, String> {
 /// whitelist the night must still hear that Boba is stuck. A store that cannot
 /// be read (still locked) reads as the defaults, which notify: a silent app is
 /// the bug.
-fn allows(settings: &NotificationSettings, notification: Notification, hour: u8) -> bool {
+fn allows(settings: &NotificationSettings, notification: &Notification, hour: u8) -> bool {
     match notification {
         Notification::LockedSearch | Notification::SessionChallengePaused => true,
         Notification::OutboxHold => settings.allows(EventKind::Outbox) && awake(settings, hour),
         Notification::SourceFailing => settings.allows(EventKind::Errors) && awake(settings, hour),
         // A host without the digest port (S5.3) still shows the plain notice,
-        // under the same "the daily digest" choice.
-        Notification::TopMatches { .. } => {
+        // under the same "the daily digest" choice. Follow-up nudges (S9.5) are
+        // the same everyday news, so the same switch and the same quiet hours
+        // hold them.
+        Notification::TopMatches { .. } | Notification::FollowUpNudge { .. } => {
             settings.allows(EventKind::Digest) && awake(settings, hour)
         }
     }
@@ -194,7 +239,7 @@ impl<R: Runtime> TauriNotifier<R> {
 impl<R: Runtime> NotifierPort for TauriNotifier<R> {
     fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
         let hour = boba_app::digest::local_hour(&boba_app::system::SystemClock.now_rfc3339());
-        if !allows(&stored_settings(&self.app), notification, hour) {
+        if !allows(&stored_settings(&self.app), &notification, hour) {
             return Ok(());
         }
         let locale = crate::lifecycle::ui_locale(&self.app);
@@ -227,6 +272,25 @@ impl<R: Runtime> NotifierPort for TauriNotifier<R> {
                     // a plain replace keeps the catalog readable in both
                     // languages without an ICU runtime in the core.
                     text(locale, entry).replace("{count}", &count.to_string()),
+                )
+            }
+            Notification::FollowUpNudge {
+                title,
+                company,
+                days,
+                no_response,
+            } => {
+                let (title_entry, body_entry) = if no_response {
+                    (&NUDGE_NO_RESPONSE_TITLE, &NUDGE_NO_RESPONSE_BODY)
+                } else {
+                    (&NUDGE_CHECK_IN_TITLE, &NUDGE_CHECK_IN_BODY)
+                };
+                (
+                    nudges_text(locale, title_entry),
+                    nudges_text(locale, body_entry)
+                        .replace("{title}", &title)
+                        .replace("{company}", &company)
+                        .replace("{days}", &days.to_string()),
                 )
             }
         };
@@ -297,13 +361,14 @@ mod tests {
         off.events.digest = false;
 
         // Silenced when asked.
-        assert!(!allows(&off, Notification::OutboxHold, 10));
-        assert!(!allows(&off, Notification::SourceFailing, 10));
-        assert!(!allows(&off, Notification::TopMatches { count: 3 }, 10));
+        assert!(!allows(&off, &Notification::OutboxHold, 10));
+        assert!(!allows(&off, &Notification::SourceFailing, 10));
+        assert!(!allows(&off, &Notification::TopMatches { count: 3 }, 10));
+        assert!(!allows(&off, &nudge(), 10));
 
         // Never silenced: a locked store and a paused board need the user.
-        assert!(allows(&off, Notification::LockedSearch, 10));
-        assert!(allows(&off, Notification::SessionChallengePaused, 10));
+        assert!(allows(&off, &Notification::LockedSearch, 10));
+        assert!(allows(&off, &Notification::SessionChallengePaused, 10));
 
         // Everything on by default.
         let on = NotificationSettings::default();
@@ -311,8 +376,9 @@ mod tests {
             Notification::OutboxHold,
             Notification::SourceFailing,
             Notification::TopMatches { count: 1 },
+            nudge(),
         ] {
-            assert!(allows(&on, notification, 10));
+            assert!(allows(&on, &notification, 10));
         }
     }
 
@@ -327,18 +393,48 @@ mod tests {
         night.quiet_hours.from = 22;
         night.quiet_hours.to = 7;
 
-        assert!(!allows(&night, Notification::OutboxHold, 23));
-        assert!(!allows(&night, Notification::SourceFailing, 2));
-        assert!(!allows(&night, Notification::TopMatches { count: 2 }, 6));
-        assert!(allows(&night, Notification::OutboxHold, 9));
+        assert!(!allows(&night, &Notification::OutboxHold, 23));
+        assert!(!allows(&night, &Notification::SourceFailing, 2));
+        assert!(!allows(&night, &Notification::TopMatches { count: 2 }, 6));
+        assert!(!allows(&night, &nudge(), 23));
+        assert!(allows(&night, &Notification::OutboxHold, 9));
 
         // Security notices are exempt from quiet hours.
-        assert!(allows(&night, Notification::LockedSearch, 23));
-        assert!(allows(&night, Notification::SessionChallengePaused, 23));
+        assert!(allows(&night, &Notification::LockedSearch, 23));
+        assert!(allows(&night, &Notification::SessionChallengePaused, 23));
 
         // And a user who asked to keep hearing Boba at night still does.
         night.quiet_hours.notify_during = true;
-        assert!(allows(&night, Notification::OutboxHold, 23));
+        assert!(allows(&night, &Notification::OutboxHold, 23));
+    }
+
+    /// The S9.5 nudge notice, as the sweep hands it over.
+    fn nudge() -> Notification {
+        Notification::FollowUpNudge {
+            title: "Backend Engineer".into(),
+            company: "Nimbus".into(),
+            days: 12,
+            no_response: false,
+        }
+    }
+
+    /// S9.5: both nudge notices resolve in both languages.
+    #[test]
+    fn both_languages_resolve_the_follow_up_nudges() {
+        for locale in [Locale::En, Locale::Es] {
+            for entry in [
+                NUDGE_CHECK_IN_TITLE,
+                NUDGE_CHECK_IN_BODY,
+                NUDGE_NO_RESPONSE_TITLE,
+                NUDGE_NO_RESPONSE_BODY,
+            ] {
+                assert!(
+                    nudges_message(locale, entry.message_key).is_some_and(|text| !text.is_empty()),
+                    "{locale:?} is missing {}",
+                    entry.message_key
+                );
+            }
+        }
     }
 
     #[test]

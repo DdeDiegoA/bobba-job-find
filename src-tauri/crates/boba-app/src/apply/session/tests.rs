@@ -528,6 +528,39 @@ fn ready_harness(fields: Vec<PageField>) -> Harness {
     h
 }
 
+// FR-92 (S9.5): the session panel is warned before the form is handed over.
+#[test]
+fn starting_warns_when_a_similar_application_exists() {
+    let h = harness(vec![]);
+    let mut target = application();
+    target.offer_snapshot_json = serde_json::json!({
+        "company": "Nimbus",
+        "title": "Backend Engineer",
+    })
+    .to_string();
+    seed_cv(&h.apply, &h.documents, &target.id);
+    h.apply.seed_application(Application {
+        id: "app_prior".into(),
+        posting_id: "pst_00".into(),
+        status: AppStatus::Applied,
+        offer_snapshot_json: target.offer_snapshot_json.clone(),
+        notes: None,
+        next_action: None,
+        created_at: "2026-10-16T00:00:00Z".into(),
+        updated_at: "2026-10-16T00:00:00Z".into(),
+    });
+
+    let view = h.service.start(&target, &offer()).unwrap();
+
+    assert_eq!(
+        view.duplicate,
+        Some(crate::apply::guard::DuplicateGuardView {
+            role: "Backend Engineer".into(),
+            days_ago: 1,
+        })
+    );
+}
+
 #[test]
 fn the_form_is_filled_from_the_cv_the_answers_and_the_verified_documents() {
     let h = ready_harness(vec![

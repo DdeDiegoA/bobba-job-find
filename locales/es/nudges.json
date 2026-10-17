@@ -1,1 +1,16 @@
-{}
+{
+  "title": "Seguimientos",
+  "check_in": "{title} en {company} lleva {days} días en silencio. Un mensaje breve y cálido de seguimiento ayuda mucho.",
+  "no_response": "{title} en {company} no ha respondido en {days} días. ¿Hora de darlo por perdido?",
+  "action.no_response": "Marcar sin respuesta",
+  "confirm.no_response": "¿Mover {title} a Sin respuesta?",
+  "confirm.yes": "Mover a Sin respuesta",
+  "confirm.no": "Aún no",
+  "undo.label": "«{title}» pasó a Sin respuesta",
+  "undo.action": "Deshacer",
+  "error.move": "Ese cambio no se guardó. Inténtalo de nuevo.",
+  "notification.check_in.title": "¿Sigues sin noticias?",
+  "notification.check_in.body": "{title} en {company} lleva {days} días en silencio. Un mensaje breve y cálido de seguimiento ayuda mucho.",
+  "notification.no_response.title": "¿Hora de darlo por perdido?",
+  "notification.no_response.body": "{title} en {company} no ha respondido en {days} días. Abre el Seguimiento para marcarlo Sin respuesta."
+}

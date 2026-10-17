@@ -247,6 +247,9 @@ pub struct SessionApplyView {
     pub attached: Vec<String>,
     pub unanswered: Vec<UnansweredField>,
     pub handoff: Option<SessionHandoff>,
+    /// An application to the same company and a similar role inside 30 days
+    /// (S9.5, FR-92). The assist panel warns before the user submits.
+    pub duplicate: Option<crate::apply::guard::DuplicateGuardView>,
 }
 
 /// The evidence a confirmed submission keeps (FR-88).
@@ -408,6 +411,13 @@ impl SessionApplyService {
             attached: step.attached,
             unanswered: step.unanswered,
             handoff: step.handoff,
+            // FR-92 (S9.5): warned before the form is handed over.
+            duplicate: crate::apply::guard::duplicate_for(
+                self.apply.as_ref(),
+                application,
+                &self.clock.now_rfc3339(),
+            )
+            .map_err(ManualError::from)?,
         })
     }
 
@@ -452,6 +462,13 @@ impl SessionApplyService {
             attached: step.attached,
             unanswered: step.unanswered,
             handoff: step.handoff,
+            // FR-92 (S9.5): warned before the form is handed over.
+            duplicate: crate::apply::guard::duplicate_for(
+                self.apply.as_ref(),
+                application,
+                &self.clock.now_rfc3339(),
+            )
+            .map_err(ManualError::from)?,
         })
     }
 

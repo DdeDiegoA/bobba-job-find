@@ -7,7 +7,7 @@
 //! its menu labels.
 
 /// A native notification the core asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Notification {
     /// A scheduled slot was due while the store was locked: "Boba is locked.
     /// Open it to run today's search." (ADR-009 §3, AC4). One per slot.
@@ -28,6 +28,17 @@ pub enum Notification {
     TopMatches {
         /// How many top matches the run produced (never zero).
         count: u32,
+    },
+    /// An Application sat in Applied too long (S9.5, FR-95): a check-in after
+    /// ten days, a No Response suggestion after thirty. One per threshold per
+    /// application, and held back by quiet hours (S5.3).
+    FollowUpNudge {
+        title: String,
+        company: String,
+        /// Whole days the application has been in Applied.
+        days: u32,
+        /// `true` for the thirty-day No Response suggestion.
+        no_response: bool,
     },
 }
 

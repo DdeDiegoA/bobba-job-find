@@ -68,6 +68,9 @@ pub struct EmailApplyView {
     pub ready: bool,
     /// The newest attempt at sending this application, if any (AC2 evidence).
     pub last_attempt: Option<AttemptView>,
+    /// An application to the same company and a similar role inside 30 days
+    /// (S9.5, FR-92). The review screen warns before the send.
+    pub duplicate: Option<crate::apply::guard::DuplicateGuardView>,
 }
 
 /// One attempt as the review screen shows it (AC2).
@@ -238,6 +241,13 @@ impl ApplyEngine {
             pending: gate.pending,
             ready: gate.ready,
             last_attempt: attempts.last().map(AttemptView::from),
+            // FR-92 (S9.5): the review screen says it before the send.
+            duplicate: crate::apply::guard::duplicate_for(
+                self.apply.as_ref(),
+                application,
+                &self.clock.now_rfc3339(),
+            )
+            .map_err(ManualError::from)?,
         })
     }
 
@@ -1036,6 +1046,42 @@ mod tests {
         assert!(view.ready);
         assert!(view.pending.is_empty());
         assert_eq!(view.last_attempt, None);
+    }
+
+    /// A stored snapshot naming one role (S9.5).
+    fn snapshot(company: &str, title: &str) -> String {
+        serde_json::json!({ "company": company, "title": title }).to_string()
+    }
+
+    #[test]
+    fn the_review_warns_when_a_similar_application_exists() {
+        let harness = harness(FakeMail::default());
+        let mut target = application();
+        target.offer_snapshot_json = snapshot("Nimbus", "Backend Engineer");
+        seed_verified_cv(&harness, &target);
+        // Sent four days ago to the same company for the same role (FR-92).
+        harness.apply.seed_application(Application {
+            id: "app_prior".into(),
+            posting_id: "pst_00".into(),
+            status: AppStatus::Applied,
+            offer_snapshot_json: snapshot("Nimbus, Inc.", "Backend Engineer"),
+            notes: None,
+            next_action: None,
+            created_at: "2026-10-13T00:00:00Z".into(),
+            updated_at: "2026-10-13T00:00:00Z".into(),
+        });
+
+        let view = engine(&harness)
+            .review(&target, &offer(Some("jobs@nimbus.example")))
+            .unwrap();
+
+        assert_eq!(
+            view.duplicate,
+            Some(crate::apply::guard::DuplicateGuardView {
+                role: "Backend Engineer".into(),
+                days_ago: 4,
+            })
+        );
     }
 
     #[test]
