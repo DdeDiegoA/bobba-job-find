@@ -13,6 +13,8 @@ boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The stored timestamp form (AD-17): message dates arrive as Unix seconds.
+time = { workspace = true }
 
 # Storage / crypto — versions pinned once in the workspace manifest (S1.1).
 rusqlite = { workspace = true }

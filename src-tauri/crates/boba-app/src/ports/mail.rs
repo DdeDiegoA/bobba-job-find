@@ -64,3 +64,24 @@ pub trait MailPort: Send + Sync {
         message: &'a OutgoingMessage,
     ) -> MailFuture<'a, Result<(), MailError>>;
 }
+
+// ---- Scoped mail reading (S8.3, FR-38/104) --------------------------------
+//
+// The pipeline's message shape lives in `boba_domain::mail` (AD-14); this port
+// is where a matched message stops. `boba-store` implements it without being
+// allowed to depend on the `boba-mail` adapter (AD-1), and `boba-mail`
+// re-exports both the types and the trait so the engine keeps one vocabulary.
+
+use boba_domain::mail::{StoredMessage, SyncError};
+
+/// Where a matched message goes. The `email` adapter writes it to
+/// `email_message`; tests collect it in memory.
+///
+/// `&self` (not `&mut self`) so one sink can be mounted as `Arc<dyn
+/// MessageSink>` and shared by the `email_sync` job; the adapter serialises its
+/// own writes.
+pub trait MessageSink: Send + Sync {
+    /// Persist one matched message. A failure stops the pass: the caller
+    /// records the error and retries from its cursor.
+    fn store(&self, message: StoredMessage<'_>) -> Result<(), SyncError>;
+}

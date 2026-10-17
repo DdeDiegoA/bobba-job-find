@@ -117,6 +117,17 @@ fn body(message: &Message<'_>) -> String {
     cap(text)
 }
 
+/// A provider body (Graph hands one as `contentType` + `content`) reduced to
+/// the pipeline's plain text: HTML is stripped, and the result is capped like a
+/// parsed body. Shared with the Graph reader so both edges behave the same.
+pub(crate) fn body_from(content_type: &str, content: &str) -> String {
+    if content_type.eq_ignore_ascii_case("text") || content_type.eq_ignore_ascii_case("plain") {
+        cap(content.to_string())
+    } else {
+        cap(html_to_text(content))
+    }
+}
+
 /// Keep the first [`MAX_BODY_CHARS`] characters, on a character boundary.
 fn cap(text: String) -> String {
     if text.chars().count() <= MAX_BODY_CHARS {
@@ -173,7 +184,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// Reduce an HTML body to plain text: tags are dropped (a few block elements
 /// become a line break), `<script>`/`<style>` content is skipped, common
 /// entities are decoded, and whitespace is collapsed.
-fn html_to_text(html: &str) -> String {
+pub(crate) fn html_to_text(html: &str) -> String {
     let mut out = String::with_capacity(html.len());
     let mut rest = html;
     while !rest.is_empty() {
@@ -187,31 +198,53 @@ fn html_to_text(html: &str) -> String {
             break;
         };
         let tag = after[1..end].trim_start_matches('/').trim();
-        let name = tag
+        let name: String = tag
             .split(|c: char| c.is_whitespace() || c == '/')
             .next()
             .unwrap_or_default()
-            .to_ascii_lowercase();
+            .chars()
+            .take(16)
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
         match name.as_str() {
             "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
                 out.push('\n');
             }
             "script" | "style" => {
                 // Skip the element's contents entirely: markup source is not
-                // message text.
-                if let Some(close) = after.to_ascii_lowercase().find(&format!("</{name}")) {
-                    let tail = &after[close..];
-                    if let Some(gt) = tail.find('>') {
-                        rest = &tail[gt + 1..];
-                        continue;
+                // message text. The search is case-insensitive in place (a
+                // lowercased copy of the remainder per tag would make a body
+                // full of tags quadratic).
+                match find_ascii_ci(after, &format!("</{name}")) {
+                    Some(close) => {
+                        let tail = &after[close..];
+                        match tail.find('>') {
+                            Some(gt) => rest = &tail[gt + 1..],
+                            None => break,
+                        }
                     }
+                    // An unterminated script has no message text after it;
+                    // stopping also keeps the loop linear.
+                    None => break,
                 }
+                continue;
             }
             _ => {}
         }
         rest = &after[end + 1..];
     }
     collapse_whitespace(&out)
+}
+
+/// Find `needle` in `haystack`, ignoring ASCII case, without allocating.
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let hay = haystack.as_bytes();
+    let needle = needle.as_bytes();
+    if needle.is_empty() || needle.len() > hay.len() {
+        return None;
+    }
+    hay.windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle))
 }
 
 /// Decode the handful of HTML entities a mail body actually uses. An unknown
@@ -392,6 +425,51 @@ mod tests {
             "{}",
             message.body_text
         );
+    }
+
+    #[test]
+    fn many_script_tags_are_stripped_in_linear_time() {
+        let mut html = String::from("<html><body>");
+        for _ in 0..50_000 {
+            html.push_str("<script>alert('x')</script><p>hello</p>");
+        }
+        let started = std::time::Instant::now();
+        let text = html_to_text(&html);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "stripping 50k tags took {:?}",
+            started.elapsed()
+        );
+        assert!(text.contains("hello"));
+        assert!(!text.contains("alert"));
+    }
+
+    #[test]
+    fn fifty_thousand_unclosed_script_tags_stay_fast() {
+        // The exact shape that made the first version quadratic: no closing
+        // tag anywhere, so every later open tag would rescan the whole rest.
+        let html = "<script>".repeat(50_000);
+        let started = std::time::Instant::now();
+        let text = html_to_text(&html);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "stripping 50k unclosed script tags took {:?}",
+            started.elapsed()
+        );
+        assert!(text.is_empty());
+    }
+
+    #[test]
+    fn an_unterminated_script_stops_instead_of_rescanning_the_remainder() {
+        let html = String::from("<p>before</p><script>") + &"<p>after</p>".repeat(50_000);
+        let started = std::time::Instant::now();
+        let text = html_to_text(&html);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "stripping an unterminated script took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(text, "before");
     }
 
     #[test]

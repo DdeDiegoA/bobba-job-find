@@ -38,6 +38,8 @@ tokio-native-tls = { workspace = true }
 # headers (encoded words, addresses, references); already in the lock via the
 # architect's pin.
 mail-parser = { workspace = true }
+# The IMAP fetch drains async-imap's fetch stream (S8.3).
+futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

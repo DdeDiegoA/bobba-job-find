@@ -1,10 +1,10 @@
-//! IMAP connection probe (S8.2, FR-36, architecture §11).
+//! IMAP connection probe and read (S8.2/S8.3, FR-36/FR-38, architecture §11).
 //!
-//! An IMAP/SMTP account is tested **before it is saved** (AC2): this module opens
+//! An IMAP/SMTP account is tested **before it is saved** (AC2): the probe opens
 //! the mailbox read-only (`EXAMINE`, never `SELECT` — no flag or per-user state
-//! can change) and reports what it found. Reading and syncing mail is the sync
-//! owner's job (S8.3); this slice proves the settings and the credential work and
-//! that the connection writes nothing.
+//! can change) and reports what it found. The scoped sync (S8.3) reads through
+//! the same read-only gate: `EXAMINE` + `BODY.PEEK[]`, so fetching a message
+//! never sets `\Seen` and nothing on the server changes.
 //!
 //! The credential is the one the provider issued: an app password (`LOGIN`) or an
 //! OAuth 2.0 access token (`XOAUTH2`). [`Auth`] and [`Security`] live here because
@@ -13,7 +13,11 @@
 
 use std::fmt;
 
+use futures::StreamExt as _;
 use tokio::net::TcpStream;
+
+use crate::eml;
+use crate::sync::RawMessage;
 
 /// How the socket is protected. Both protocols start from plain TCP on their
 /// provider port and are then wrapped or upgraded.
@@ -190,18 +194,7 @@ where
         }
     }
 
-    // A refused credential is the one failure the UI must name precisely, and
-    // the server's own text is not repeated: it has seen the credential.
-    let mut session = match auth {
-        Auth::Password(password) => client
-            .login(settings.username.as_str(), password.as_str())
-            .await
-            .map_err(|_| ImapError::Credentials)?,
-        Auth::XOAuth2(token) => client
-            .authenticate("XOAUTH2", XOAuth2::new(&settings.username, token))
-            .await
-            .map_err(|_| ImapError::Credentials)?,
-    };
+    let mut session = login(client, settings, auth).await?;
 
     // AC2: `EXAMINE`, never `SELECT` — the mailbox is opened read-only, so the
     // test cannot change a flag or any per-user state.
@@ -214,6 +207,171 @@ where
     // The probe has its answer; a refused LOGOUT does not change it.
     let _ = session.logout().await;
     Ok(MailboxProbe { messages })
+}
+
+/// Log in on a fresh client. A refused credential is the one failure the UI
+/// must name precisely, and the server's own text is not repeated: it has seen
+/// the credential.
+async fn login<S>(
+    client: async_imap::Client<S>,
+    settings: &ImapSettings,
+    auth: &Auth,
+) -> Result<async_imap::Session<S>, ImapError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + fmt::Debug + Send,
+{
+    match auth {
+        Auth::Password(password) => client
+            .login(settings.username.as_str(), password.as_str())
+            .await
+            .map_err(|_| ImapError::Credentials),
+        Auth::XOAuth2(token) => client
+            .authenticate("XOAUTH2", XOAuth2::new(&settings.username, token))
+            .await
+            .map_err(|_| ImapError::Credentials),
+    }
+}
+
+/// How many messages one read pass may fetch. A recruiter reply is a handful;
+/// the cap is what keeps a first run on a full inbox bounded.
+pub const MAX_FETCH_MESSAGES: usize = 100;
+
+/// The largest message that is downloaded: the same cap the `.eml` importer
+/// applies, so one oversized attachment cannot stall a run.
+pub const MAX_FETCH_BYTES: u32 = 25 * 1024 * 1024;
+
+/// How many bytes one pass may download in total. A first run on a full inbox
+/// stops at this budget and resumes from the cursor on the next tick.
+pub const MAX_FETCH_BYTES_PER_RUN: u64 = 50 * 1024 * 1024;
+
+/// Read the messages received since `since` (Unix seconds) from `INBOX`, in
+/// read+send mode (FR-38). The mailbox is opened read-only (`EXAMINE`) and each
+/// message is fetched with `BODY.PEEK[]`, so nothing is marked seen.
+///
+/// `now` is the fallback for a message without a usable `Date`; `limit` caps the
+/// number of messages (never more than [`MAX_FETCH_MESSAGES`]).
+pub async fn fetch_inbox(
+    settings: &ImapSettings,
+    auth: &Auth,
+    since: i64,
+    now: i64,
+    limit: usize,
+) -> Result<Vec<RawMessage>, ImapError> {
+    settings.validate()?;
+    let (stream, greeting_read) = connect(settings).await?;
+    fetch(stream, settings, auth, since, now, limit, greeting_read).await
+}
+
+/// The fetch conversation, generic over the socket so a test can drive it over
+/// plain TCP (only [`connect`] needs a certificate).
+async fn fetch<S>(
+    stream: S,
+    settings: &ImapSettings,
+    auth: &Auth,
+    since: i64,
+    now: i64,
+    limit: usize,
+    greeting_read: bool,
+) -> Result<Vec<RawMessage>, ImapError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + fmt::Debug + Send,
+{
+    let mut client = async_imap::Client::new(stream);
+    if !greeting_read {
+        match client.read_response().await {
+            Ok(Some(_)) => {}
+            _ => return Err(ImapError::Connect),
+        }
+    }
+    let mut session = login(client, settings, auth).await?;
+
+    // Read-only, exactly like the probe: `EXAMINE` never changes a flag.
+    session
+        .examine("INBOX")
+        .await
+        .map_err(|_| ImapError::Refused)?;
+
+    let uids = session
+        .uid_search(format!("SINCE {}", imap_date(since)))
+        .await
+        .map_err(|_| ImapError::Refused)?;
+    let mut uids: Vec<u32> = uids.into_iter().collect();
+    uids.sort_unstable();
+    // The newest UIDs are the newest arrivals; keep the window the cursor and
+    // the cap allow.
+    let limit = limit.clamp(1, MAX_FETCH_MESSAGES);
+    if uids.len() > limit {
+        uids = uids.split_off(uids.len() - limit);
+    }
+
+    // Sizes first (cheap), then bodies only for the messages under the caps:
+    // one message never exceeds `MAX_FETCH_BYTES`, and the whole pass never
+    // downloads more than `MAX_FETCH_BYTES_PER_RUN`.
+    let mut wanted: Vec<(u32, u32)> = Vec::new();
+    let mut budget = MAX_FETCH_BYTES_PER_RUN;
+    'sizes: for chunk in uids.chunks(50) {
+        let set = uid_set(chunk);
+        let mut sizes = session
+            .uid_fetch(&set, "(UID RFC822.SIZE)")
+            .await
+            .map_err(|_| ImapError::Refused)?;
+        while let Some(item) = sizes.next().await {
+            let item = item.map_err(|_| ImapError::Refused)?;
+            if let (Some(uid), Some(size)) = (item.uid, item.size)
+                && size <= MAX_FETCH_BYTES
+            {
+                if u64::from(size) > budget {
+                    break 'sizes;
+                }
+                budget -= u64::from(size);
+                wanted.push((uid, size));
+            }
+        }
+    }
+
+    let mut messages = Vec::with_capacity(wanted.len());
+    let wanted: Vec<u32> = wanted.into_iter().map(|(uid, _)| uid).collect();
+    for chunk in wanted.chunks(20) {
+        let set = uid_set(chunk);
+        let mut bodies = session
+            .uid_fetch(&set, "(UID BODY.PEEK[])")
+            .await
+            .map_err(|_| ImapError::Refused)?;
+        while let Some(item) = bodies.next().await {
+            let item = item.map_err(|_| ImapError::Refused)?;
+            let (Some(uid), Some(raw)) = (item.uid, item.body()) else {
+                continue;
+            };
+            // A message the parser cannot read is skipped; the rest of the
+            // mailbox still syncs. Its provider id is the mailbox UID, which is
+            // stable within the connection.
+            if let Ok(mut message) = eml::parse(raw, now) {
+                message.provider_id = format!("imap:{uid}");
+                messages.push(message);
+            }
+        }
+    }
+
+    let _ = session.logout().await;
+    Ok(messages)
+}
+
+fn uid_set(uids: &[u32]) -> String {
+    uids.iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// An IMAP `SINCE` date (`1-Jan-2024`, no leading zero on the day).
+fn imap_date(timestamp: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let date = mail_parser::DateTime::from_timestamp(timestamp);
+    let index = usize::from(date.month).clamp(1, 12) - 1;
+    let month = MONTHS[index];
+    format!("{}-{month}-{}", date.day, date.year)
 }
 
 /// The SASL `XOAUTH2` response (Google's profile): the bearer token in the
@@ -403,6 +561,99 @@ mod tests {
         .expect_err("refused");
         assert_eq!(error, ImapError::Credentials);
         assert!(!format!("{error}").contains("wrong"));
+    }
+
+    #[tokio::test]
+    async fn fetch_reads_new_messages_without_marking_them_seen() {
+        let raw = |id: &str| {
+            format!(
+                "From: ana@acme.example\r\nSubject: {id}\r\n\
+                 Date: Mon, 1 Jan 2024 10:00:00 +0000\r\n\
+                 Message-ID: <{id}@acme.example>\r\n\r\nHello from {id}\r\n"
+            )
+        };
+        let first = raw("m1");
+        let second = raw("m2");
+        let (addr, seen) = fake_imap("* OK ready\r\n", move |tag, command| {
+            if command.starts_with("LOGIN") {
+                format!("{tag} OK LOGIN completed\r\n")
+            } else if command.starts_with("EXAMINE") {
+                format!("* 2 EXISTS\r\n* OK [READ-ONLY] done\r\n{tag} OK EXAMINE completed\r\n")
+            } else if command.starts_with("UID SEARCH") {
+                format!("* SEARCH 7 9\r\n{tag} OK SEARCH completed\r\n")
+            } else if command.contains("BODY.PEEK[]") {
+                format!(
+                    "* 1 FETCH (UID 7 BODY[] {{{}}}\r\n{})\r\n\
+                     * 2 FETCH (UID 9 BODY[] {{{}}}\r\n{})\r\n\
+                     {tag} OK FETCH completed\r\n",
+                    first.len(),
+                    first,
+                    second.len(),
+                    second
+                )
+            } else if command.contains("RFC822.SIZE") {
+                format!(
+                    "* 1 FETCH (UID 7 RFC822.SIZE {})\r\n\
+                     * 2 FETCH (UID 9 RFC822.SIZE {})\r\n\
+                     {tag} OK FETCH completed\r\n",
+                    first.len(),
+                    second.len()
+                )
+            } else if command.starts_with("LOGOUT") {
+                format!("* BYE\r\n{tag} OK LOGOUT completed\r\n")
+            } else {
+                format!("{tag} BAD unknown\r\n")
+            }
+        })
+        .await;
+
+        let stream = TcpStream::connect(addr).await.expect("connect");
+        let messages = fetch(
+            stream,
+            &settings(addr),
+            &Auth::Password("app-password".to_string()),
+            1_704_000_000,
+            1_760_000_000,
+            10,
+            false,
+        )
+        .await
+        .expect("fetch");
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].provider_id, "imap:7");
+        assert_eq!(messages[1].provider_id, "imap:9");
+        assert_eq!(messages[0].subject, "m1");
+        assert_eq!(messages[1].subject, "m2");
+        assert!(messages[0].body_text.contains("Hello from m1"));
+
+        let commands = seen.lock().expect("lock").clone();
+        assert!(
+            commands
+                .iter()
+                .any(|line| line.contains("UID SEARCH SINCE")),
+            "the search is bounded by the cursor date: {commands:?}"
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|line| line.contains("EXAMINE \"INBOX\"")),
+            "the mailbox is opened read-only: {commands:?}"
+        );
+        assert!(
+            !commands.iter().any(|line| line.contains("SELECT")),
+            "SELECT would open the mailbox read-write: {commands:?}"
+        );
+        assert!(
+            commands.iter().any(|line| line.contains("BODY.PEEK[]")),
+            "PEEK is what keeps the message unread: {commands:?}"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|line| line.to_ascii_uppercase().contains("STORE")),
+            "a read never changes a flag: {commands:?}"
+        );
     }
 
     #[test]

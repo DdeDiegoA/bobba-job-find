@@ -15,12 +15,26 @@
 //! adapter (Gmail BYO in S8.5).
 //!
 //! The pass is incremental: the caller passes the cursor it stored, and every
-//! message at or before it is skipped without being stored again. The 60-day
+//! message older than it is skipped without being stored again. The 60-day
 //! lookback default bounds how far back a pass reads (FR-38); a manual import
 //! is user-initiated and bypasses the window, while retention (FR-113) still
 //! applies to what is stored.
+//!
+//! ## Wiring
+//!
+//! [`MessageSink`] is implemented by `boba-store` over `email_message`
+//! (migration `0025_email_messages.sql`) and mounted as a port; the scheduler's
+//! `email_sync` handler builds the scope from the Tracker (the addresses
+//! applications were sent to, the Offer hosts and the sent `Message-ID`s),
+//! reads each read+send connection (`graph::fetch_inbox`, `imap::fetch_inbox`,
+//! both read-only and capped) and calls [`run`] with the cursor it stored. S8.4
+//! then reads the stored rows for classification; S10.3 sweeps them by
+//! `received_at`.
 
 use std::collections::BTreeSet;
+
+pub use boba_app::ports::mail::MessageSink;
+pub use boba_domain::mail::{ImportOrigin, MatchReason, RawMessage, StoredMessage, SyncError};
 
 /// The default lookback window: messages older than this are not read during a
 /// sync (FR-38).
@@ -59,88 +73,6 @@ pub const ATS_SENDER_DOMAINS: &[&str] = &[
     "join.com",
     "recruiterbox.com",
 ];
-
-/// Which part of a message made it through the scope filter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MatchReason {
-    /// The sender is on a domain of a company the user applied to.
-    CompanyDomain,
-    /// The sender is a known ATS.
-    AtsSender,
-    /// The message is a reply to a thread the app started.
-    SentThread,
-}
-
-impl MatchReason {
-    /// The stored text form (mirrors `email_message.matched_by`).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::CompanyDomain => "company_domain",
-            Self::AtsSender => "ats_sender",
-            Self::SentThread => "sent_thread",
-        }
-    }
-}
-
-/// Where a stored message entered the pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ImportOrigin {
-    /// Fetched from a connected mailbox during a sync pass.
-    #[default]
-    Sync,
-    /// Handed in by the user as an `.eml` file or pasted text (FR-104).
-    Eml,
-}
-
-impl ImportOrigin {
-    /// The stored text form (mirrors `email_message.origin`).
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Sync => "sync",
-            Self::Eml => "eml",
-        }
-    }
-}
-
-/// One message as an adapter (Graph, IMAP, Gmail or the `.eml` importer)
-/// normalised it. Bodies are plain text only; HTML never travels further
-/// (AD-7).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RawMessage {
-    /// The id the source assigned, stable across a re-delivery. For an `.eml`
-    /// file this is its Message-ID or a hash of the bytes.
-    pub provider_id: String,
-    /// The `Message-ID` header, normalised (no angle brackets, lowercase).
-    pub message_id: Option<String>,
-    /// `In-Reply-To` ids, normalised like `message_id`.
-    pub in_reply_to: Vec<String>,
-    /// `References` ids, normalised like `message_id`.
-    pub references: Vec<String>,
-    /// The `From` address, as the header carried it.
-    pub from_address: String,
-    /// The display name in `From`, when the header had one.
-    pub from_name: Option<String>,
-    /// The `To` addresses.
-    pub to_addresses: Vec<String>,
-    /// The `Subject` line.
-    pub subject: String,
-    /// The `Date` header, in Unix seconds (UTC).
-    pub received_at: i64,
-    /// The plain-text body, already stripped of markup.
-    pub body_text: String,
-    /// Whether the message carries attachments (metadata only: attachments are
-    /// never stored).
-    pub has_attachments: bool,
-}
-
-impl RawMessage {
-    /// The lowercased domain of [`RawMessage::from_address`], when it has one.
-    pub fn sender_domain(&self) -> Option<String> {
-        let (_, domain) = self.from_address.trim().rsplit_once('@')?;
-        let domain = normalize_domain(domain);
-        (!domain.is_empty()).then_some(domain)
-    }
-}
 
 /// What the caller knows about the Applications before a pass runs. It is
 /// built by the core from the Tracker, never by an adapter.
@@ -236,58 +168,36 @@ impl MessageScope {
 pub struct SyncRequest {
     /// The pass's clock, in Unix seconds.
     pub now: i64,
-    /// The cursor from the previous pass: messages at or before it were already
+    /// The cursor from the previous pass: messages older than it were already
     /// scanned and are skipped (incremental sync).
     pub after: Option<i64>,
     /// Whether a mailbox adapter or the manual importer asked for the pass.
     pub origin: ImportOrigin,
+    /// The connection a mailbox pass belongs to; `None` for an import.
+    pub account: Option<String>,
 }
 
 impl SyncRequest {
-    /// An incremental pass over a mailbox (FR-38).
-    pub fn incremental(now: i64, after: Option<i64>) -> Self {
+    /// An incremental pass over one connected mailbox (FR-38).
+    pub fn incremental(account: impl Into<String>, now: i64, after: Option<i64>) -> Self {
         Self {
             now,
             after,
             origin: ImportOrigin::Sync,
+            account: Some(account.into()),
         }
     }
 
-    /// A manual import (FR-104): no cursor and no lookback window.
+    /// A manual import (FR-104): no connection, no cursor and no lookback
+    /// window.
     pub fn import(now: i64) -> Self {
         Self {
             now,
             after: None,
             origin: ImportOrigin::Eml,
+            account: None,
         }
     }
-}
-
-/// A message that passed the scope filter, handed to the storage adapter.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StoredMessage<'a> {
-    /// The normalised message.
-    pub message: &'a RawMessage,
-    /// Why it was kept.
-    pub matched_by: MatchReason,
-    /// Where it came from.
-    pub origin: ImportOrigin,
-}
-
-/// Where a matched message goes. The `email` adapter writes it to
-/// `email_message`; tests collect it in memory.
-pub trait MessageSink {
-    /// Persist one matched message. A failure stops the pass: the caller
-    /// records the error and retries from its cursor.
-    fn store(&mut self, message: StoredMessage<'_>) -> Result<(), SyncError>;
-}
-
-/// Failures of one pass.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum SyncError {
-    /// The storage adapter could not write a matched message.
-    #[error("the email store failed: {0}")]
-    Store(String),
 }
 
 /// What one pass did.
@@ -301,9 +211,10 @@ pub struct SyncReport {
     pub discarded: usize,
     /// How many fell outside the lookback window.
     pub too_old: usize,
-    /// How many were at or before the cursor, or a duplicate delivery.
+    /// How many were older than the cursor, or a duplicate delivery.
     pub already_seen: usize,
-    /// The cursor to store for the next pass: the newest `received_at` seen.
+    /// The cursor to store for the next pass: the newest `received_at` seen,
+    /// never later than the pass's `now`.
     pub next_after: Option<i64>,
 }
 
@@ -314,11 +225,16 @@ pub struct SyncReport {
 /// duplicate ids (an incremental pass is idempotent), then the scope match.
 /// Only a matched message calls [`MessageSink::store`], so nothing else is ever
 /// written.
+///
+/// The cursor is deliberately conservative: a message is skipped only when it
+/// is **older** than the cursor (two messages can share a timestamp, and the
+/// sink's unique key makes re-storing one harmless), and a message dated in the
+/// future cannot push the cursor past `now`.
 pub fn run(
     messages: impl IntoIterator<Item = RawMessage>,
     scope: &MessageScope,
     request: &SyncRequest,
-    sink: &mut dyn MessageSink,
+    sink: &dyn MessageSink,
 ) -> Result<SyncReport, SyncError> {
     let mut report = SyncReport {
         next_after: request.after,
@@ -327,16 +243,15 @@ pub fn run(
     let mut seen: BTreeSet<String> = BTreeSet::new();
     for message in messages {
         report.scanned += 1;
-        report.next_after = Some(report.next_after.map_or(message.received_at, |cursor| {
-            cursor.max(message.received_at)
-        }));
+        let stamp = message.received_at.min(request.now);
+        report.next_after = Some(report.next_after.map_or(stamp, |cursor| cursor.max(stamp)));
         if request.origin == ImportOrigin::Sync && !scope.in_window(&message, request.now) {
             report.too_old += 1;
             continue;
         }
         if request
             .after
-            .is_some_and(|cursor| message.received_at <= cursor)
+            .is_some_and(|cursor| message.received_at < cursor)
         {
             report.already_seen += 1;
             continue;
@@ -353,9 +268,13 @@ pub fn run(
             message: &message,
             matched_by,
             origin: request.origin,
+            account_id: request.account.as_deref(),
         })?;
         report.stored += 1;
     }
+    // A cursor left in the future by an earlier skewed clock is pulled back to
+    // the pass's clock, so it cannot hide real mail from now on.
+    report.next_after = report.next_after.map(|cursor| cursor.min(request.now));
     Ok(report)
 }
 
@@ -399,6 +318,7 @@ mod tests {
 
     const NOW: i64 = 1_760_000_000;
     const DAY: i64 = 24 * 60 * 60;
+    const ACCOUNT: &str = "acc-1";
 
     fn message(provider_id: &str, from: &str, received_at: i64) -> RawMessage {
         RawMessage {
@@ -413,16 +333,30 @@ mod tests {
 
     #[derive(Default)]
     struct Collector {
-        stored: Vec<RawMessage>,
-        reasons: Vec<MatchReason>,
-        origins: Vec<ImportOrigin>,
+        stored: std::sync::Mutex<Vec<RawMessage>>,
+        reasons: std::sync::Mutex<Vec<MatchReason>>,
+        origins: std::sync::Mutex<Vec<ImportOrigin>>,
+    }
+
+    impl Collector {
+        fn stored(&self) -> Vec<RawMessage> {
+            self.stored.lock().unwrap().clone()
+        }
+
+        fn reasons(&self) -> Vec<MatchReason> {
+            self.reasons.lock().unwrap().clone()
+        }
+
+        fn origins(&self) -> Vec<ImportOrigin> {
+            self.origins.lock().unwrap().clone()
+        }
     }
 
     impl MessageSink for Collector {
-        fn store(&mut self, message: StoredMessage<'_>) -> Result<(), SyncError> {
-            self.stored.push(message.message.clone());
-            self.reasons.push(message.matched_by);
-            self.origins.push(message.origin);
+        fn store(&self, message: StoredMessage<'_>) -> Result<(), SyncError> {
+            self.stored.lock().unwrap().push(message.message.clone());
+            self.reasons.lock().unwrap().push(message.matched_by);
+            self.origins.lock().unwrap().push(message.origin);
             Ok(())
         }
     }
@@ -430,7 +364,7 @@ mod tests {
     struct BrokenSink;
 
     impl MessageSink for BrokenSink {
-        fn store(&mut self, _message: StoredMessage<'_>) -> Result<(), SyncError> {
+        fn store(&self, _message: StoredMessage<'_>) -> Result<(), SyncError> {
             Err(SyncError::Store("disk full".to_string()))
         }
     }
@@ -518,42 +452,42 @@ mod tests {
 
     #[test]
     fn an_unrelated_message_is_discarded_before_the_sink() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [message("m1", "friend@personal.example", NOW - DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.discarded, 1);
         assert_eq!(report.stored, 0);
-        assert!(collector.stored.is_empty());
+        assert!(collector.stored().is_empty());
     }
 
     #[test]
     fn a_message_older_than_the_lookback_is_not_even_matched() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [message("m1", "talent@acme.example", NOW - 61 * DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.too_old, 1);
         assert_eq!(report.stored, 0);
-        assert!(collector.stored.is_empty());
+        assert!(collector.stored().is_empty());
     }
 
     #[test]
     fn the_lookback_window_follows_the_message_date() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [message("m1", "talent@acme.example", NOW - 60 * DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.stored, 1, "the boundary day is inside the window");
@@ -561,21 +495,21 @@ mod tests {
 
     #[test]
     fn a_custom_lookback_is_honoured() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [message("m1", "talent@acme.example", NOW - 10 * DAY)],
             &scope().with_lookback_days(7),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.too_old, 1);
-        assert!(collector.stored.is_empty());
+        assert!(collector.stored().is_empty());
     }
 
     #[test]
-    fn an_incremental_pass_skips_messages_at_or_before_the_cursor() {
-        let mut collector = Collector::default();
+    fn an_incremental_pass_skips_messages_older_than_the_cursor() {
+        let collector = Collector::default();
         let report = run(
             [
                 message("m1", "talent@acme.example", NOW - 5 * DAY),
@@ -583,27 +517,68 @@ mod tests {
                 message("m3", "talent@acme.example", NOW - DAY),
             ],
             &scope(),
-            &SyncRequest::incremental(NOW, Some(NOW - 2 * DAY)),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, Some(NOW - 2 * DAY)),
+            &collector,
         )
         .expect("pass");
-        assert_eq!(report.already_seen, 2);
+        assert_eq!(report.already_seen, 1);
+        assert_eq!(report.stored, 2);
+        assert_eq!(collector.stored().len(), 2);
+    }
+
+    #[test]
+    fn a_message_in_the_cursor_second_is_not_lost() {
+        // Two messages can share a timestamp; skipping everything at the
+        // cursor would drop the second one forever.
+        let collector = Collector::default();
+        let report = run(
+            [message("m1", "talent@acme.example", NOW - DAY)],
+            &scope(),
+            &SyncRequest::incremental(ACCOUNT, NOW, Some(NOW - DAY)),
+            &collector,
+        )
+        .expect("pass");
+        assert_eq!(report.already_seen, 0);
         assert_eq!(report.stored, 1);
-        assert_eq!(collector.stored.len(), 1);
-        assert_eq!(collector.stored[0].provider_id, "m3");
+    }
+
+    #[test]
+    fn a_future_date_never_pushes_the_cursor_past_now() {
+        let collector = Collector::default();
+        let report = run(
+            [message("m1", "talent@acme.example", NOW + 30 * DAY)],
+            &scope(),
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
+        )
+        .expect("pass");
+        assert_eq!(report.next_after, Some(NOW));
+    }
+
+    #[test]
+    fn a_future_cursor_from_a_skewed_clock_is_pulled_back_to_now() {
+        let collector = Collector::default();
+        let report = run(
+            [message("m1", "talent@acme.example", NOW - DAY)],
+            &scope(),
+            &SyncRequest::incremental(ACCOUNT, NOW, Some(NOW + 10 * DAY)),
+            &collector,
+        )
+        .expect("pass");
+        assert_eq!(report.next_after, Some(NOW));
     }
 
     #[test]
     fn a_re_delivered_message_is_stored_once() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [
                 message("m1", "talent@acme.example", NOW - DAY),
                 message("m1", "talent@acme.example", NOW - DAY),
             ],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.stored, 1);
@@ -612,15 +587,15 @@ mod tests {
 
     #[test]
     fn the_cursor_moves_to_the_newest_scanned_message_even_when_discarded() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [
                 message("m1", "friend@personal.example", NOW - DAY),
                 message("m2", "talent@acme.example", NOW - 3 * DAY),
             ],
             &scope(),
-            &SyncRequest::incremental(NOW, Some(NOW - 10 * DAY)),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, Some(NOW - 10 * DAY)),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.next_after, Some(NOW - DAY));
@@ -628,12 +603,12 @@ mod tests {
 
     #[test]
     fn the_cursor_never_moves_backwards() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [message("m1", "talent@acme.example", NOW - 5 * DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, Some(NOW - DAY)),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, Some(NOW - DAY)),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.next_after, Some(NOW - DAY));
@@ -641,23 +616,23 @@ mod tests {
 
     #[test]
     fn a_matched_message_reports_why_it_was_kept_and_where_it_came_from() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         run(
             [message("m1", "no-reply@greenhouse.io", NOW - DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
-        assert_eq!(collector.reasons, vec![MatchReason::AtsSender]);
-        assert_eq!(collector.origins, vec![ImportOrigin::Sync]);
+        assert_eq!(collector.reasons(), vec![MatchReason::AtsSender]);
+        assert_eq!(collector.origins(), vec![ImportOrigin::Sync]);
         assert_eq!(MatchReason::AtsSender.as_str(), "ats_sender");
         assert_eq!(ImportOrigin::Sync.as_str(), "sync");
     }
 
     #[test]
     fn the_report_counts_every_message_once() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [
                 message("m1", "friend@personal.example", NOW - DAY),
@@ -666,8 +641,8 @@ mod tests {
                 message("m4", "talent@acme.example", NOW - 200 * DAY),
             ],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut collector,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.scanned, 4);
@@ -682,8 +657,8 @@ mod tests {
         let err = run(
             [message("m1", "talent@acme.example", NOW - DAY)],
             &scope(),
-            &SyncRequest::incremental(NOW, None),
-            &mut BrokenSink,
+            &SyncRequest::incremental(ACCOUNT, NOW, None),
+            &BrokenSink,
         )
         .expect_err("store failure");
         assert_eq!(err, SyncError::Store("disk full".to_string()));
@@ -691,7 +666,7 @@ mod tests {
 
     #[test]
     fn a_manual_import_ignores_the_lookback_window_but_still_matches() {
-        let mut collector = Collector::default();
+        let collector = Collector::default();
         let report = run(
             [
                 message("m1", "talent@acme.example", NOW - 200 * DAY),
@@ -699,13 +674,13 @@ mod tests {
             ],
             &scope(),
             &SyncRequest::import(NOW),
-            &mut collector,
+            &collector,
         )
         .expect("pass");
         assert_eq!(report.stored, 1, "an old reply the user picked is kept");
         assert_eq!(report.discarded, 1);
         assert_eq!(report.too_old, 0);
-        assert_eq!(collector.origins, vec![ImportOrigin::Eml]);
+        assert_eq!(collector.origins(), vec![ImportOrigin::Eml]);
         assert_eq!(ImportOrigin::Eml.as_str(), "eml");
     }
 }

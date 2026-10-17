@@ -6,6 +6,7 @@ pub mod audit;
 pub mod dedup;
 pub mod documents;
 pub mod keywords;
+pub mod mail;
 pub mod posting;
 pub mod posting_features;
 pub mod profile;

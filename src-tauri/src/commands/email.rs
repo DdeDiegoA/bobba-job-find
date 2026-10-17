@@ -11,26 +11,35 @@
 //! mode and disconnects.
 
 use boba_app::error::{AppError, AppResult, ErrorCode};
+use boba_app::jobs::{JobHandler, JobKind};
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::email::{
     ClientIdKind, EmailAccount, EmailMode, EmailRepo, MailProvider, OFFLINE_ACCESS_SCOPE,
 };
+use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::outbox::OutboxRepo;
+use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::secret::SecretPort;
 use boba_app::system::SystemClock;
 use boba_mail::gmail::{
     self, BUNDLED_GMAIL_CLIENT_ID, BUNDLED_GMAIL_CLIENT_SECRET, GMAIL_SEND_SCOPE, GmailSecret,
 };
+use boba_mail::graph::GraphMail;
 use boba_mail::imap::{self, Auth, ImapError, ImapSettings};
 use boba_mail::oauth::{
     self, BUNDLED_GRAPH_CLIENT_ID, OAuthError as FlowError, PendingFlow, ProviderEndpoints,
     STATE_TTL, TokenSet, loopback,
 };
 use boba_mail::smtp::{self, ImapSmtpSecret, SmtpError, SmtpSettings};
+use boba_mail::sync::{self, MessageScope, MessageSink, RawMessage, SyncRequest};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
+use tauri::{AppHandle, Runtime};
 
 use crate::wiring;
 
@@ -812,6 +821,235 @@ fn stored_tokens(provider: MailProvider, stored: &str) -> Option<TokenSet> {
     }
 }
 
+// --- Scoped sync (S8.3, FR-38/104/113) ---
+
+/// The `setting` row that carries one connection's sync cursor: the Unix second
+/// of the newest message scanned. AD-18: a pass re-reads only newer mail, and
+/// the sink's unique key makes an overlapping window harmless.
+pub const SYNC_CURSOR_PREFIX: &str = "email.sync.cursor.";
+
+/// How many messages one run reads per connection (the readers cap too).
+const SYNC_READ_LIMIT: usize = 100;
+
+/// Mount the `email_sync` job. Called as one line from `port_list` (ADR-012).
+pub fn mount<R: Runtime>(app: &AppHandle<R>) {
+    let registered = crate::scheduler::register_handler(
+        app,
+        JobKind::EmailSync,
+        Arc::new(EmailSyncHandler::new(app)),
+    );
+    if !registered {
+        tracing::warn!("email sync handler was not registered");
+    }
+}
+
+/// The scheduled reply sync (FR-38): read+send connections only, scoped to the
+/// Applications, incremental from the stored cursor.
+///
+/// A locked store never reaches this handler — the scheduler records the slot
+/// `skipped_locked` and notifies (S5.1, ADR-009); the ports resolving here is
+/// the proof the store is open.
+pub struct EmailSyncHandler<R: Runtime> {
+    app: AppHandle<R>,
+}
+
+impl<R: Runtime> EmailSyncHandler<R> {
+    /// A handler for the app it will read its ports from.
+    pub fn new(app: &AppHandle<R>) -> Self {
+        Self { app: app.clone() }
+    }
+}
+
+impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
+    fn run(&self, job: JobKind) -> Result<(), String> {
+        if job != JobKind::EmailSync {
+            return Err(format!("{} is not this handler's job", job.as_str()));
+        }
+        let port = |key: &str, error: AppError| format!("{key}: {}", error.message_key);
+        let accounts =
+            wiring::port::<dyn EmailRepo>(&self.app).map_err(|error| port("email repo", error))?;
+        let secrets = wiring::port::<dyn SecretPort>(&self.app)
+            .map_err(|error| port("secret port", error))?;
+        let sink = wiring::port::<dyn MessageSink>(&self.app)
+            .map_err(|error| port("message sink", error))?;
+        let system = wiring::port::<dyn SystemRepo>(&self.app)
+            .map_err(|error| port("system repo", error))?;
+        let apply =
+            wiring::port::<dyn ApplyRepo>(&self.app).map_err(|error| port("apply repo", error))?;
+        let outbox = wiring::port::<dyn OutboxRepo>(&self.app)
+            .map_err(|error| port("outbox repo", error))?;
+        let offers = wiring::port::<dyn IngestionRepo>(&self.app)
+            .map_err(|error| port("ingestion repo", error))?;
+
+        let connected: Vec<EmailAccount> = accounts
+            .list_accounts()
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .filter(|account| account.mode == EmailMode::ReadSend)
+            .collect();
+        if connected.is_empty() {
+            return Ok(());
+        }
+
+        let scope = sync_scope(apply.as_ref(), outbox.as_ref(), offers.as_ref())?;
+        let now = i64::try_from(oauth::now_unix()).unwrap_or(i64::MAX);
+        let graph = GraphMail::new(Arc::clone(&secrets), Arc::clone(&accounts))
+            .map_err(|error| error.to_string())?;
+
+        for account in connected {
+            let after = read_cursor(system.as_ref(), &account.id)?;
+            let since = after.unwrap_or_else(|| scope.cutoff(now));
+            let messages = match account.provider {
+                MailProvider::MicrosoftGraph => tauri::async_runtime::block_on(graph.fetch_inbox(
+                    &account.id,
+                    since,
+                    now,
+                    SYNC_READ_LIMIT,
+                ))
+                .map_err(|error| error.to_string())?,
+                MailProvider::ImapSmtp => {
+                    let stored = secrets
+                        .get(&account.secret_ref)
+                        .map_err(|_| "the keychain could not be read".to_string())?
+                        .ok_or_else(|| "the connection needs to be authorised again".to_string())?;
+                    let secret =
+                        ImapSmtpSecret::from_json(&stored).map_err(|error| error.to_string())?;
+                    tauri::async_runtime::block_on(boba_mail::imap::fetch_inbox(
+                        &secret.imap,
+                        &secret.credential,
+                        since,
+                        now,
+                        SYNC_READ_LIMIT,
+                    ))
+                    .map_err(|error| error.to_string())?
+                }
+                // Gmail's bundled client has no read scope; the BYO read lands
+                // with S8.5.
+                MailProvider::Gmail => continue,
+            };
+            sync_pass(
+                &account.id,
+                messages,
+                &scope,
+                now,
+                after,
+                sink.as_ref(),
+                system.as_ref(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Run one connection's pass and persist its cursor. Split out so the wiring
+/// (handler → `sync::run` → sink → cursor) is exercised without a mailbox.
+fn sync_pass(
+    account_id: &str,
+    messages: Vec<RawMessage>,
+    scope: &MessageScope,
+    now: i64,
+    after: Option<i64>,
+    sink: &dyn MessageSink,
+    system: &dyn SystemRepo,
+) -> Result<usize, String> {
+    let request = SyncRequest::incremental(account_id, now, after);
+    let report = sync::run(messages, scope, &request, sink).map_err(|error| error.to_string())?;
+    if let Some(next) = report.next_after
+        && Some(next) != after
+    {
+        let updated_at = ClockPort::now_rfc3339(&boba_app::system::SystemClock);
+        system
+            .setting_put(&cursor_key(account_id), &next.to_string(), &updated_at)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(report.stored)
+}
+
+/// The scope for one pass: the domains applications were sent to (and the
+/// company hosts their Offers live on), plus the `Message-ID`s of what Boba
+/// sent, so a reply in one of those threads is recognised.
+fn sync_scope(
+    apply: &dyn ApplyRepo,
+    outbox: &dyn OutboxRepo,
+    offers: &dyn IngestionRepo,
+) -> Result<MessageScope, String> {
+    let mut domains: Vec<String> = Vec::new();
+    let mut sent: Vec<String> = Vec::new();
+    for application in apply.applications().map_err(|error| error.to_string())? {
+        for attempt in outbox
+            .attempts_for(&application.id)
+            .map_err(|error| error.to_string())?
+        {
+            if let Some(domain) = email_domain(&attempt.recipient) {
+                domains.push(domain);
+            }
+            if let Some(message_id) = attempt.message_id {
+                sent.push(message_id);
+            }
+        }
+        // The Offer may still exist; a missing one only costs a domain.
+        if let Ok(Some(offer)) = offers.get_offer(&application.posting_id) {
+            if let Some(email) = offer.apply.email.as_deref()
+                && let Some(domain) = email_domain(email)
+            {
+                domains.push(domain);
+            }
+            if let Some(host) = url_host(&offer.apply.url) {
+                domains.extend(host_variants(&host));
+            }
+        }
+    }
+    domains.sort();
+    domains.dedup();
+    sent.sort();
+    sent.dedup();
+    Ok(MessageScope::new(domains, Vec::<String>::new(), sent))
+}
+
+/// The domain of an email address, lowercased; `None` when it has none.
+fn email_domain(address: &str) -> Option<String> {
+    let (_, domain) = address.trim().rsplit_once('@')?;
+    let domain = domain.trim().trim_end_matches('.').to_ascii_lowercase();
+    (!domain.is_empty()).then_some(domain)
+}
+
+/// The host of an apply URL, when it parses.
+fn url_host(url: &str) -> Option<String> {
+    url::Url::parse(url).ok()?.host_str().map(str::to_string)
+}
+
+/// A host and, when it has a subdomain, its parent: an Offer on
+/// `careers.acme.com` must let a reply from `acme.com` through. No public-suffix
+/// list is shipped; one label is dropped, which is the conservative direction
+/// (it can only widen matching to the same company).
+fn host_variants(host: &str) -> Vec<String> {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() > 2 {
+        let parent = labels[1..].join(".");
+        vec![host, parent]
+    } else {
+        vec![host]
+    }
+}
+
+/// The cursor for one connection.
+fn read_cursor(system: &dyn SystemRepo, account_id: &str) -> Result<Option<i64>, String> {
+    system
+        .setting_get(&cursor_key(account_id))
+        .map_err(|error| error.to_string())?
+        .map(|value| {
+            value
+                .parse::<i64>()
+                .map_err(|_| format!("the sync cursor of {account_id} is not a timestamp"))
+        })
+        .transpose()
+}
+
+fn cursor_key(account_id: &str) -> String {
+    format!("{SYNC_CURSOR_PREFIX}{account_id}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -1214,5 +1452,239 @@ mod tests {
         let error = AppError::from(failure);
         assert_eq!(error.code, ErrorCode::NotFound);
         assert_eq!(error.message_key, "errors.email.unknown_connection");
+    }
+
+    // --- Scoped sync (S8.3, FR-38) ---
+
+    use boba_app::ports::repo::system::{NewIntent, SettingRecord, SystemRepoError};
+    use boba_domain::audit::{AuditOutcome, AuditRow, ChainStatus};
+
+    #[derive(Default)]
+    struct SyncSink(Mutex<Vec<RawMessage>>);
+
+    impl MessageSink for SyncSink {
+        fn store(
+            &self,
+            message: boba_mail::sync::StoredMessage<'_>,
+        ) -> Result<(), boba_mail::sync::SyncError> {
+            self.0.lock().unwrap().push(message.message.clone());
+            Ok(())
+        }
+    }
+
+    impl SyncSink {
+        fn messages(&self) -> Vec<RawMessage> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// The settings half of `SystemRepo`, which is all a sync pass touches.
+    #[derive(Default)]
+    struct MemorySettings(std::sync::Mutex<std::collections::BTreeMap<String, SettingRecord>>);
+
+    impl SystemRepo for MemorySettings {
+        fn setting_get(&self, key: &str) -> Result<Option<String>, SystemRepoError> {
+            Ok(self.0.lock().unwrap().get(key).map(|row| row.value.clone()))
+        }
+
+        fn setting_put(
+            &self,
+            key: &str,
+            value: &str,
+            updated_at: &str,
+        ) -> Result<(), SystemRepoError> {
+            self.0.lock().unwrap().insert(
+                key.to_string(),
+                SettingRecord {
+                    key: key.to_string(),
+                    value: value.to_string(),
+                    updated_at: updated_at.to_string(),
+                },
+            );
+            Ok(())
+        }
+
+        fn setting_list(&self) -> Result<Vec<SettingRecord>, SystemRepoError> {
+            Ok(self.0.lock().unwrap().values().cloned().collect())
+        }
+
+        fn setting_delete(&self, key: &str) -> Result<bool, SystemRepoError> {
+            Ok(self.0.lock().unwrap().remove(key).is_some())
+        }
+
+        fn audit_append_intent(&self, _: &NewIntent) -> Result<AuditRow, SystemRepoError> {
+            unreachable!("the mail sync does not write the audit log")
+        }
+
+        fn audit_append_outcome(
+            &self,
+            _: &AuditRow,
+            _: AuditOutcome,
+            _: &str,
+            _: &str,
+        ) -> Result<AuditRow, SystemRepoError> {
+            unreachable!("the mail sync does not write the audit log")
+        }
+
+        fn audit_head_hash(&self) -> Result<Option<String>, SystemRepoError> {
+            unreachable!("the mail sync does not read the audit log")
+        }
+
+        fn audit_verify_chain(&self) -> Result<ChainStatus, SystemRepoError> {
+            unreachable!("the mail sync does not read the audit log")
+        }
+
+        fn audit_unresolved_intents(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
+            unreachable!("the mail sync does not read the audit log")
+        }
+
+        fn audit_anchor_get(&self) -> Result<Option<String>, SystemRepoError> {
+            unreachable!("the mail sync does not read the audit log")
+        }
+
+        fn audit_anchor_is_known(&self, _: &str) -> Result<bool, SystemRepoError> {
+            unreachable!("the mail sync does not read the audit log")
+        }
+
+        fn audit_anchor_set(&self, _: &str) -> Result<(), SystemRepoError> {
+            unreachable!("the mail sync does not write the audit log")
+        }
+    }
+
+    const NOW: i64 = 1_760_000_000;
+    const DAY: i64 = 24 * 60 * 60;
+
+    fn incoming(id: &str, from: &str, received_at: i64) -> RawMessage {
+        RawMessage {
+            provider_id: id.to_string(),
+            from_address: from.to_string(),
+            subject: "hello".to_string(),
+            body_text: "body".to_string(),
+            received_at,
+            ..RawMessage::default()
+        }
+    }
+
+    fn sync_scope_for() -> MessageScope {
+        MessageScope::new(
+            ["acme.example".to_string()],
+            Vec::<String>::new(),
+            ["sent-1@boba.local".to_string()],
+        )
+    }
+
+    #[test]
+    fn a_pass_goes_through_run_and_the_sink_and_stores_the_cursor() {
+        let sink = SyncSink::default();
+        let system = MemorySettings::default();
+        let stored = sync_pass(
+            "acc-1",
+            vec![
+                incoming("m1", "ana@acme.example", NOW - DAY),
+                incoming("m2", "friend@personal.example", NOW - DAY),
+            ],
+            &sync_scope_for(),
+            NOW,
+            None,
+            &sink,
+            &system,
+        )
+        .expect("pass");
+
+        assert_eq!(stored, 1);
+        assert_eq!(sink.messages().len(), 1);
+        assert_eq!(sink.messages()[0].provider_id, "m1");
+        assert_eq!(
+            read_cursor(&system, "acc-1").expect("cursor"),
+            Some(NOW - DAY)
+        );
+    }
+
+    #[test]
+    fn a_second_pass_skips_mail_older_than_the_stored_cursor() {
+        let sink = SyncSink::default();
+        let system = MemorySettings::default();
+        let scope = sync_scope_for();
+        let first = sync_pass(
+            "acc-1",
+            vec![incoming("m1", "ana@acme.example", NOW - 10 * DAY)],
+            &scope,
+            NOW,
+            None,
+            &sink,
+            &system,
+        )
+        .expect("first");
+        assert_eq!(first, 1);
+
+        let cursor = read_cursor(&system, "acc-1").expect("cursor");
+        let second = sync_pass(
+            "acc-1",
+            vec![
+                incoming("m0", "ana@acme.example", NOW - 20 * DAY),
+                // A message in the cursor's own second is genuinely ambiguous
+                // (two mails can share a timestamp), so it is re-offered; the
+                // sink's unique key is what makes it one row.
+                incoming("m1", "ana@acme.example", NOW - 10 * DAY),
+                incoming("m2", "talent@acme.example", NOW - DAY),
+            ],
+            &scope,
+            NOW,
+            cursor,
+            &sink,
+            &system,
+        )
+        .expect("second");
+        assert_eq!(
+            second, 2,
+            "the older message is skipped, the other two are offered"
+        );
+        let stored_ids: Vec<String> = sink
+            .messages()
+            .into_iter()
+            .map(|message| message.provider_id)
+            .collect();
+        assert!(!stored_ids.contains(&"m0".to_string()), "{stored_ids:?}");
+        assert_eq!(
+            read_cursor(&system, "acc-1").expect("cursor"),
+            Some(NOW - DAY)
+        );
+    }
+
+    #[test]
+    fn a_corrupt_cursor_is_an_error_not_a_silent_rescan() {
+        let system = MemorySettings::default();
+        system
+            .setting_put(&cursor_key("acc-1"), "not-a-timestamp", "t")
+            .expect("seed");
+        assert!(read_cursor(&system, "acc-1").is_err());
+    }
+
+    #[test]
+    fn company_domains_come_from_the_addresses_applications_were_sent_to() {
+        assert_eq!(
+            email_domain("Talent@ACME.example."),
+            Some("acme.example".to_string())
+        );
+        assert_eq!(email_domain("not-an-address"), None);
+    }
+
+    #[test]
+    fn an_offer_host_also_covers_its_parent_domain() {
+        assert_eq!(
+            url_host("https://careers.acme.example/jobs/1"),
+            Some("careers.acme.example".to_string())
+        );
+        assert_eq!(
+            host_variants("careers.acme.example"),
+            vec![
+                "careers.acme.example".to_string(),
+                "acme.example".to_string()
+            ]
+        );
+        assert_eq!(
+            host_variants("acme.example"),
+            vec!["acme.example".to_string()]
+        );
     }
 }

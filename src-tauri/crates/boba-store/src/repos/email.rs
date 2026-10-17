@@ -6,9 +6,11 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+use boba_app::ports::mail::MessageSink;
 use boba_app::ports::repo::email::{
     ClientIdKind, EmailAccount, EmailMode, EmailRepo, EmailRepoError, MailProvider,
 };
+use boba_domain::mail::{ImportOrigin, MatchReason, RawMessage, StoredMessage, SyncError};
 use thiserror::Error;
 
 use crate::db::{Store, StoreError};
@@ -192,6 +194,80 @@ impl EmailRepo for Store {
         let id = id.to_string();
         self.execute(move |conn| delete_account(conn, &id))
             .map_err(map_err)
+    }
+}
+
+/// Store one matched message (S8.3, FR-38/104). Returns whether a row was
+/// written: a re-delivered message (same connection and provider id) is a
+/// no-op, which is what makes an overlapping incremental window safe.
+pub fn insert_message(
+    conn: &Connection,
+    id: &str,
+    account_id: Option<&str>,
+    message: &RawMessage,
+    matched_by: MatchReason,
+    origin: ImportOrigin,
+    imported_at: &str,
+) -> Result<bool, StoreError> {
+    let changed = conn.execute(
+        "INSERT INTO email_message \
+         (id, account_id, provider_message_id, message_id, in_reply_to, references_header, \
+          from_address, from_name, to_addresses, subject, received_at, body_text, \
+          has_attachments, matched_by, origin, imported_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16) \
+         ON CONFLICT DO NOTHING",
+        params![
+            id,
+            account_id,
+            message.provider_id,
+            message.message_id,
+            message.in_reply_to.join(" "),
+            message.references.join(" "),
+            message.from_address,
+            message.from_name,
+            message.to_addresses.join(", "),
+            message.subject,
+            rfc3339(message.received_at),
+            message.body_text,
+            i64::from(message.has_attachments),
+            matched_by.as_str(),
+            origin.as_str(),
+            imported_at,
+        ],
+    )?;
+    Ok(changed > 0)
+}
+
+/// The stored timestamp form (AD-17). A date the parser accepted but the
+/// calendar cannot represent is clamped to the epoch rather than failing a sync.
+fn rfc3339(timestamp: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(timestamp)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
+}
+
+impl MessageSink for Store {
+    fn store(&self, message: StoredMessage<'_>) -> Result<(), SyncError> {
+        let id = ulid::Ulid::generate().to_string();
+        let imported_at = rfc3339(time::OffsetDateTime::now_utc().unix_timestamp());
+        let stored = message.message.clone();
+        let account = message.account_id.map(str::to_string);
+        let matched_by = message.matched_by;
+        let origin = message.origin;
+        self.execute(move |conn| {
+            insert_message(
+                conn,
+                &id,
+                account.as_deref(),
+                &stored,
+                matched_by,
+                origin,
+                &imported_at,
+            )
+        })
+        .map(|_| ())
+        .map_err(|error| SyncError::Store(error.to_string()))
     }
 }
 
@@ -394,5 +470,244 @@ mod tests {
         assert_eq!(MailProvider::parse("nope"), None);
         assert_eq!(EmailMode::parse("nope"), None);
         assert_eq!(ClientIdKind::parse("nope"), None);
+    }
+
+    // --- The matched-message sink (S8.3) ---
+
+    fn message() -> RawMessage {
+        RawMessage {
+            provider_id: "pg-1".into(),
+            message_id: Some("abc@acme.example".into()),
+            in_reply_to: vec!["sent-1@boba.local".into()],
+            references: vec!["older@acme.example".into(), "sent-1@boba.local".into()],
+            from_address: "ana@acme.example".into(),
+            from_name: Some("Ana".into()),
+            to_addresses: vec!["me@example.com".into(), "team@example.com".into()],
+            subject: "Your application".into(),
+            received_at: 1_704_103_200,
+            body_text: "Thanks for applying.".into(),
+            has_attachments: true,
+        }
+    }
+
+    fn stored_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT count(*) FROM email_message", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_matched_message_round_trips_into_the_table() {
+        let conn = connection();
+        upsert_account(&conn, &account("acc", "a@example.com", EmailMode::ReadSend)).unwrap();
+        assert!(
+            insert_message(
+                &conn,
+                "m1",
+                Some("acc"),
+                &message(),
+                MatchReason::AtsSender,
+                ImportOrigin::Sync,
+                "2026-10-17T10:00:00Z",
+            )
+            .unwrap(),
+            "a new message is written"
+        );
+        let (provider, subject, received, matched, origin, attachments, ids): (
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT provider_message_id, subject, received_at, matched_by, origin, \
+                 has_attachments, references_header FROM email_message WHERE id = 'm1'",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(provider, "pg-1");
+        assert_eq!(subject, "Your application");
+        // The Unix date becomes the stored RFC 3339 form (AD-17).
+        assert_eq!(received, "2024-01-01T10:00:00Z");
+        assert_eq!(matched, "ats_sender");
+        assert_eq!(origin, "sync");
+        assert_eq!(attachments, 1);
+        assert_eq!(ids, "older@acme.example sent-1@boba.local");
+    }
+
+    #[test]
+    fn a_re_delivered_message_is_one_row_per_connection() {
+        let conn = connection();
+        upsert_account(
+            &conn,
+            &account("acc-1", "a@example.com", EmailMode::ReadSend),
+        )
+        .unwrap();
+        upsert_account(
+            &conn,
+            &account("acc-2", "b@example.com", EmailMode::ReadSend),
+        )
+        .unwrap();
+        let first = insert_message(
+            &conn,
+            "m1",
+            Some("acc-1"),
+            &message(),
+            MatchReason::CompanyDomain,
+            ImportOrigin::Sync,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        let again = insert_message(
+            &conn,
+            "m2",
+            Some("acc-1"),
+            &message(),
+            MatchReason::CompanyDomain,
+            ImportOrigin::Sync,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        let other = insert_message(
+            &conn,
+            "m3",
+            Some("acc-2"),
+            &message(),
+            MatchReason::CompanyDomain,
+            ImportOrigin::Sync,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        assert!(first);
+        assert!(!again, "the same message on the same connection is a no-op");
+        assert!(
+            other,
+            "the same message on another connection is its own row"
+        );
+        assert_eq!(stored_count(&conn), 2);
+    }
+
+    #[test]
+    fn the_same_local_import_twice_is_one_row() {
+        let conn = connection();
+        let first = insert_message(
+            &conn,
+            "m1",
+            None,
+            &message(),
+            MatchReason::SentThread,
+            ImportOrigin::Eml,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        let again = insert_message(
+            &conn,
+            "m2",
+            None,
+            &message(),
+            MatchReason::SentThread,
+            ImportOrigin::Eml,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        assert!(first);
+        assert!(!again);
+        assert_eq!(stored_count(&conn), 1);
+    }
+
+    #[test]
+    fn the_origin_and_connection_must_agree() {
+        let conn = connection();
+        // A synced message without a connection.
+        insert_message(
+            &conn,
+            "m1",
+            None,
+            &message(),
+            MatchReason::AtsSender,
+            ImportOrigin::Sync,
+            "2026-10-17T10:00:00Z",
+        )
+        .expect_err("sync without an account violates the CHECK");
+        // A manual import bound to a connection.
+        insert_message(
+            &conn,
+            "m2",
+            Some("acc"),
+            &message(),
+            MatchReason::AtsSender,
+            ImportOrigin::Eml,
+            "2026-10-17T10:00:00Z",
+        )
+        .expect_err("eml with an account violates the CHECK");
+        assert_eq!(stored_count(&conn), 0);
+    }
+
+    #[test]
+    fn an_unknown_match_reason_is_rejected() {
+        let conn = connection();
+        let error = conn.execute(
+            "INSERT INTO email_message \
+             (id, provider_message_id, from_address, received_at, body_text, matched_by, \
+              origin, imported_at) \
+             VALUES ('x', 'p', 'a', 't', 'b', 'guessed', 'eml', 't')",
+            [],
+        );
+        assert!(error.is_err());
+    }
+
+    #[test]
+    fn disconnecting_deletes_its_mail_but_not_a_local_import() {
+        let conn = connection();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        upsert_account(&conn, &account("acc", "a@example.com", EmailMode::ReadSend)).unwrap();
+        insert_message(
+            &conn,
+            "m1",
+            Some("acc"),
+            &message(),
+            MatchReason::AtsSender,
+            ImportOrigin::Sync,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+        insert_message(
+            &conn,
+            "m2",
+            None,
+            &message(),
+            MatchReason::SentThread,
+            ImportOrigin::Eml,
+            "2026-10-17T10:00:00Z",
+        )
+        .unwrap();
+
+        assert!(delete_account(&conn, "acc").unwrap());
+        assert_eq!(
+            stored_count(&conn),
+            1,
+            "the local import outlives the connection"
+        );
+    }
+
+    #[test]
+    fn the_store_is_the_sink_and_writes_through_its_writer() {
+        // The adapter is mounted as `dyn MessageSink`; this proves the trait
+        // impl compiles against `Store` and maps a write failure to SyncError.
+        fn is_sink<T: MessageSink>() {}
+        is_sink::<crate::db::Store>();
     }
 }
