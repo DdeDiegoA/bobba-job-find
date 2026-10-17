@@ -106,7 +106,7 @@ data. The checks CI runs are listed in [CONTRIBUTING.md](CONTRIBUTING.md).
 |---|---|
 | Use the app | [docs/user-guide/](docs/user-guide/getting-started.md) |
 | Install or update it | [docs/install/](docs/install/README.md) |
-| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Contribute | [CONTRIBUTING.md](CONTRIBUTING.md), [docs/contributing/](docs/contributing/conventions.md) |
 | Report a security issue | [SECURITY.md](SECURITY.md), [docs/security/](docs/security/) |
 | Understand the design | [docs/architecture/](docs/architecture/ARCHITECTURE-SPINE.md), [docs/design/](docs/design/DESIGN.md) |
 | See what the product promises | [docs/product/PRD.md](docs/product/PRD.md) |
