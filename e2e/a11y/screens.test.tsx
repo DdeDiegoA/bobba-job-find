@@ -562,6 +562,10 @@ describe("Applying (AC1)", () => {
     fireEvent.keyDown(accept, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(cancel);
 
+    // B1: focus that escapes the dialog is pulled straight back in.
+    screen.getByRole("button", { name: "New rule" }).focus();
+    expect(document.activeElement).toBe(accept);
+
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(enable);

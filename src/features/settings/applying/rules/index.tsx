@@ -81,14 +81,24 @@ export default function SettingsApplyingRules() {
   const [channel, setChannel] = useState("email");
   const [decision, setDecision] = useState<DecisionView | null>(null);
   const acceptRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   // A11Y-7: the confirmation is a real modal. Focus moves into it, Esc closes
   // it, Tab stays inside, and focus returns to the control that opened it.
+  // Anything that focuses outside while it is open (a stray Tab, a script) is
+  // pulled back to the checkbox — `aria-modal` promises that much.
   useEffect(() => {
     if (!confirming) return;
     acceptRef.current?.focus();
+    function onFocusIn(event: FocusEvent) {
+      const dialog = dialogRef.current;
+      const target = event.target as Node | null;
+      if (dialog && target && !dialog.contains(target)) acceptRef.current?.focus();
+    }
+    document.addEventListener("focusin", onFocusIn);
     return () => {
+      document.removeEventListener("focusin", onFocusIn);
       const trigger = document.querySelector<HTMLButtonElement>('[data-slot="enable-auto"]');
       if (trigger?.isConnected) trigger.focus();
       else titleRef.current?.focus();
@@ -197,6 +207,7 @@ export default function SettingsApplyingRules() {
 
             {confirming ? (
               <div
+                ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="auto-confirm-title"

@@ -164,8 +164,9 @@ panel with `role="dialog" aria-modal="true"` inline in the page; focus stayed on
 the trigger and Tab walked the whole screen.
 
 **Fixed (CH14):** the confirmation is a real modal — focus moves to the acceptance
-checkbox on open, Tab wraps inside it, Escape closes it, and focus returns to
-"Enable Auto" (or to the screen title when Auto turned on and that button left).
+checkbox on open, Tab wraps inside it, any focus that lands outside is pulled back
+in, Escape closes it, and focus returns to "Enable Auto" (or to the screen title
+when Auto turned on and that button left).
 **Evidence:** `screens.test.tsx` — "is a real modal: focus moves in, Tab is trapped,
 Esc closes and restores focus".
 
