@@ -107,6 +107,12 @@ pub struct SessionSnapshot {
     pub boards: Vec<BoardView>,
 }
 
+/// The page a load opened, without its query or fragment: the audit row names
+/// the board page, never the user's search terms or location (S11.1b R-b).
+fn page_url(url: &str) -> &str {
+    url.split(['?', '#']).next().unwrap_or(url)
+}
+
 /// The Session Board opt-in, sign-out and pause use case.
 pub struct SessionBoardService<C> {
     sources: Arc<dyn SourcesRepo>,
@@ -282,7 +288,9 @@ impl<C: ClockPort> SessionBoardService<C> {
         self.session_source(source_id)?;
         let detail = serde_json::json!({
             "source_id": source_id,
-            "url": url,
+            // R-b (S11.1b review): search keywords and locations stay out of
+            // the audit log; the page itself is what the row is about.
+            "url": page_url(url),
             "loads_today": loads_today,
         });
         self.audited(
@@ -791,6 +799,46 @@ mod tests {
         assert_eq!(actions, vec![OPT_IN_ACTION, OPT_IN_ACTION]);
         assert!(h.system.detail(OPT_IN_ACTION).contains("linkedin"));
         assert!(h.system.detail(OPT_IN_ACTION).contains(WARNING_VERSION));
+    }
+
+    #[test]
+    fn a_page_load_is_audited_without_the_query() {
+        let h = harness(CookieProtection::MacosKeychain);
+        h.service
+            .record_page_load(
+                "linkedin",
+                "https://www.linkedin.com/jobs/search/?keywords=rust&location=Madrid",
+                3,
+            )
+            .unwrap();
+        let detail = h.system.detail(PAGE_LOAD_ACTION);
+        assert!(
+            detail.contains("https://www.linkedin.com/jobs/search/"),
+            "{detail}"
+        );
+        assert!(!detail.contains("keywords"), "{detail}");
+        assert!(!detail.contains("Madrid"), "{detail}");
+        assert!(detail.contains("\"loads_today\":3"), "{detail}");
+        assert_eq!(
+            h.system.setting_get(&loads_key("linkedin", NOW)).unwrap(),
+            Some("3".to_string()),
+            "the day's counter is what the next run reads"
+        );
+    }
+
+    #[test]
+    fn a_page_load_for_a_source_that_is_not_a_board_is_refused() {
+        let h = harness(CookieProtection::MacosKeychain);
+        assert!(matches!(
+            h.service
+                .record_page_load("remotive", "https://remotive.com/api/remote-jobs", 1),
+            Err(SessionBoardError::NotSessionBoard(_))
+        ));
+        assert!(matches!(
+            h.service
+                .record_page_load("telepathy", "https://example.com/", 1),
+            Err(SessionBoardError::UnknownSource(_))
+        ));
     }
 
     #[test]
