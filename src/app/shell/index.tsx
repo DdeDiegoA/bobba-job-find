@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
+import CommandPalette from "@/app/palette";
 import { useTheme } from "@/app/theme";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IDLE_RUN_STATE, NAV_ITEMS, type RunState } from "./nav";
@@ -110,6 +111,8 @@ export function Shell() {
         </div>
       </div>
       <ResizeFloor />
+      {/* S6.7's leaf (EXPERIENCE §6): the command palette, opened by Cmd/Ctrl+K. */}
+      <CommandPalette />
     </>
   );
 }

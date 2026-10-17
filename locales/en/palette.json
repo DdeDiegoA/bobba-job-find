@@ -1,1 +1,24 @@
-{}
+{
+  "title": "Command palette",
+  "placeholder": "Search pages and Offers…",
+  "results": "Results",
+  "pages": "Pages",
+  "offers": "Offers",
+  "empty": "No matches",
+  "hint": "Enter to open · Esc to close",
+  "offer": {
+    "untitled": "Untitled offer"
+  },
+  "triage": {
+    "hint": "Triage: J/K move · S save · D dismiss · Enter open · {mod}+Z undo",
+    "saved": "Saved “{title}”",
+    "dismissed": "Dismissed “{title}”",
+    "undone": "Restored “{title}”",
+    "undo": "Undo",
+    "error": "That action did not go through"
+  },
+  "announce": {
+    "offer": "{title}. Verdict: {verdict}. Fit {fit}. Quality {quality}.",
+    "unscored": "Not scored yet"
+  }
+}

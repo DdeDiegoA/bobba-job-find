@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { usePaletteStore } from "@/app/palette/store";
 import { ThemeProvider } from "@/app/theme";
 import { NotFound, Shell } from "./index";
 import type { RunState } from "./nav";
@@ -15,6 +16,11 @@ const EXPECTED_NAV = [
   "/connections",
   "/settings",
 ];
+
+beforeEach(() => {
+  // S6.7: the palette is store-driven, so every test starts with it closed.
+  usePaletteStore.setState({ open: false });
+});
 
 function renderShell(initialPath = "/") {
   return render(
@@ -125,10 +131,12 @@ describe("Shell — topbar (AC1)", () => {
 });
 
 describe("Shell — keyboard shortcuts (AC1/EXPERIENCE §6)", () => {
-  it("Cmd/Ctrl+K focuses the search trigger", () => {
+  it("Cmd/Ctrl+K opens the command palette (S6.7)", () => {
     renderShell("/");
     fireEvent.keyDown(window, { key: "k", metaKey: true });
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Search" }));
+    // The trigger's job since S6.7 is to open the palette, which takes the focus.
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("combobox"));
   });
 
   it("Cmd/Ctrl+digit jumps to the matching destination", () => {
