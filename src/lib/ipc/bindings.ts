@@ -188,6 +188,26 @@ export const commands = {
     ),
   /**  A manual "Run now" over IPC (FR-41). Registered in `ipc::command_list`. */
   jobsRunNow: () => typedError<RunNowOutcome, AppError_Serialize>(__TAURI_INVOKE("jobs_run_now")),
+  /**  The channels and the copy-ready kit for one application (AC1/AC2). */
+  applyView: (applicationId: string) =>
+    typedError<ManualView, AppError_Serialize>(__TAURI_INVOKE("apply_view", { applicationId })),
+  /**
+   *  Mark the application Applied after the user applied by hand (AC2). The core
+   *  re-checks Ready + verified first, so a manual apply never attaches a draft
+   *  the checks did not pass (AD-14).
+   */
+  applyMarkApplied: (applicationId: string) =>
+    typedError<ManualView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_mark_applied", { applicationId }),
+    ),
+  /**
+   *  Write the kit's PDFs for the user to attach by hand and return where they
+   *  are (AD-14: only Ready and verified documents reach the folder).
+   */
+  applyExportPdfs: (applicationId: string) =>
+    typedError<ExportedFile[], AppError_Serialize>(
+      __TAURI_INVOKE("apply_export_pdfs", { applicationId }),
+    ),
 };
 
 /** Events */
@@ -307,6 +327,15 @@ export type BoardColumn = {
 export type BoardView = {
   columns: BoardColumn[];
 };
+
+/**  One way to apply, as the apply bar shows it (FR-81). */
+export type ChannelView =
+  /**  Write to the posting's apply address. */
+  | { kind: "email_apply"; address: string }
+  /**  Fill the employer's hosted ATS form. */
+  | { kind: "ats_form"; provider: string; url: string }
+  /**  Open the original page and apply by hand. */
+  | { kind: "manual"; url: string };
 
 /**  The checks one version of a draft must pass before it may be sent (AD-14). */
 export type ChecksView = {
@@ -608,6 +637,22 @@ export type Finding_Serialize = {
   suggestion?: string | null;
 };
 
+/**  One screening answer the user approved, ready to copy (S7.8). */
+export type KitAnswerView = {
+  question: string;
+  answer: string;
+  class: string;
+};
+
+/**  One verified PDF the user can attach by hand (AD-14). */
+export type KitDocumentView = {
+  document_id: string;
+  /**  `cv` or `cover_letter`. */
+  kind: string;
+  lang: string;
+  version: number;
+};
+
 /**  The layout facts of the last render (S7.5/S7.6). */
 export type LayoutView = {
   pages: number;
@@ -669,6 +714,29 @@ export type ManualOffer = {
   apply_url: string;
   /**  BCP-47 content language of the posting. */
   lang: string;
+};
+
+/**  Everything the Manual apply bar shows for one application (AC1/AC2). */
+export type ManualView = {
+  application_id: string;
+  posting_id: string;
+  title: string;
+  company: string;
+  /**  The stored status (`saved`, `drafted`, `applied`…). */
+  status: string;
+  /**  Email Apply, ATS Form and Manual, in that order (FR-81). */
+  channels: ChannelView[];
+  /**  The package's Ready and verified documents; empty until they render. */
+  documents: KitDocumentView[];
+  /**  The approved answers, oldest first. */
+  answers: KitAnswerView[];
+  /**
+   *  Kinds whose newest draft is not Ready and verified (AD-14), so the bar
+   *  can say so while a manual apply is still the user's to do.
+   */
+  pending: string[];
+  /**  Whether every draft in the package passed the attachable check (AD-14). */
+  ready: boolean;
 };
 
 /**  Salary period (AD-17). */
