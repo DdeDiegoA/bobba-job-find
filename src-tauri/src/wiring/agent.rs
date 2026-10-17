@@ -151,8 +151,8 @@ fn is_shim(path: &Path) -> bool {
             .is_some_and(|name| name.starts_with(SHIM_NAME) && !name.ends_with(".d"))
 }
 
-/// Forward a run's events to the UI as the typed `task.progressed` and
-/// `task.finished` facts (AD-3). `message_key` is an i18n key, never prose.
+/// Forward a run's events to the UI as the typed `task:progressed` and
+/// `task:finished` facts (AD-3). `message_key` is an i18n key, never prose.
 fn agent_emitter<R: Runtime>(app: &AppHandle<R>) -> Arc<Emitter> {
     let app = app.clone();
     Arc::new(move |run_id: &str, seq: i64, event: &AgentEvent| {
@@ -163,7 +163,9 @@ fn agent_emitter<R: Runtime>(app: &AppHandle<R>) -> Arc<Emitter> {
             total: None,
             message_key: failure_of(event).map(|reason| reason.message_key().to_string()),
         };
-        let _ = progress.emit(&app);
+        if let Err(error) = progress.emit(&app) {
+            tracing::warn!(run = run_id, %error, "task:progressed not delivered");
+        }
 
         if let Some((outcome, message_key)) = terminal_of(event) {
             let finished = TaskFinished {
@@ -172,7 +174,9 @@ fn agent_emitter<R: Runtime>(app: &AppHandle<R>) -> Arc<Emitter> {
                 outcome,
                 message_key,
             };
-            let _ = finished.emit(&app);
+            if let Err(error) = finished.emit(&app) {
+                tracing::warn!(run = run_id, %error, "task:finished not delivered");
+            }
         }
     })
 }

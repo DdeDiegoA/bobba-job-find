@@ -1,10 +1,18 @@
 //! Typed domain events and the cancellable-task registry (AD-3).
 //!
-//! Events are past-tense facts named `<area>.<thing>.<verb-ed>`. Long-running
-//! work registers a [`TaskHandle`] here, reports `task.progressed` while it
-//! runs, observes cancellation through its [`CancellationToken`], and reports
-//! `task.finished` when it ends. The UI subscribes to invalidate TanStack Query
-//! caches; it never polls.
+//! # Event names (CH10)
+//!
+//! Tauri 2.12 accepts only alphanumeric characters and `-`, `/`, `:`, `_` in an
+//! event name. A `.` is rejected by `EventName::new`, and the emit fails
+//! (`IllegalEventName`), so every event is named `<area>:<verb-ed>` here, with
+//! `_` inside a segment: `task:progressed`, `run_report:progressed`. Never use a
+//! dot. `ipc::tests::every_registered_event_name_is_legal_for_tauri` walks every
+//! registered event through Tauri's own validation, so a dotted name fails CI.
+//!
+//! Events are past-tense facts. Long-running work registers a [`TaskHandle`]
+//! here, reports `task:progressed` while it runs, observes cancellation through
+//! its [`CancellationToken`], and reports `task:finished` when it ends. The UI
+//! subscribes to invalidate TanStack Query caches; it never polls.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -15,11 +23,11 @@ use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio_util::sync::CancellationToken;
 
-/// Progress for a long task, emitted as `task.progressed`.
+/// Progress for a long task, emitted as `task:progressed`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-#[tauri_specta(event_name = "task.progressed")]
+#[tauri_specta(event_name = "task:progressed")]
 pub struct TaskProgressed {
-    /// Stable id of the task instance (matches the `task.finished` id).
+    /// Stable id of the task instance (matches the `task:finished` id).
     pub task_id: String,
     /// Owning area, e.g. `agent.run`, `ingest.run`, `apply.attempt`.
     pub area: String,
@@ -43,9 +51,9 @@ pub enum TaskOutcome {
     Failed,
 }
 
-/// Terminal event for a long task, emitted as `task.finished`.
+/// Terminal event for a long task, emitted as `task:finished`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-#[tauri_specta(event_name = "task.finished")]
+#[tauri_specta(event_name = "task:finished")]
 pub struct TaskFinished {
     /// Id of the task that ended.
     pub task_id: String,
@@ -145,7 +153,7 @@ impl TaskHandle {
         self.token.is_cancelled()
     }
 
-    /// Emit `task.progressed`.
+    /// Emit `task:progressed`.
     pub fn progress(
         &self,
         app: &AppHandle,
@@ -153,25 +161,29 @@ impl TaskHandle {
         total: Option<u32>,
         message_key: Option<&str>,
     ) {
-        let _ = TaskProgressed {
+        let event = TaskProgressed {
             task_id: self.task_id.clone(),
             area: self.area.clone(),
             done,
             total,
             message_key: message_key.map(str::to_owned),
+        };
+        if let Err(error) = event.emit(app) {
+            tracing::warn!(task = %self.task_id, %error, "task:progressed not delivered");
         }
-        .emit(app);
     }
 
-    /// Emit `task.finished` and unregister the task.
+    /// Emit `task:finished` and unregister the task.
     pub fn finished(&self, app: &AppHandle, outcome: TaskOutcome, message_key: Option<&str>) {
-        let _ = TaskFinished {
+        let event = TaskFinished {
             task_id: self.task_id.clone(),
             area: self.area.clone(),
             outcome,
             message_key: message_key.map(str::to_owned),
+        };
+        if let Err(error) = event.emit(app) {
+            tracing::warn!(task = %self.task_id, %error, "task:finished not delivered");
         }
-        .emit(app);
         self.registry.remove(&self.task_id);
     }
 }

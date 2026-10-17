@@ -136,13 +136,13 @@ impl RunReportView {
     }
 }
 
-/// A run's live progress, emitted as `run_report.progressed` (AC1).
+/// A run's live progress, emitted as `run_report:progressed` (AC1).
 ///
 /// One event per phase: `started` (the run began against `total` Sources),
 /// `source` (one Source's turn ended, `done` of `total` now finished) and
 /// `finished` (the report is stored; the screen reads it).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Event)]
-#[tauri_specta(event_name = "run_report.progressed")]
+#[tauri_specta(event_name = "run_report:progressed")]
 pub struct RunReportProgressed {
     pub run_id: String,
     /// `started` | `source` | `finished`.
@@ -165,7 +165,7 @@ struct EventObserver<R: Runtime> {
 
 impl<R: Runtime> RunObserver for EventObserver<R> {
     fn run_started(&self, run_id: &str, total: u32) {
-        let _ = RunReportProgressed {
+        let event = RunReportProgressed {
             run_id: run_id.to_string(),
             phase: "started".to_string(),
             done: 0,
@@ -174,12 +174,14 @@ impl<R: Runtime> RunObserver for EventObserver<R> {
             source_name: None,
             outcome: None,
             partial: None,
+        };
+        if let Err(error) = event.emit(&self.app) {
+            tracing::warn!(run = run_id, phase = "started", %error, "run_report:progressed not delivered");
         }
-        .emit(&self.app);
     }
 
     fn source_finished(&self, run_id: &str, report: &SourceReport, done: u32, total: u32) {
-        let _ = RunReportProgressed {
+        let event = RunReportProgressed {
             run_id: run_id.to_string(),
             phase: "source".to_string(),
             done,
@@ -188,12 +190,14 @@ impl<R: Runtime> RunObserver for EventObserver<R> {
             source_name: Some(report.name.clone()),
             outcome: Some(report.outcome.as_str().to_string()),
             partial: None,
+        };
+        if let Err(error) = event.emit(&self.app) {
+            tracing::warn!(run = run_id, phase = "source", %error, "run_report:progressed not delivered");
         }
-        .emit(&self.app);
     }
 
     fn run_finished(&self, report: &RunReport) {
-        let _ = RunReportProgressed {
+        let event = RunReportProgressed {
             run_id: report.run_id.clone(),
             phase: "finished".to_string(),
             done: report.sources.len() as u32,
@@ -202,8 +206,10 @@ impl<R: Runtime> RunObserver for EventObserver<R> {
             source_name: None,
             outcome: None,
             partial: Some(report.is_partial()),
+        };
+        if let Err(error) = event.emit(&self.app) {
+            tracing::warn!(run = %report.run_id, phase = "finished", %error, "run_report:progressed not delivered");
         }
-        .emit(&self.app);
     }
 }
 
@@ -747,7 +753,7 @@ pub async fn run_report_latest(app: tauri::AppHandle) -> AppResult<Option<RunRep
 }
 
 /// Retry the Sources the newest report could not reach (AC3): re-queries only
-/// those, on its own thread, and emits `run_report.progressed` as it works.
+/// those, on its own thread, and emits `run_report:progressed` as it works.
 /// Returns as soon as the retry starts; the screen follows the events.
 #[tauri::command]
 #[specta::specta]
