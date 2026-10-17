@@ -72,5 +72,28 @@
     "edit_hint": "Confírmala tal como está o edítala y guárdala.",
     "save": "Aprobar respuesta",
     "failed": "Esa respuesta no se pudo guardar."
+  },
+  "session": {
+    "title": "Completa este formulario de {board} en tu sesión",
+    "board": {
+      "linkedin": "LinkedIn",
+      "indeed": "Indeed"
+    },
+    "ban_warning": "LinkedIn e Indeed prohíben postular de forma automatizada en sus términos, y una cuenta puede ser bloqueada. Boba solo completa el formulario en pantalla, en tu propia sesión iniciada; tú revisas cada campo y pulsas enviar. Puedes pausar o cerrar la sesión de este tablero en Conexiones.",
+    "start": "Abrir y completar este paso",
+    "fill_step": "Completar el siguiente paso",
+    "filled": "Completé {count} campos y adjunté {documents}. Revisa la ventana y pulsa enviar tú.",
+    "unanswered": "Boba dejó esto para ti: {labels}.",
+    "handoff_captcha": "La página tiene un CAPTCHA. Boba se detuvo: termina el formulario en la ventana.",
+    "handoff_login_wall": "Tu sesión está cerrada. Boba se detuvo: inicia sesión ahí y termina el formulario tú.",
+    "handoff_unusual_activity": "El tablero informó actividad inusual. Boba se detuvo: pausa esta fuente en Conexiones antes de continuar.",
+    "handoff_rate_limited": "El tablero limitó la página por frecuencia. Boba se detuvo: pausa esta fuente en Conexiones e inténtalo más tarde.",
+    "handoff_embedded_frame": "Este formulario de postulación se abre en un marco aparte donde Boba no puede escribir. Complétalo tú en la ventana.",
+    "handoff_unknown": "Boba no tiene una respuesta segura para «{label}». Completa ese campo tú.",
+    "handoff_missing_document": "Boba no tiene un documento verificado para adjuntar en «{label}». Añádelo en el Studio o adjúntalo tú.",
+    "confirm": "Ya lo envié",
+    "applied": "Confirmado: {text}",
+    "needs_check": "Boba no encontró una confirmación. La tarjeta queda como Revisar: ábrela para verificar.",
+    "failed": "Ese paso de la sesión no se completó."
   }
 }

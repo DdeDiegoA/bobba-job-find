@@ -36,5 +36,12 @@
   "errors.apply.outbox_clock": "Boba no puede leer su propio reloj, así que no puede medir esta espera.",
   "errors.apply.outbox_queued": "Esta postulación ya espera en la bandeja de salida.",
   "errors.apply.outbox_kill_switch": "El interruptor de emergencia está activo, así que Boba no envía nada de forma automática.",
-  "errors.apply.kill_switch": "Boba no pudo leer ni cambiar el Kill Switch."
+  "errors.apply.kill_switch": "Boba no pudo leer ni cambiar el Kill Switch.",
+  "errors.apply.session_not_board": "La fuente de esta oferta no es un tablero de sesión que Boba pueda rellenar.",
+  "errors.apply.session_opt_in": "Activa primero este tablero de sesión: Boba solo rellena sus formularios después de que aceptes el aviso de riesgo de bloqueo de cuenta.",
+  "errors.apply.session_paused": "Este tablero de sesión está en pausa tras un desafío. Abre Conexiones, resuélvelo y reanuda la fuente.",
+  "errors.apply.session_off_board": "Ese enlace de postulación no apunta al tablero, así que Boba no abrirá allí tu sesión iniciada.",
+  "errors.apply.session_unknown_attempt": "Ese intento del tablero de sesión ya no está pendiente.",
+  "errors.apply.session_kill_switch": "El interruptor de emergencia está activo, así que Boba no está rellenando ningún formulario.",
+  "errors.apply.session_browser": "Boba no pudo controlar tu sesión del navegador. Comprueba que Chrome o Chromium esté instalado e inténtalo otra vez."
 }

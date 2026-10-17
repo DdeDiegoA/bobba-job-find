@@ -36,5 +36,12 @@
   "errors.apply.outbox_clock": "Boba cannot read its own clock, so it cannot time this hold.",
   "errors.apply.outbox_queued": "This application is already waiting in the Outbox.",
   "errors.apply.outbox_kill_switch": "The Kill Switch is on, so Boba is not sending anything automatically.",
-  "errors.apply.kill_switch": "Boba could not read or change the Kill Switch."
+  "errors.apply.kill_switch": "Boba could not read or change the Kill Switch.",
+  "errors.apply.session_not_board": "This posting's source is not a Session Board Boba can fill.",
+  "errors.apply.session_opt_in": "Turn on this Session Board first — Boba only fills its forms after you accept the account-ban warning.",
+  "errors.apply.session_paused": "This Session Board is paused after a challenge. Open Connections, resolve it and resume the source.",
+  "errors.apply.session_off_board": "That apply link does not point at the job board, so Boba will not open your signed-in session there.",
+  "errors.apply.session_unknown_attempt": "That Session Board attempt is no longer waiting.",
+  "errors.apply.session_kill_switch": "The Kill Switch is on, so Boba is not filling any form.",
+  "errors.apply.session_browser": "Boba could not drive your browser session. Check that Chrome or Chromium is installed and try again."
 }

@@ -72,5 +72,28 @@
     "edit_hint": "Confirm it as it stands, or edit it and save.",
     "save": "Approve answer",
     "failed": "That answer could not be saved."
+  },
+  "session": {
+    "title": "Fill this {board} form in your session",
+    "board": {
+      "linkedin": "LinkedIn",
+      "indeed": "Indeed"
+    },
+    "ban_warning": "LinkedIn and Indeed prohibit automated applying in their terms, and an account can be banned. Boba fills only the form on screen, in your own signed-in session; you read every field and press submit yourself. You can pause or sign out this board in Connections.",
+    "start": "Open and fill this step",
+    "fill_step": "Fill the next step",
+    "filled": "Filled {count} fields and attached {documents}. Read the window, then press submit yourself.",
+    "unanswered": "Boba left these for you: {labels}.",
+    "handoff_captcha": "The page has a CAPTCHA. Boba stopped — finish the form in the window.",
+    "handoff_login_wall": "Your session is signed out. Boba stopped — sign in there and finish the form yourself.",
+    "handoff_unusual_activity": "The board reported unusual activity. Boba stopped — pause this Source in Connections before you continue.",
+    "handoff_rate_limited": "The board rate-limited the page. Boba stopped — pause this Source in Connections and try again later.",
+    "handoff_embedded_frame": "This apply form opens in a separate frame Boba cannot type into. Fill it yourself in the window.",
+    "handoff_unknown": "Boba had no confident answer for “{label}”. Finish that field yourself.",
+    "handoff_missing_document": "Boba has no verified document to attach for “{label}”. Add it in the Studio, or attach it yourself.",
+    "confirm": "I submitted it",
+    "applied": "Confirmed: {text}",
+    "needs_check": "Boba could not find a confirmation. The card is marked Needs check — open it to verify.",
+    "failed": "That session step did not go through."
   }
 }

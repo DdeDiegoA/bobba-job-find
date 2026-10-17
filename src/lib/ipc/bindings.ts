@@ -313,6 +313,28 @@ export const commands = {
       __TAURI_INVOKE("apply_ats_confirm", { applicationId, attemptId }),
     ),
   /**
+   *  Open the board's apply page in the user's session and fill the step on
+   *  screen (AC1). Off the UI thread: launching Chrome and reading the page
+   *  block, and the window the user takes over in must stay responsive.
+   */
+  applySessionStart: (applicationId: string) =>
+    typedError<SessionApplyView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_session_start", { applicationId }),
+    ),
+  /**  Fill the step the user advanced to, under the same attempt (AC1). */
+  applySessionFill: (applicationId: string, attemptId: string) =>
+    typedError<SessionApplyView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_session_fill", { applicationId, attemptId }),
+    ),
+  /**
+   *  Read the page after the user submitted: evidence, Applied or Needs check
+   *  (FR-88), exactly as the ATS channel records it.
+   */
+  applySessionConfirm: (applicationId: string, attemptId: string) =>
+    typedError<SessionOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("apply_session_confirm", { applicationId, attemptId }),
+    ),
+  /**
    *  Every Session Board Source, its opt-in and pause, and this platform's
    *  cookie protection (AC2/AC4).
    */
@@ -1423,6 +1445,12 @@ export type ManualView = {
   pending: string[];
   /**  Whether every draft in the package passed the attachable check (AD-14). */
   ready: boolean;
+  /**
+   *  The Session Board this Offer's Source is (`linkedin`, `indeed`), when
+   *  Boba can fill its form in the user's own session (S11.2). `None` for
+   *  every other Source, so the apply bar knows whether to offer it.
+   */
+  session_board: string | null;
 };
 
 /**  Salary period (AD-17). */
@@ -1933,6 +1961,22 @@ export type SendRequest = {
 /**  Target seniority (FR-7). */
 export type Seniority = "intern" | "junior" | "mid" | "senior" | "lead" | "principal";
 
+/**  The filled form handed to the user, and the window it lives in (AC1). */
+export type SessionApplyView = {
+  application_id: string;
+  /**  The attempt's correlation id, which `fill` and `confirm` take back. */
+  attempt_id: string;
+  source_id: string;
+  /**  The board the Source is driven as (`linkedin`, `indeed`). */
+  board: string;
+  url: string;
+  filled: FilledField[];
+  /**  Document kinds attached from the Package (`cv`, `cover_letter`). */
+  attached: string[];
+  unanswered: UnansweredField[];
+  handoff: SessionHandoff | null;
+};
+
 /**  One Session Board Source on the opt-in and privacy screens. */
 export type SessionBoardView = {
   source_id: string;
@@ -1944,6 +1988,39 @@ export type SessionBoardView = {
   pause: SessionPauseView | null;
   weak_ack: boolean;
 };
+
+/**  The evidence a confirmed submission keeps (FR-88). */
+export type SessionEvidence = {
+  confirmation_text: string;
+  screenshot_blake3: string;
+};
+
+/**  One handoff, with the field that caused it when a field did. */
+export type SessionHandoff = {
+  kind: SessionHandoffKind;
+  label: string | null;
+};
+
+/**  Why automation stopped and the user took over (AC1). */
+export type SessionHandoffKind =
+  | "captcha"
+  | "login_wall"
+  | "unusual_activity"
+  | "rate_limited"
+  /**  The form is inside a cross-origin frame Boba cannot type into. */
+  | "embedded_frame"
+  | "unknown_required"
+  | "missing_document";
+
+/**  What a submission turned out to be (FR-88). */
+export type SessionOutcome =
+  /**  The page confirmed it: evidence stored, the card is Applied. */
+  | { kind: "applied"; evidence: SessionEvidence }
+  /**
+   *  No confirmation was found: the attempt is recorded and the card stays,
+   *  marked Needs check from that outcome.
+   */
+  | { kind: "needs_check"; screenshot_blake3: string };
 
 /**  A challenge that keeps one Source paused (FR-30, AD-10). */
 export type SessionPauseView = {
