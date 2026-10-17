@@ -112,7 +112,9 @@
     "rule_daily_cap_reached": "Se alcanzó el tope de {cap} al día de esta regla.",
     "company_cap_reached": "Se alcanzó el límite de {cap} por empresa cada {days} días.",
     "outside_active_hours": "Fuera de las horas activas de la regla ({start_minute}–{end_minute}).",
-    "spacing_not_elapsed": "Espera {wait_minutes} minutos más entre envíos automáticos."
+    "spacing_not_elapsed": "Espera {wait_minutes} minutos más entre envíos automáticos.",
+    "session_cap_reached": "Esta fuente ya envió sus {cap} postulaciones automáticas de hoy.",
+    "session_spacing_not_elapsed": "Espera {wait_minutes} minutos más: las postulaciones automáticas en esta fuente van separadas al menos 10 minutos."
   },
   "error": {
     "load": "Boba no pudo cargar los ajustes de aplicación.",

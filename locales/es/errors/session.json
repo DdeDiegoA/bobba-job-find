@@ -4,5 +4,9 @@
   "errors.session.warning_changed": "El aviso cambió. Léelo de nuevo antes de activar este portal.",
   "errors.session.weak_ack": "Marca el consentimiento aparte sobre las cookies antes de activar este portal.",
   "errors.session.store": "No se pudieron guardar los ajustes de sesión.",
-  "errors.session.in_use": "Cierra la ventana del navegador que usa esta sesión y vuelve a cerrar sesión."
+  "errors.session.in_use": "Cierra la ventana del navegador que usa esta sesión y vuelve a cerrar sesión.",
+  "errors.session.auto_needs_reading": "Primero enciende la sesión de este portal: el Auto se apoya en ella.",
+  "errors.session.auto_name_mismatch": "Escribe el nombre del portal exactamente como aparece.",
+  "errors.session.auto_warning_changed": "El aviso de Auto cambió. Léelo de nuevo antes de confirmar.",
+  "errors.session.auto_cap_invalid": "El tope diario debe estar entre 1 y 10."
 }

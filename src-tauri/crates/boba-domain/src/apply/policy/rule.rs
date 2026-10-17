@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::apply::session_policy::MAX_SESSION_DAILY_CAP;
 use crate::scoring::gates::Confidence;
 use crate::scoring::rank::Verdict;
 
@@ -211,6 +212,13 @@ impl AutoRule {
         if !(1..=MAX_DAILY_CAP).contains(&self.daily_cap) {
             return Err(RuleViolation::DailyCapOutOfRange);
         }
+        // S11.3 (FR-91): a rule that drives a Session Board cannot raise its
+        // cap past the Source's own hard maximum.
+        if self.channels.contains(&RuleChannel::SessionBoard)
+            && self.daily_cap > MAX_SESSION_DAILY_CAP
+        {
+            return Err(RuleViolation::SessionDailyCapAboveMax);
+        }
         if self.per_company_cap == 0 {
             return Err(RuleViolation::PerCompanyCapZero);
         }
@@ -257,6 +265,8 @@ pub enum RuleViolation {
     MinFitOutOfRange,
     #[error("the daily cap must be between 1 and {MAX_DAILY_CAP}")]
     DailyCapOutOfRange,
+    #[error("a session board rule's daily cap must be at most {MAX_SESSION_DAILY_CAP} (FR-91)")]
+    SessionDailyCapAboveMax,
     #[error("the per-company cap must be at least 1")]
     PerCompanyCapZero,
     #[error("the per-company window must be between 1 and {MAX_PER_COMPANY_DAYS} days")]
@@ -373,6 +383,16 @@ mod tests {
         assert!(
             rule.validate().is_ok(),
             "a named source is the opt-in surface"
+        );
+
+        // S11.3 (FR-91): a Session Board rule cannot exceed the Source's cap.
+        rule.daily_cap = MAX_SESSION_DAILY_CAP;
+        assert!(rule.validate().is_ok(), "ten a day is the hard maximum");
+        rule.daily_cap = MAX_SESSION_DAILY_CAP + 1;
+        assert_eq!(
+            rule.validate(),
+            Err(RuleViolation::SessionDailyCapAboveMax),
+            "no rule raises a Session Board past ten"
         );
     }
 

@@ -9,9 +9,11 @@
 
 use std::sync::Arc;
 
+use boba_app::apply::session_auto::{SessionAutoError, SessionAutoService, SessionAutoView};
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::notifier::NotifierPort;
+use boba_app::ports::repo::auto_rules::AutoRulesRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::ports::session::SessionStore;
@@ -200,6 +202,93 @@ pub fn session_resume(app: tauri::AppHandle, source_id: String) -> AppResult<Ses
         .map_err(to_app)
 }
 
+// ---- Session Board Auto (S11.3, FR-91) -------------------------------------
+
+/// The separate Auto opt-in use case, built from the mounted ports.
+fn auto_service(app: &tauri::AppHandle) -> AppResult<SessionAutoService> {
+    Ok(SessionAutoService::new(
+        wiring::port::<dyn SourcesRepo>(app)?,
+        wiring::port::<dyn AutoRulesRepo>(app)?,
+        wiring::port::<dyn SystemRepo>(app)?,
+        Arc::new(SystemClock),
+    ))
+}
+
+/// Map a Session Board Auto failure onto the typed IPC error (AD-3).
+fn to_auto(error: SessionAutoError) -> AppError {
+    let code = match &error {
+        SessionAutoError::UnknownSource(_) => ErrorCode::NotFound,
+        SessionAutoError::NotSessionBoard(_)
+        | SessionAutoError::ReadingOptInRequired(_)
+        | SessionAutoError::Refused(_)
+        | SessionAutoError::Cap(_) => ErrorCode::InvalidInput,
+        SessionAutoError::Sources(_)
+        | SessionAutoError::Rules(_)
+        | SessionAutoError::System(_)
+        | SessionAutoError::Clock => ErrorCode::Internal,
+    };
+    AppError::new(code, error.message_key())
+}
+
+/// Every Session Board Source and where its Auto stands (FR-91): `off`,
+/// `expired`, `paused` or `active`, with the cap and today's count.
+#[tauri::command]
+#[specta::specta]
+pub fn session_auto_snapshot(app: tauri::AppHandle) -> AppResult<Vec<SessionAutoView>> {
+    // The same lazy seam S11.1b uses: the boards must be listed — and their
+    // rows must exist — before Auto can be turned on, even if Connections or
+    // Settings → Privacy never opened.
+    let sources = wiring::port::<dyn SourcesRepo>(&app)?;
+    let now = SystemClock.now_rfc3339();
+    for record in boba_sources::session::records(&now) {
+        if sources
+            .get_source(&record.id)
+            .map_err(|_| AppError::new(ErrorCode::Internal, "errors.session.store"))?
+            .is_none()
+        {
+            sources
+                .upsert_source(&record)
+                .map_err(|_| AppError::new(ErrorCode::Internal, "errors.session.store"))?;
+        }
+    }
+    auto_service(&app)?.snapshot().map_err(to_auto)
+}
+
+/// Accept the **separate** Auto opt-in: the core compares the typed Source
+/// name and the warning version, audits both and only then records it (FR-91).
+#[tauri::command]
+#[specta::specta]
+pub fn session_auto_opt_in(
+    app: tauri::AppHandle,
+    source_id: String,
+    typed_name: String,
+    warning_version: String,
+) -> AppResult<SessionAutoView> {
+    auto_service(&app)?
+        .opt_in(&source_id, &typed_name, &warning_version)
+        .map_err(to_auto)
+}
+
+/// Revoke Auto on that Source; the reading opt-in and the session stay.
+#[tauri::command]
+#[specta::specta]
+pub fn session_auto_revoke(app: tauri::AppHandle, source_id: String) -> AppResult<SessionAutoView> {
+    auto_service(&app)?.revoke(&source_id).map_err(to_auto)
+}
+
+/// Set the Source's daily cap; the core rejects anything above 10 a day.
+#[tauri::command]
+#[specta::specta]
+pub fn session_auto_set_cap(
+    app: tauri::AppHandle,
+    source_id: String,
+    cap: u8,
+) -> AppResult<SessionAutoView> {
+    auto_service(&app)?
+        .set_cap(&source_id, cap)
+        .map_err(to_auto)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +330,34 @@ mod tests {
             "linkedin".into(),
         )));
         assert_eq!(mapped.code, ErrorCode::Internal);
+    }
+
+    #[test]
+    fn session_auto_errors_map_to_codes_and_i18n_keys() {
+        let mapped = to_auto(SessionAutoError::UnknownSource("telepathy".into()));
+        assert_eq!(mapped.code, ErrorCode::NotFound);
+        assert_eq!(mapped.message_key, "errors.session.unknown_source");
+
+        let mapped = to_auto(SessionAutoError::ReadingOptInRequired("linkedin".into()));
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.session.auto_needs_reading");
+
+        let mapped = to_auto(SessionAutoError::Refused(
+            boba_domain::apply::session_policy::SessionAutoRefusal::NameMismatch,
+        ));
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.session.auto_name_mismatch");
+
+        let mapped = to_auto(SessionAutoError::Cap(
+            boba_domain::apply::session_policy::CapViolation::TooHigh,
+        ));
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.session.auto_cap_invalid");
+
+        let mapped = to_auto(SessionAutoError::System(
+            boba_app::ports::repo::system::SystemRepoError::new("down"),
+        ));
+        assert_eq!(mapped.code, ErrorCode::Internal);
+        assert_eq!(mapped.message_key, "errors.session.store");
     }
 }

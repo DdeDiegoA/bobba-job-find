@@ -60,4 +60,13 @@ pub trait AutoRulesRepo: Send + Sync {
         &self,
         source_id: &str,
     ) -> Result<Option<String>, AutoRulesRepoError>;
+
+    /// Automatic submissions to one Source on one channel at or after `since`.
+    /// S11.3's per-Source Session Board cap counts on it (FR-91).
+    fn ledger_source_since(
+        &self,
+        source_id: &str,
+        channel: &str,
+        since: &str,
+    ) -> Result<u32, AutoRulesRepoError>;
 }

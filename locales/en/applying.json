@@ -112,7 +112,9 @@
     "rule_daily_cap_reached": "This rule's cap of {cap} a day is reached.",
     "company_cap_reached": "The limit of {cap} per company per {days} days is reached.",
     "outside_active_hours": "Outside the rule's active hours ({start_minute}–{end_minute}).",
-    "spacing_not_elapsed": "Wait {wait_minutes} more minutes between automatic sends."
+    "spacing_not_elapsed": "Wait {wait_minutes} more minutes between automatic sends.",
+    "session_cap_reached": "This Source already sent its {cap} automatic applications today.",
+    "session_spacing_not_elapsed": "Wait {wait_minutes} more minutes: automatic applications on this Source stay at least 10 minutes apart."
   },
   "error": {
     "load": "Boba could not load the Apply settings.",

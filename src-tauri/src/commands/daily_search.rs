@@ -1065,6 +1065,46 @@ mod tests {
             Ok(Vec::new())
         }
 
+        fn auto_opt_in(
+            &self,
+            _source_id: &str,
+        ) -> Result<
+            Option<boba_domain::apply::session_policy::SessionAutoOptIn>,
+            boba_app::ports::repo::sources::SourcesRepoError,
+        > {
+            Ok(None)
+        }
+
+        fn record_auto_opt_in(
+            &self,
+            _optin: &boba_domain::apply::session_policy::SessionAutoOptIn,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            Ok(())
+        }
+
+        fn remove_auto_opt_in(
+            &self,
+            _source_id: &str,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            Ok(())
+        }
+
+        fn auto_paused_until(
+            &self,
+            _source_id: &str,
+        ) -> Result<Option<String>, boba_app::ports::repo::sources::SourcesRepoError> {
+            Ok(None)
+        }
+
+        fn set_auto_paused_until(
+            &self,
+            _source_id: &str,
+            _until: Option<&str>,
+            _updated_at: &str,
+        ) -> Result<(), boba_app::ports::repo::sources::SourcesRepoError> {
+            Ok(())
+        }
+
         fn start_run(
             &self,
             _run: &boba_domain::source::SourceRunRecord,

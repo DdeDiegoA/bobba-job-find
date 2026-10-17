@@ -28,6 +28,7 @@ use boba_app::apply::rules::{
 use boba_app::apply::session::{
     SessionApplyError, SessionApplyService, SessionApplyView, SessionFormPort, SessionOutcome,
 };
+use boba_app::apply::session_auto;
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::clock::ClockPort;
@@ -47,7 +48,8 @@ use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;
 use boba_domain::application::Application;
 use boba_domain::apply::outbox::OutboxState;
-use boba_domain::apply::policy::{self, PolicyCandidate, RuleChannel};
+use boba_domain::apply::policy::{self, PolicyCandidate, RuleChannel, SessionAutoFacts};
+use boba_domain::apply::session_policy;
 use boba_domain::posting::Offer;
 use boba_domain::scoring::factors::MarketData;
 use boba_domain::scoring::fraud;
@@ -617,6 +619,14 @@ fn candidate_for<R: tauri::Runtime>(
         .get_optin(&offer.source_id)
         .map_err(|_| CommandError::Store.app_error())?
         .is_some();
+    // S11.3 (FR-91): a Session Board candidate needs its own, second opt-in and
+    // carries the Source's stricter caps. Both are read here, from the core,
+    // at every decide() call — a screen never supplies them.
+    let (source_auto_opt_in, session_auto) = if channel == RuleChannel::SessionBoard {
+        session_auto_for(app, &offer.source_id)?
+    } else {
+        (opt_in, None)
+    };
     let offset = utc_offset_minutes.unwrap_or_else(rules::local_offset_minutes);
 
     Ok(PolicyCandidate {
@@ -657,12 +667,66 @@ fn candidate_for<R: tauri::Runtime>(
         .is_some(),
         agent_used: false,
         cli_tool_lockdown: true,
-        source_auto_opt_in: opt_in,
+        source_auto_opt_in,
+        session_auto,
         utc_offset_minutes: offset,
         local_minute: local_minute.unwrap_or_else(|| {
             rules::local_minute_at(&ClockPort::now_rfc3339(&SystemClock), offset)
         }),
     })
+}
+
+/// The Session Board Auto facts for one candidate (S11.3, FR-91).
+///
+/// Whether Auto may run at all (the opt-in is fresh and no challenge paused it)
+/// and the Source's own limits. Both come from the core: the Source row, the
+/// cap setting and the S9.6 ledger. `decide()` gets the facts, never a screen's
+/// word, so the three send points enforce the same numbers.
+fn session_auto_for<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    source_id: &str,
+) -> AppResult<(bool, Option<SessionAutoFacts>)> {
+    let sources = wiring::port::<dyn SourcesRepo>(app)?;
+    let now_text = ClockPort::now_rfc3339(&SystemClock);
+    // An unreadable clock never grants Auto: it reads as never opted in.
+    let Some(now) = session_policy::parse_time(&now_text) else {
+        return Ok((false, None));
+    };
+    let status = session_auto::auto_state(sources.as_ref(), source_id, now)
+        .map_err(|_| CommandError::Store.app_error())?;
+
+    let rules = rules_service(app)?;
+    let system = wiring::port::<dyn SystemRepo>(app)?;
+    let cap = session_policy::stored_daily_cap(
+        system
+            .setting_get(&session_policy::cap_key(source_id))
+            .map_err(|_| CommandError::Store.app_error())?
+            .as_deref(),
+    );
+    // The same local day the S9.6 caps count on.
+    let offset = time::Duration::minutes(i64::from(rules::local_offset_minutes()));
+    let day_start = (now + offset).replace_time(time::Time::MIDNIGHT) - offset;
+    let today = wiring::port::<dyn AutoRulesRepo>(app)?
+        .ledger_source_since(
+            source_id,
+            RuleChannel::SessionBoard.as_str(),
+            &session_policy::format_time(day_start),
+        )
+        .map_err(|_| CommandError::Store.app_error())?;
+    let minutes_since_last = rules
+        .last_auto_for_source(source_id)
+        .map_err(|_| CommandError::Store.app_error())?
+        .and_then(|text| session_policy::parse_time(&text))
+        .map(|last| (now - last).whole_minutes().max(0) as u32);
+
+    Ok((
+        status.is_active(),
+        Some(SessionAutoFacts {
+            daily_cap: cap,
+            today,
+            minutes_since_last,
+        }),
+    ))
 }
 
 /// The Auto Rules use case, built from the mounted ports (ADR-012).
@@ -897,10 +961,12 @@ async fn sweep_item<R: tauri::Runtime>(
     service: &OutboxService,
     item: boba_domain::apply::outbox::OutboxItem,
 ) -> AppResult<Option<OutboxItemView>> {
-    // Only Email Apply has an automatic channel in this build: an ATS form waits
-    // for the user (S9.4) and the Session Board is S11.3's. The item goes to the
-    // review queue rather than pretending to send.
-    if item.channel != "email" {
+    // Email Apply is the one channel that sends hands-free in this build; an
+    // ATS form waits for the user (S9.4). A Session Board item still passes
+    // `decide()` here (S11.3: the release is one of the three enforcement
+    // points) and is parked after that, because this build never presses a
+    // board's submit: the user finishes it in the review queue.
+    if item.channel != "email" && item.channel != "session_board" {
         return Ok(Some(
             service
                 .park(&item.id, "channel_unavailable")
@@ -921,9 +987,22 @@ async fn sweep_item<R: tauri::Runtime>(
         Release::Sending {
             item: stored,
             rule_id,
-        } => Ok(Some(
-            send_email(app, service, &stored, &rule_id, &candidate).await?,
-        )),
+        } => {
+            if stored.channel == "session_board" {
+                // The policy said Auto at the release and at every earlier
+                // point. There is no automatic board submit in this build, so
+                // the item leaves the automatic path for the user, never for a
+                // second silent attempt.
+                return Ok(Some(
+                    service
+                        .park(&stored.id, "channel_unavailable")
+                        .map_err(outbox_error)?,
+                ));
+            }
+            Ok(Some(
+                send_email(app, service, &stored, &rule_id, &candidate).await?,
+            ))
+        }
     }
 }
 

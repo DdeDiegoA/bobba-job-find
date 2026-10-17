@@ -421,6 +421,30 @@ export const commands = {
       __TAURI_INVOKE("session_resume", { sourceId }),
     ),
   /**
+   *  Every Session Board Source and where its Auto stands (FR-91): `off`,
+   *  `expired`, `paused` or `active`, with the cap and today's count.
+   */
+  sessionAutoSnapshot: () =>
+    typedError<SessionAutoView[], AppError_Serialize>(__TAURI_INVOKE("session_auto_snapshot")),
+  /**
+   *  Accept the **separate** Auto opt-in: the core compares the typed Source
+   *  name and the warning version, audits both and only then records it (FR-91).
+   */
+  sessionAutoOptIn: (sourceId: string, typedName: string, warningVersion: string) =>
+    typedError<SessionAutoView, AppError_Serialize>(
+      __TAURI_INVOKE("session_auto_opt_in", { sourceId, typedName, warningVersion }),
+    ),
+  /**  Revoke Auto on that Source; the reading opt-in and the session stay. */
+  sessionAutoRevoke: (sourceId: string) =>
+    typedError<SessionAutoView, AppError_Serialize>(
+      __TAURI_INVOKE("session_auto_revoke", { sourceId }),
+    ),
+  /**  Set the Source's daily cap; the core rejects anything above 10 a day. */
+  sessionAutoSetCap: (sourceId: string, cap: number) =>
+    typedError<SessionAutoView, AppError_Serialize>(
+      __TAURI_INVOKE("session_auto_set_cap", { sourceId, cap }),
+    ),
+  /**
    *  Read the user's picked files, cap the size, and hand the text to one
    *  `profile_import` run (FR-5, AC1). Returns the proposals now waiting for
    *  review; nothing has been saved to the profile.
@@ -2667,6 +2691,34 @@ export type SessionApplyView = {
   duplicate: DuplicateGuardView | null;
 };
 
+/**  One Session Board Source's Auto state, as the settings screen shows it. */
+export type SessionAutoView = {
+  source_id: string;
+  name: string;
+  /**  The Session Board reading opt-in (S11.1a) — Auto needs it too. */
+  reading_opted_in: boolean;
+  /**  `off`, `expired`, `paused` or `active` (FR-91). */
+  state: string;
+  /**  When the Auto opt-in was accepted, `None` when never. */
+  accepted_at: string | null;
+  /**  The name the user typed at acceptance. */
+  confirmed_name: string | null;
+  /**  The warning version the user read. */
+  warning_version: string | null;
+  /**  When the opt-in must be re-confirmed (30 days after acceptance). */
+  expires_at: string | null;
+  /**  Until when a challenge keeps Auto paused. */
+  paused_until: string | null;
+  /**  The per-Source daily cap (default 3, maximum 10). */
+  daily_cap: number;
+  /**  Automatic submissions to this Source today. */
+  used_today: number;
+  /**  The hard maximum this build accepts, so the UI never invents one. */
+  max_daily_cap: number;
+  /**  The warning copy version this build ships. */
+  current_warning_version: string;
+};
+
 /**  One Session Board Source on the opt-in and privacy screens. */
 export type SessionBoardView = {
   source_id: string;
@@ -2710,7 +2762,13 @@ export type SessionOutcome =
    *  No confirmation was found: the attempt is recorded and the card stays,
    *  marked Needs check from that outcome.
    */
-  | { kind: "needs_check"; screenshot_blake3: string };
+  | { kind: "needs_check"; screenshot_blake3: string }
+  /**
+   *  The page does not say the form went through yet (S11.3 L1). Nothing is
+   *  resolved and nothing is closed: the user submits (or advances a step)
+   *  and confirms again under the same attempt.
+   */
+  | { kind: "not_submitted" };
 
 /**  A challenge that keeps one Source paused (FR-30, AD-10). */
 export type SessionPauseView = {
@@ -2784,6 +2842,11 @@ export type SourceTileView = {
   last_error: string | null;
   consecutive_failures: number;
   attribution: string | null;
+  /**
+   *  S11.3 (FR-91): the separate Auto opt-in on a Session Board is active, so
+   *  the tile carries the persistent ToS-risk badge. Always false elsewhere.
+   */
+  auto_opt_in: boolean;
 };
 
 /**  One Stage column and how many Applications currently sit in it. */

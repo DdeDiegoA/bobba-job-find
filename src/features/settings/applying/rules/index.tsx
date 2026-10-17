@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { commands, type DecisionView, type RuleView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
+import { useSessionAuto } from "../session/use-session-auto";
 import { DecisionReasons, minuteClock } from "./reasons";
 import { RuleForm } from "./rule-form";
 import {
@@ -59,6 +60,19 @@ export default function SettingsApplyingRules() {
 
   const snapshot = rules.data;
   const applications = useApplications();
+  // S11.3 (FR-91): a rule that targets a Session Board with Auto on carries the
+  // same ToS-risk badge the Source does. The state comes from the core.
+  const sessionAuto = useSessionAuto();
+  const autoSources = new Set(
+    (sessionAuto.data ?? [])
+      .filter((board) => board.state !== "off")
+      .map((board) => board.source_id),
+  );
+  const tosRisk = (rule: RuleView) =>
+    rule.channels.includes("session_board") &&
+    (rule.source_ids.length === 0
+      ? autoSources.size > 0
+      : rule.source_ids.some((id) => autoSources.has(id)));
   const [applicationId, setApplicationId] = useState("");
   const [channel, setChannel] = useState("email");
   const [decision, setDecision] = useState<DecisionView | null>(null);
@@ -208,7 +222,17 @@ export default function SettingsApplyingRules() {
                   className="flex flex-col gap-1 rounded-2xl border border-border p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-fg">{rule.name}</span>
+                    <span className="flex items-center gap-2 font-medium text-fg">
+                      {rule.name}
+                      {tosRisk(rule) ? (
+                        <span
+                          className="rounded-xl bg-danger/15 px-2 py-1 text-xs text-danger"
+                          data-tos-risk=""
+                        >
+                          {t("session_auto:badge.tos_risk")}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="text-xs text-fg-muted">
                       {rule.enabled ? t("rules.on") : t("rules.off")}
                     </span>

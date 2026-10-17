@@ -1174,6 +1174,25 @@ mod tests {
                 .map(|entry| entry.created_at.clone())
                 .max())
         }
+
+        fn ledger_source_since(
+            &self,
+            source_id: &str,
+            channel: &str,
+            since: &str,
+        ) -> Result<u32, AutoRulesRepoError> {
+            Ok(self
+                .ledger
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| {
+                    entry.source_id == source_id
+                        && entry.channel.as_str() == channel
+                        && entry.created_at.as_str() >= since
+                })
+                .count() as u32)
+        }
     }
 
     #[derive(Default)]
@@ -1211,6 +1230,7 @@ mod tests {
             agent_used: false,
             cli_tool_lockdown: true,
             source_auto_opt_in: true,
+            session_auto: None,
             local_minute: 10 * 60,
             utc_offset_minutes: 0,
         }

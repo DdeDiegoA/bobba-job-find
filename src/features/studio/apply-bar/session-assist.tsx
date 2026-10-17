@@ -36,11 +36,15 @@ export default function SessionAssist({
   const confirm = useSessionConfirm(applicationId);
   const [session, setSession] = useState<SessionApplyView | null>(null);
   const [outcome, setOutcome] = useState<SessionOutcome | null>(null);
+  // S11.3 L1: a premature Confirm is not terminal — the attempt and the window
+  // stay open, and the user submits and checks again.
+  const [notSubmitted, setNotSubmitted] = useState(false);
 
   const failure = start.error ?? fill.error ?? confirm.error;
 
   const onStart = () => {
     setOutcome(null);
+    setNotSubmitted(false);
     start.mutate(undefined, { onSuccess: (view) => setSession(view) });
   };
   const onFill = () => {
@@ -49,7 +53,16 @@ export default function SessionAssist({
   };
   const onConfirm = () => {
     if (!session) return;
-    confirm.mutate(session.attempt_id, { onSuccess: (result) => setOutcome(result) });
+    confirm.mutate(session.attempt_id, {
+      onSuccess: (result) => {
+        if (result.kind === "not_submitted") {
+          setNotSubmitted(true);
+          return;
+        }
+        setNotSubmitted(false);
+        setOutcome(result);
+      },
+    });
   };
 
   return (
@@ -109,6 +122,12 @@ export default function SessionAssist({
             </p>
           ) : null}
         </div>
+      ) : null}
+
+      {notSubmitted && !outcome ? (
+        <p className="text-xs text-warning" role="status" data-session-outcome="not_submitted">
+          {t("session_auto:session.not_submitted")}
+        </p>
       ) : null}
 
       {failure ? (

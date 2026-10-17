@@ -16,8 +16,8 @@ pub mod rule;
 pub mod settings;
 
 pub use decide::{
-    AutoAttemptEntry, Decision, PolicyCandidate, PolicyCounts, Reason, company_key, decide,
-    new_auto_attempt_id,
+    AutoAttemptEntry, Decision, PolicyCandidate, PolicyCounts, Reason, SessionAutoFacts,
+    company_key, decide, new_auto_attempt_id,
 };
 pub use pace::{MAX_GAP_MINUTES, MIN_GAP_MINUTES, gap_minutes};
 pub use rule::{ActiveHours, AutoRule, RuleChannel, RuleViolation};

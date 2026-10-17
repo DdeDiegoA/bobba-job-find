@@ -86,6 +86,43 @@ impl SourcesRepo for FakeSourcesRepo {
         Ok(Vec::new())
     }
 
+    fn auto_opt_in(
+        &self,
+
+        _source_id: &str,
+    ) -> Result<Option<boba_domain::apply::session_policy::SessionAutoOptIn>, SourcesRepoError>
+    {
+        Ok(None)
+    }
+
+    fn record_auto_opt_in(
+        &self,
+
+        _optin: &boba_domain::apply::session_policy::SessionAutoOptIn,
+    ) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+
+    fn remove_auto_opt_in(&self, _source_id: &str) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+
+    fn auto_paused_until(&self, _source_id: &str) -> Result<Option<String>, SourcesRepoError> {
+        Ok(None)
+    }
+
+    fn set_auto_paused_until(
+        &self,
+
+        _source_id: &str,
+
+        _until: Option<&str>,
+
+        _updated_at: &str,
+    ) -> Result<(), SourcesRepoError> {
+        Ok(())
+    }
+
     fn start_run(&self, _run: &SourceRunRecord) -> Result<(), SourcesRepoError> {
         Ok(())
     }

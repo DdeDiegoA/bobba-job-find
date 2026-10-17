@@ -4,6 +4,7 @@ import { NavLink, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
 import SettingsAiEngine from "./ai-engine";
 import SettingsApplyingRules from "./applying/rules";
+import SettingsApplyingSession from "./applying/session";
 import SettingsNotifications from "./notifications";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyAudit from "./privacy/audit";
@@ -30,6 +31,11 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
   { id: "privacy/export", labelKey: "export:title", Component: SettingsPrivacyExport },
   { id: "privacy/network", labelKey: "network:title", Component: SettingsPrivacyNetwork },
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
+  {
+    id: "applying/session",
+    labelKey: "session_auto:title",
+    Component: SettingsApplyingSession,
+  },
   { id: "ai-engine", labelKey: "ai_engine:title", Component: SettingsAiEngine },
   { id: "notifications", labelKey: "notifications:title", Component: SettingsNotifications },
   { id: "scoring", labelKey: "settings_scoring:title", Component: SettingsScoring },

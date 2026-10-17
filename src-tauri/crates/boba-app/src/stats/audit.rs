@@ -555,6 +555,15 @@ mod tests {
         ) -> Result<Option<String>, crate::ports::repo::auto_rules::AutoRulesRepoError> {
             Ok(None)
         }
+
+        fn ledger_source_since(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> Result<u32, crate::ports::repo::auto_rules::AutoRulesRepoError> {
+            Ok(0)
+        }
     }
 
     fn intent(action: &str, at: &str) -> NewIntent {

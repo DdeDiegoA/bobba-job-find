@@ -257,6 +257,15 @@ impl AutoRulesRepo for FakeAutoRules {
         Ok(Vec::new())
     }
 
+    fn ledger_source_since(
+        &self,
+        _source_id: &str,
+        _channel: &str,
+        _since: &str,
+    ) -> Result<u32, AutoRulesRepoError> {
+        Ok(0)
+    }
+
     fn rule_upsert(&self, _rule: &AutoRule) -> Result<(), AutoRulesRepoError> {
         Ok(())
     }
@@ -314,6 +323,7 @@ fn candidate() -> PolicyCandidate {
         agent_used: false,
         cli_tool_lockdown: true,
         source_auto_opt_in: true,
+        session_auto: None,
         local_minute: 10 * 60,
         utc_offset_minutes: 0,
     }

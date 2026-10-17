@@ -52,6 +52,9 @@ pub struct SourceTileView {
     pub last_error: Option<String>,
     pub consecutive_failures: u32,
     pub attribution: Option<String>,
+    /// S11.3 (FR-91): the separate Auto opt-in on a Session Board is active, so
+    /// the tile carries the persistent ToS-risk badge. Always false elsewhere.
+    pub auto_opt_in: bool,
 }
 
 /// One sampled posting in the add-feed preview (AC2).
@@ -136,7 +139,8 @@ pub async fn sources_catalogue(app: tauri::AppHandle) -> AppResult<Vec<SourceTil
         let runs = sources
             .recent_runs(&record.id, HEALTH_WINDOW)
             .map_err(store_error)?;
-        tiles.push(tile(&record, manifest, is_custom, &runs));
+        let auto_opt_in = session_auto_opted_in(&sources, &record, &now)?;
+        tiles.push(tile(&record, manifest, is_custom, &runs, auto_opt_in));
     }
     tiles.sort_by_key(|tile| tile.name.to_lowercase());
     Ok(tiles)
@@ -184,7 +188,7 @@ pub async fn sources_add_rss(
     let runs = sources
         .recent_runs(&record.id, HEALTH_WINDOW)
         .map_err(store_error)?;
-    Ok(tile(&record, None, true, &runs))
+    Ok(tile(&record, None, true, &runs, false))
 }
 
 /// Remove a custom feed; `true` when it was saved.
@@ -256,6 +260,7 @@ fn tile(
     manifest: Option<&SourceManifest>,
     custom: bool,
     runs: &[boba_domain::source::SourceRunRecord],
+    auto_opt_in: bool,
 ) -> SourceTileView {
     let health: SourceHealth = health::health_from_runs(runs);
     SourceTileView {
@@ -272,7 +277,26 @@ fn tile(
         last_error: health.last_error,
         consecutive_failures: health.consecutive_failures,
         attribution: record.attribution.clone(),
+        auto_opt_in,
     }
+}
+
+/// Whether this Session Board carries the persistent ToS-risk badge (S11.3,
+/// FR-91): the user accepted Auto on it, so the risk stays named even while a
+/// challenge pauses it or the 30-day acceptance lapses. A tile of any other
+/// access class never carries the badge.
+fn session_auto_opted_in(
+    sources: &std::sync::Arc<dyn SourcesRepo>,
+    record: &SourceRecord,
+    _now: &str,
+) -> AppResult<bool> {
+    if record.access_class != boba_domain::source::AccessClass::SessionBrowser {
+        return Ok(false);
+    }
+    Ok(sources
+        .auto_opt_in(&record.id)
+        .map_err(store_error)?
+        .is_some())
 }
 
 /// The tile's Type (EXPERIENCE §9.7). The access class drives it; a custom
@@ -443,7 +467,7 @@ mod tests {
         let mut stored = record("remotive", AccessClass::PublicJson);
         stored.attribution = manifest.attribution.clone();
         let history = [run("2", RunStatus::Ok, 9)];
-        let view = tile(&stored, Some(&manifest), false, &history);
+        let view = tile(&stored, Some(&manifest), false, &history, false);
         assert_eq!(view.markets, vec!["Global remote".to_string()]);
         assert_eq!(view.risk_tier, "safe");
         assert_eq!(view.status, SourceStatus::Ok);
@@ -467,6 +491,7 @@ mod tests {
                 run("2", RunStatus::Failed, 0),
                 run("3", RunStatus::Failed, 0),
             ],
+            false,
         );
         assert_eq!(view.status, SourceStatus::Failing);
         assert_eq!(view.risk_tier, "caution");
