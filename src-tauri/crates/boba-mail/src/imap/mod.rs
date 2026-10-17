@@ -297,12 +297,11 @@ where
         .map_err(|_| ImapError::Refused)?;
     let mut uids: Vec<u32> = uids.into_iter().collect();
     uids.sort_unstable();
-    // The newest UIDs are the newest arrivals; keep the window the cursor and
-    // the cap allow.
+    // Oldest first. The cursor advances to the newest message scanned, so
+    // keeping the *newest* UIDs would leave the older ones behind it forever;
+    // truncating leaves the next pass to start where this one stopped.
     let limit = limit.clamp(1, MAX_FETCH_MESSAGES);
-    if uids.len() > limit {
-        uids = uids.split_off(uids.len() - limit);
-    }
+    uids.truncate(limit);
 
     // Sizes first (cheap), then bodies only for the messages under the caps:
     // one message never exceeds `MAX_FETCH_BYTES`, and the whole pass never
@@ -654,6 +653,139 @@ mod tests {
                 .any(|line| line.to_ascii_uppercase().contains("STORE")),
             "a read never changes a flag: {commands:?}"
         );
+    }
+
+    fn raw_for(uid: u32) -> String {
+        format!(
+            "From: ana@acme.example\r\nSubject: s{uid}\r\n\
+             Date: Mon, 1 Jan 2024 10:00:00 +0000\r\n\
+             Message-ID: <m{uid}@acme.example>\r\n\r\nHello {uid}\r\n"
+        )
+    }
+
+    /// Answer a FETCH for whichever UID set the client asked for.
+    fn fetch_answer(command: &str, tag: &str) -> String {
+        let body = command.contains("BODY.PEEK[]");
+        let start = command
+            .find("UID FETCH ")
+            .map_or(0, |index| index + "UID FETCH ".len());
+        let end = command[start..]
+            .find(' ')
+            .map_or(command.len(), |index| start + index);
+        let mut out = String::new();
+        for (index, uid) in command[start..end]
+            .split(',')
+            .filter_map(|uid| uid.parse::<u32>().ok())
+            .enumerate()
+        {
+            let raw = raw_for(uid);
+            let n = index + 1;
+            if body {
+                out.push_str(&format!(
+                    "* {n} FETCH (UID {uid} BODY[] {{{}}}\r\n{raw})\r\n",
+                    raw.len()
+                ));
+            } else {
+                out.push_str(&format!(
+                    "* {n} FETCH (UID {uid} RFC822.SIZE {})\r\n",
+                    raw.len()
+                ));
+            }
+        }
+        out.push_str(&format!("{tag} OK FETCH completed\r\n"));
+        out
+    }
+
+    fn search_answer(tag: &str, uids: &[u32]) -> String {
+        let list = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("* SEARCH {list}\r\n{tag} OK SEARCH completed\r\n")
+    }
+
+    #[tokio::test]
+    async fn a_capped_pass_keeps_the_oldest_uids_and_the_next_pass_sees_the_rest() {
+        // Pass 1: the mailbox has 150 matching UIDs; the 100-message cap must
+        // keep the *oldest* ones, or the cursor would step over the rest.
+        let all: Vec<u32> = (1001..=1150).collect();
+        let first = all.clone();
+        let (addr, seen) = fake_imap("* OK ready\r\n", move |tag, command| {
+            if command.starts_with("LOGIN") {
+                format!("{tag} OK LOGIN completed\r\n")
+            } else if command.starts_with("EXAMINE") {
+                format!("* 150 EXISTS\r\n* OK [READ-ONLY] done\r\n{tag} OK EXAMINE completed\r\n")
+            } else if command.starts_with("UID SEARCH") {
+                search_answer(tag, &first)
+            } else if command.starts_with("UID FETCH") {
+                fetch_answer(command, tag)
+            } else if command.starts_with("LOGOUT") {
+                format!("* BYE\r\n{tag} OK LOGOUT completed\r\n")
+            } else {
+                format!("{tag} BAD unknown\r\n")
+            }
+        })
+        .await;
+
+        let stream = TcpStream::connect(addr).await.expect("connect");
+        let messages = fetch(
+            stream,
+            &settings(addr),
+            &Auth::Password("app-password".to_string()),
+            1_704_000_000,
+            1_760_000_000,
+            100,
+            false,
+        )
+        .await
+        .expect("pass one");
+
+        assert_eq!(messages.len(), 100);
+        assert_eq!(messages[0].provider_id, "imap:1001");
+        assert_eq!(messages[99].provider_id, "imap:1100");
+        let commands = seen.lock().expect("lock").clone();
+        assert!(
+            !commands.iter().any(|line| line.contains("1101")),
+            "the pass must not read past the cap: {commands:?}"
+        );
+
+        // Pass 2: the cursor moved past 1100, so the search now names only the
+        // remaining UIDs, and the cap no longer cuts anything.
+        let rest: Vec<u32> = (1101..=1150).collect();
+        let (addr, _) = fake_imap("* OK ready\r\n", move |tag, command| {
+            if command.starts_with("LOGIN") {
+                format!("{tag} OK LOGIN completed\r\n")
+            } else if command.starts_with("EXAMINE") {
+                format!("* 50 EXISTS\r\n* OK [READ-ONLY] done\r\n{tag} OK EXAMINE completed\r\n")
+            } else if command.starts_with("UID SEARCH") {
+                search_answer(tag, &rest)
+            } else if command.starts_with("UID FETCH") {
+                fetch_answer(command, tag)
+            } else if command.starts_with("LOGOUT") {
+                format!("* BYE\r\n{tag} OK LOGOUT completed\r\n")
+            } else {
+                format!("{tag} BAD unknown\r\n")
+            }
+        })
+        .await;
+
+        let stream = TcpStream::connect(addr).await.expect("connect");
+        let messages = fetch(
+            stream,
+            &settings(addr),
+            &Auth::Password("app-password".to_string()),
+            1_704_100_000,
+            1_760_000_000,
+            100,
+            false,
+        )
+        .await
+        .expect("pass two");
+
+        assert_eq!(messages.len(), 50);
+        assert_eq!(messages[0].provider_id, "imap:1101");
+        assert_eq!(messages[49].provider_id, "imap:1150");
     }
 
     #[test]

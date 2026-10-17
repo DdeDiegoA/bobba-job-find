@@ -245,6 +245,8 @@ impl GraphMail {
                 response.status().as_u16()
             )));
         }
+        // A provider may omit (or lie about) Content-Length, so the body is
+        // read in chunks under a running cap instead of buffered blindly.
         if response
             .content_length()
             .is_some_and(|length| length > MAX_READ_BYTES)
@@ -253,23 +255,36 @@ impl GraphMail {
                 "the inbox answer is too large".to_string(),
             ));
         }
-        let body: Value = response
-            .json()
+        let mut response = response;
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
             .await
+            .map_err(|_| MailError::Transport("the inbox answer was cut off".to_string()))?
+        {
+            if body.len() as u64 + chunk.len() as u64 > MAX_READ_BYTES {
+                return Err(MailError::Rejected(
+                    "the inbox answer is too large".to_string(),
+                ));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let body: Value = serde_json::from_slice(&body)
             .map_err(|_| MailError::Rejected("the inbox answer could not be read".to_string()))?;
-        Ok(read_messages(&body, now))
+        Ok(read_messages(&body, now, limit.min(READ_PAGE_SIZE)))
     }
 }
 
 /// Map Graph's message list onto the pipeline's shape. A message without an id
 /// or sender is skipped rather than failing the whole read.
-fn read_messages(body: &Value, now: i64) -> Vec<RawMessage> {
+fn read_messages(body: &Value, now: i64, limit: usize) -> Vec<RawMessage> {
     body.get("value")
         .and_then(Value::as_array)
         .map(|items| {
             items
                 .iter()
                 .filter_map(|item| read_message(item, now))
+                .take(limit)
                 .collect()
         })
         .unwrap_or_default()
@@ -759,6 +774,43 @@ mod tests {
             message.body_text
         );
         assert!(!message.body_text.contains("x()"), "{}", message.body_text);
+    }
+
+    #[tokio::test]
+    async fn a_page_never_exceeds_the_read_cap() {
+        let server = MockServer::start().await;
+        let item = |id: &str| {
+            json!({
+                "id": id,
+                "internetMessageId": format!("<{id}@acme.example>"),
+                "subject": "reply",
+                "from": {"emailAddress": {"address": "ana@acme.example"}},
+                "receivedDateTime": "2024-01-01T10:00:00Z",
+                "body": {"contentType": "text", "content": "hello"},
+                "hasAttachments": false
+            })
+        };
+        Mock::given(method("GET"))
+            .and(path("/me/mailFolders/inbox/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": [item("m1"), item("m2"), item("m3")]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mail = adapter(
+            &server,
+            FakeSecrets::with(REF, tokens(Some(3600))),
+            Arc::new(FakeAccounts(Some(account()))),
+        );
+        let messages = mail
+            .fetch_inbox("01ACC", 0, 1_760_000_000, 2)
+            .await
+            .expect("read");
+        assert_eq!(messages.len(), 2, "the cap is enforced on the mapped page");
+        assert_eq!(messages[0].provider_id, "m1");
+        assert_eq!(messages[1].provider_id, "m2");
     }
 
     #[tokio::test]

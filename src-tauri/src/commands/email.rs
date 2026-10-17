@@ -980,7 +980,7 @@ fn sync_scope(
             .attempts_for(&application.id)
             .map_err(|error| error.to_string())?
         {
-            if let Some(domain) = email_domain(&attempt.recipient) {
+            if let Some(domain) = company_domain(&attempt.recipient) {
                 domains.push(domain);
             }
             if let Some(message_id) = attempt.message_id {
@@ -990,12 +990,14 @@ fn sync_scope(
         // The Offer may still exist; a missing one only costs a domain.
         if let Ok(Some(offer)) = offers.get_offer(&application.posting_id) {
             if let Some(email) = offer.apply.email.as_deref()
-                && let Some(domain) = email_domain(email)
+                && let Some(domain) = company_domain(email)
             {
                 domains.push(domain);
             }
-            if let Some(host) = url_host(&offer.apply.url) {
-                domains.extend(host_variants(&host));
+            if let Some(host) = url_host(&offer.apply.url)
+                && !is_excluded_host(&host)
+            {
+                domains.push(host);
             }
         }
     }
@@ -1006,6 +1008,53 @@ fn sync_scope(
     Ok(MessageScope::new(domains, Vec::<String>::new(), sent))
 }
 
+/// Hosts that are never a company's own domain: free mailboxes and job boards.
+/// A recipient at one of them (a relay, a board's own inbox) must not open the
+/// scope to every mail that domain carries.
+const EXCLUDED_HOSTS: &[&str] = &[
+    // Free mailbox providers.
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "yahoo.com",
+    "yahoo.es",
+    "yahoo.com.mx",
+    "icloud.com",
+    "me.com",
+    "proton.me",
+    "protonmail.com",
+    "aol.com",
+    "gmx.com",
+    "gmx.net",
+    "mail.com",
+    "zoho.com",
+    // Job boards and aggregators.
+    "linkedin.com",
+    "indeed.com",
+    "glassdoor.com",
+    "monster.com",
+    "ziprecruiter.com",
+    "dice.com",
+    "wellfound.com",
+    "angel.co",
+    "infojobs.net",
+    "infojobs.com.br",
+    "computrabajo.com",
+    "bumeran.com",
+    "elempleo.com",
+    "occ.com.mx",
+];
+
+/// Whether `host` is (or is a subdomain of) one of [`EXCLUDED_HOSTS`].
+fn is_excluded_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    EXCLUDED_HOSTS
+        .iter()
+        .any(|excluded| host == *excluded || host.ends_with(&format!(".{excluded}")))
+}
+
 /// The domain of an email address, lowercased; `None` when it has none.
 fn email_domain(address: &str) -> Option<String> {
     let (_, domain) = address.trim().rsplit_once('@')?;
@@ -1013,24 +1062,16 @@ fn email_domain(address: &str) -> Option<String> {
     (!domain.is_empty()).then_some(domain)
 }
 
+/// The company domain of an address: its domain unless that is a free mailbox
+/// or a job board.
+fn company_domain(address: &str) -> Option<String> {
+    let domain = email_domain(address)?;
+    (!is_excluded_host(&domain)).then_some(domain)
+}
+
 /// The host of an apply URL, when it parses.
 fn url_host(url: &str) -> Option<String> {
     url::Url::parse(url).ok()?.host_str().map(str::to_string)
-}
-
-/// A host and, when it has a subdomain, its parent: an Offer on
-/// `careers.acme.com` must let a reply from `acme.com` through. No public-suffix
-/// list is shipped; one label is dropped, which is the conservative direction
-/// (it can only widen matching to the same company).
-fn host_variants(host: &str) -> Vec<String> {
-    let host = host.trim_end_matches('.').to_ascii_lowercase();
-    let labels: Vec<&str> = host.split('.').collect();
-    if labels.len() > 2 {
-        let parent = labels[1..].join(".");
-        vec![host, parent]
-    } else {
-        vec![host]
-    }
 }
 
 /// The cursor for one connection.
@@ -1667,24 +1708,52 @@ mod tests {
             Some("acme.example".to_string())
         );
         assert_eq!(email_domain("not-an-address"), None);
+        assert_eq!(
+            company_domain("talent@acme.example"),
+            Some("acme.example".to_string())
+        );
     }
 
     #[test]
-    fn an_offer_host_also_covers_its_parent_domain() {
+    fn a_multi_label_company_domain_is_kept_whole() {
+        // No parent step: `careers.acme.co.uk` must never become `co.uk`, and
+        // `acme.com.mx` must never become `com.mx`.
         assert_eq!(
-            url_host("https://careers.acme.example/jobs/1"),
-            Some("careers.acme.example".to_string())
+            company_domain("talent@acme.co.uk"),
+            Some("acme.co.uk".to_string())
         );
         assert_eq!(
-            host_variants("careers.acme.example"),
-            vec![
-                "careers.acme.example".to_string(),
-                "acme.example".to_string()
-            ]
+            company_domain("talent@acme.com.mx"),
+            Some("acme.com.mx".to_string())
         );
         assert_eq!(
-            host_variants("acme.example"),
-            vec!["acme.example".to_string()]
+            url_host("https://careers.acme.co.uk/jobs/1"),
+            Some("careers.acme.co.uk".to_string())
         );
+        assert!(!is_excluded_host("careers.acme.co.uk"));
+        assert!(!is_excluded_host("acme.com.mx"));
+    }
+
+    #[test]
+    fn free_mailboxes_and_job_boards_are_not_company_domains() {
+        for address in [
+            "someone@gmail.com",
+            "reply@mail.gmail.com",
+            "jobs@linkedin.com",
+            "careers@indeed.com",
+            "talent@outlook.com",
+        ] {
+            assert_eq!(company_domain(address), None, "{address}");
+        }
+        assert!(is_excluded_host("linkedin.com"));
+        assert!(!is_excluded_host("notlinkedin.com"));
+    }
+
+    #[test]
+    fn an_offer_on_a_job_board_host_adds_no_company_domain() {
+        let board = url_host("https://www.linkedin.com/jobs/view/1").expect("host");
+        assert!(is_excluded_host(&board));
+        let company = url_host("https://careers.acme.example/jobs/1").expect("host");
+        assert!(!is_excluded_host(&company));
     }
 }
