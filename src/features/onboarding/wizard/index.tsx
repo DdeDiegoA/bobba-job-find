@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { commands } from "@/lib/ipc/bindings";
 import {
   advance,
   answer,
@@ -48,10 +49,18 @@ function trapTab(event: KeyboardEvent<HTMLDivElement>) {
  * reopens on a resume banner (AC2). `steps` is injectable so the framework is
  * tested on its own; the app always renders the real order.
  */
-export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[] } = {}) {
+export function OnboardingWizard({
+  steps = WIZARD_STEPS,
+  onFinished,
+}: {
+  steps?: WizardStep[];
+  /** Called once setup is complete, so the route can hand over to Today. */
+  onFinished?: () => void;
+} = {}) {
   const { t } = useTranslation();
   const [state, setState] = useState<WizardState>(() => initialState(steps, loadProgress()));
   const dialogRef = useRef<HTMLDivElement>(null);
+  const handedOver = useRef(false);
 
   // The wizard answers the keyboard from the moment it opens (§10.3).
   useEffect(() => {
@@ -59,14 +68,32 @@ export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[
   }, []);
 
   useEffect(() => {
-    if (state.done) {
-      markOnboarded();
-      clearProgress();
+    if (!state.done) {
+      // A resume banner changes nothing yet: only the steps phase is a draft.
+      if (state.phase === "steps") saveProgress({ index: state.index, answers: state.answers });
       return;
     }
-    // A resume banner changes nothing yet: only the steps phase is a draft.
-    if (state.phase === "steps") saveProgress({ index: state.index, answers: state.answers });
-  }, [state]);
+    markOnboarded();
+    clearProgress();
+    if (handedOver.current) return;
+    handedOver.current = true;
+    // Hand over exactly once, after the core has recorded the completion: the
+    // first-launch gate reads `onboarding_status`, and the local mirror above
+    // only lets Today open without waiting for that round trip.
+    void finishInCore(onFinished);
+  }, [state, onFinished]);
+
+  /**
+   * Next, with the last step's own finish action: completing setup is the one
+   * place a step may do something beyond recording an answer (S3.8).
+   */
+  const goNext = () => {
+    const step = currentStep(state, steps);
+    const next = advance(state, steps);
+    if (next === state) return;
+    setState(next);
+    if (next.done) step.onFinish?.();
+  };
 
   if (isOnboarded() || state.done) return null;
 
@@ -151,7 +178,7 @@ export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[
                   {t("onboarding:wizard.back")}
                 </Button>
                 <Button
-                  onClick={() => setState((prev) => advance(prev, steps))}
+                  onClick={goNext}
                   disabled={blocked}
                   aria-describedby={blocked && step.invalidKey ? reasonId : undefined}
                 >
@@ -164,6 +191,20 @@ export function OnboardingWizard({ steps = WIZARD_STEPS }: { steps?: WizardStep[
       </div>
     </div>
   );
+}
+
+/**
+ * Record the finish in the core, then hand over (S3.8). A core that cannot
+ * answer — a locked store, or a unit test without the Tauri bridge — still
+ * hands over: the gate falls back to the local mirror.
+ */
+async function finishInCore(onFinished?: () => void): Promise<void> {
+  try {
+    await commands.onboardingComplete();
+  } catch {
+    // The mirror is the fallback; the next launch asks the core again.
+  }
+  onFinished?.();
 }
 
 function stepStatus(index: number, current: number): "done" | "current" | "upcoming" {

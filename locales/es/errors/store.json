@@ -1,3 +1,4 @@
 {
-  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar."
+  "errors.store.locked": "Boba aún no puede acceder a tus datos. Desbloquéalo para continuar.",
+  "errors.store.setting": "Boba no pudo guardar ese ajuste."
 }

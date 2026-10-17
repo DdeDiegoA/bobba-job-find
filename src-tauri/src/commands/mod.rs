@@ -12,6 +12,7 @@ pub mod email;
 pub mod ingest;
 pub mod kill_switch;
 pub mod offers;
+pub mod onboarding;
 pub mod preferences;
 pub mod profile;
 pub mod profile_import;

@@ -22,6 +22,11 @@ export interface WizardStep {
   /** `false` keeps Next disabled; `invalidKey` is the inline reason shown. */
   isValid?: (answers: Record<string, unknown>) => boolean;
   invalidKey?: string;
+  /**
+   * Runs once when Next completes the last step (S3.8: the finish step starts
+   * the first Search Run there). Earlier steps never see it.
+   */
+  onFinish?: () => void;
   Component: ComponentType<StepProps>;
 }
 

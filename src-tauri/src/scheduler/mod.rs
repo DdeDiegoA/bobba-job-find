@@ -27,6 +27,7 @@ use boba_app::jobs::{
     Dispatcher, DriveOutcome, JobHandler, JobKind, JobRun, JobsRepo, Schedule, Schedules,
     TickContext, default_schedules,
 };
+use boba_app::ports::backup::BackupPort;
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::notifier::NotifierPort;
 use boba_app::ports::repo::system::SystemRepo;
@@ -147,10 +148,33 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// ADR-009 / S3.8: an unsigned build may not run a search until a recovery
+/// backup exists, because an update can lose the keychain entry that unlocks
+/// this machine's data. The backup port is mounted by every production wiring;
+/// an app that has none (tests, headless) has no requirement to read.
+///
+/// A mounted port whose status cannot be read fails **closed** (S3.8 review
+/// F1): a backup-state error must never let a run start unbacked.
+fn recovery_backup_required<R: Runtime>(app: &AppHandle<R>) -> bool {
+    match wiring::port::<dyn BackupPort>(app) {
+        Ok(port) => port
+            .status()
+            .map(|status| status.recovery_required)
+            .unwrap_or(true),
+        Err(_) => false,
+    }
+}
+
 /// A manual "Run now" (FR-41, AC3): join the run already executing, or start
 /// one whose slot is now. While the store is locked the slot is recorded
 /// `skipped_locked` and the caller gets the typed Locked error (ADR-009 §3).
+///
+/// The recovery-backup requirement is checked first (ADR-009, S3.8): no run
+/// starts, not even the onboarding's first one, while the backup is missing.
 pub fn run_now<R: Runtime>(app: &AppHandle<R>) -> AppResult<RunNowOutcome> {
+    if recovery_backup_required(app) {
+        return Err(AppError::conflict("errors.backup.recovery_required"));
+    }
     let repo = jobs_repo(app).ok_or_else(|| AppError::locked("errors.store.locked"))?;
     let clock = SystemClock;
     let notifier = notify::TauriNotifier::new(app.clone());
@@ -228,10 +252,16 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
     record_pending_skips(app, repo.as_ref(), &now);
 
     let locked = matches!(wiring::store_state(app), StoreStatus::Locked { .. });
-    let schedules = system
+    let mut schedules = system
         .as_ref()
         .and_then(|system| read_schedules(system.as_ref()))
         .unwrap_or_else(default_schedules);
+    // ADR-009 / S3.8: no search run — scheduled or manual — starts while the
+    // recovery backup is missing. The stored schedule is left untouched, so the
+    // next tick after the backup exists runs the slot as usual.
+    if recovery_backup_required(app) {
+        schedules.remove(&JobKind::DailySearch);
+    }
     let started_at = started_at(system.as_ref(), &now, locked);
 
     let notifier = notify::TauriNotifier::new(app.clone());
@@ -533,6 +563,9 @@ pub fn jobs_run_now(app: AppHandle) -> AppResult<RunNowOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use boba_app::ports::backup::{
+        BackupError, BackupMeta, BackupPort, BackupStatus, ResetReport, RestoreReport,
+    };
 
     #[test]
     fn the_stored_schedule_parses_into_times_and_days() {
@@ -671,6 +704,106 @@ mod tests {
             rows.iter()
                 .all(|run| run.status == boba_app::jobs::RunStatus::SkippedLocked)
         );
+    }
+
+    #[test]
+    fn a_run_refuses_to_start_while_a_recovery_backup_is_required() {
+        use tauri::Manager;
+        use tauri::test::mock_app;
+
+        let app = mock_app();
+        let handle = app.handle().clone();
+        // No backup yet: the run gate must refuse before any job is recorded.
+        handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: true,
+            unreadable: false,
+        }));
+
+        assert!(recovery_backup_required(&handle));
+        let error = run_now(&handle).expect_err("a run without a recovery backup");
+        assert_eq!(error.message_key, "errors.backup.recovery_required");
+
+        // Once the core reports the backup, the gate opens (the fake app has no
+        // jobs repo, which is the next thing run_now reads).
+        let fresh = mock_app();
+        let fresh_handle = fresh.handle().clone();
+        fresh_handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: false,
+            unreadable: false,
+        }));
+        assert!(!recovery_backup_required(&fresh_handle));
+    }
+
+    #[test]
+    fn a_build_without_a_backup_port_is_not_gated() {
+        use tauri::test::mock_app;
+
+        let app = mock_app();
+        assert!(!recovery_backup_required(app.handle()));
+    }
+
+    #[test]
+    fn an_unreadable_backup_status_keeps_the_run_gate_closed() {
+        use tauri::Manager;
+        use tauri::test::mock_app;
+
+        let app = mock_app();
+        let handle = app.handle().clone();
+        // The port is there but cannot say whether a backup exists: fail closed.
+        handle.manage::<Arc<dyn BackupPort>>(Arc::new(FakeBackup {
+            required: false,
+            unreadable: true,
+        }));
+
+        assert!(recovery_backup_required(&handle));
+        let error = run_now(&handle).expect_err("a run with an unreadable backup status");
+        assert_eq!(error.message_key, "errors.backup.recovery_required");
+    }
+
+    /// A backup port that only answers the recovery requirement.
+    struct FakeBackup {
+        required: bool,
+        unreadable: bool,
+    }
+
+    impl BackupPort for FakeBackup {
+        fn status(&self) -> Result<BackupStatus, BackupError> {
+            if self.unreadable {
+                return Err(BackupError::Internal);
+            }
+            Ok(BackupStatus {
+                recovery_created_at: None,
+                recovery_path: None,
+                recovery_present: !self.required,
+                recovery_required: self.required,
+            })
+        }
+
+        fn create(
+            &self,
+            _dest: &std::path::Path,
+            _passphrase: &str,
+            _now: &str,
+        ) -> Result<BackupMeta, BackupError> {
+            Err(BackupError::Internal)
+        }
+
+        fn restore(
+            &self,
+            _src: &std::path::Path,
+            _passphrase: &str,
+        ) -> Result<RestoreReport, BackupError> {
+            Err(BackupError::Internal)
+        }
+
+        fn reset(
+            &self,
+            _service: &str,
+            _profiles: &[std::path::PathBuf],
+            _confirmation: &str,
+        ) -> Result<ResetReport, BackupError> {
+            Err(BackupError::Internal)
+        }
     }
 
     /// An in-memory `job_run` table, enough for the pending-skip path.

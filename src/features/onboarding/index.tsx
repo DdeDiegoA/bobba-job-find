@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router";
 import { OnboardingWizard } from "./wizard";
 
 /**
@@ -5,11 +6,11 @@ import { OnboardingWizard } from "./wizard";
  * feature slice replaces S1.1's placeholder container). The wizard itself is
  * the first-run gate: it renders nothing once setup is done.
  *
- * AC1 note (orquestador ruling, 2026-10-15): the first-launch navigation to
- * `/onboarding` lives in routes.tsx (S1.5) and is deferred to S3.8, which lands
- * the wizard's finish step. Visiting `/onboarding` already gives the full AC1
- * behaviour: modal wizard over the app, starting with language and theme.
+ * AC1 note (orquestador ruling, 2026-10-15; landed by S3.8): the first-launch
+ * redirect to `/onboarding` lives in routes.tsx, and finishing the wizard hands
+ * over to Today (`/`), where the first Search Run's progress lives (FR-10).
  */
 export default function Onboarding() {
-  return <OnboardingWizard />;
+  const navigate = useNavigate();
+  return <OnboardingWizard onFinished={() => navigate("/", { replace: true })} />;
 }

@@ -6,5 +6,6 @@
   "errors.backup.too_new": "This backup was made by a newer version of Boba. Update Boba, then restore it.",
   "errors.backup.wrong_confirmation": "Type DELETE exactly to confirm.",
   "errors.backup.keychain": "The system keychain refused the change.",
-  "errors.backup.internal": "The backup operation failed. Nothing was changed."
+  "errors.backup.internal": "The backup operation failed. Nothing was changed.",
+  "errors.backup.recovery_required": "Create a recovery backup before a search run can start."
 }
