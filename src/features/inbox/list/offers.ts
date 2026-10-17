@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { formatCompactSalary, type SalaryConversion } from "@/lib/format";
 import { commands, type OfferCardView } from "@/lib/ipc/bindings";
 import { unwrap } from "@/lib/ipc/errors";
 
@@ -326,14 +327,18 @@ export const EXCLUSION_REASON_LABELS: Record<string, string> = {
   satisfied: "inbox:exclusion.reason.satisfied",
 };
 
-/** The pay a card shows, or `null` when the posting named none (FR-64). */
-export function salaryLabel(card: Card, locale: string): string | null {
+/**
+ * The pay a card shows, or `null` when the posting named none (FR-64).
+ *
+ * Always in the posting's own currency (FR-115, S10.4). A converted amount is
+ * added only when the core's FX setting is on and produced one, and it carries
+ * the date of the rate used.
+ */
+export function salaryLabel(
+  card: Card,
+  locale: string,
+  conversion?: SalaryConversion | null,
+): string | null {
   if (card.amount_minor === null || card.currency === null) return null;
-  const amount = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: card.currency,
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(card.amount_minor / 100);
-  return amount;
+  return formatCompactSalary(card.amount_minor, card.currency, locale, conversion);
 }

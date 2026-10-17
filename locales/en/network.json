@@ -1,1 +1,25 @@
-{}
+{
+  "title": "Network activity",
+  "intro": "Every destination Boba contacts, on your behalf, grouped by what it is for. Only the host and the time are kept — never a path, a search, a header or a message.",
+  "no_telemetry": "There is no telemetry and no crash upload. Boba sends nothing anywhere on its own.",
+  "empty": "Nothing has been contacted yet. Destinations appear here as soon as Boba reaches one.",
+  "never": "Configured, not contacted yet",
+  "requests": "{count}×",
+  "columns.destination": "Destination",
+  "columns.last_seen": "Last contacted",
+  "columns.requests": "Requests",
+  "purpose.sources": "Sources",
+  "purpose.email": "Email",
+  "purpose.agent_cli": "Agent CLI",
+  "purpose.update": "Update checks",
+  "purpose.model_download": "Model download",
+  "purpose.fx": "Exchange rates",
+  "fx.title": "Salary conversion",
+  "fx.description": "Salaries always show in their own currency. Turn this on to add a converted amount, with the date of the rate used. Off by default.",
+  "fx.toggle": "Convert salaries",
+  "fx.on": "Conversions are on. Each converted amount shows the date of its rate.",
+  "fx.off": "Conversions are off. Salaries show in their original currency only.",
+  "fx.rate_as_of": "Rates from {date}, per 1 {currency}.",
+  "fx.no_rate": "No rate has been fetched yet.",
+  "fx.error": "Exchange rates could not be turned on."
+}

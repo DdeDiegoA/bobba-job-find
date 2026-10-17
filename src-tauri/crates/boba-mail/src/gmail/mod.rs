@@ -199,12 +199,10 @@ impl GmailMail {
 
     /// The Gmail `users.messages.send` request for one message.
     fn send_request(&self, token: &str) -> reqwest::RequestBuilder {
-        self.http
-            .post(format!(
-                "{}/users/me/messages/send",
-                self.endpoints.api_base
-            ))
-            .bearer_auth(token)
+        let url = format!("{}/users/me/messages/send", self.endpoints.api_base);
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Email, &url);
+        self.http.post(url).bearer_auth(token)
     }
 }
 

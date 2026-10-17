@@ -579,6 +579,8 @@ pub async fn revoke(
     let Some(url) = &endpoints.revoke else {
         return Ok(false);
     };
+    // The network-activity view (S10.4, NFR-1): host and time only.
+    boba_app::network_log::record(boba_app::network_log::Purpose::Email, url);
     let form = [("client_id", client_id), ("token", token)];
     let response = http
         .post(url)
@@ -613,6 +615,8 @@ async fn token_request(
     url: &str,
     form: &[(&str, &str)],
 ) -> Result<TokenResponse, OAuthError> {
+    // The network-activity view (S10.4, NFR-1): host and time only.
+    boba_app::network_log::record(boba_app::network_log::Purpose::Email, url);
     let response = http
         .post(url)
         .header(reqwest::header::CONTENT_TYPE, FORM_CONTENT_TYPE)

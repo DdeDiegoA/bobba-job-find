@@ -3,6 +3,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { useFxSettings } from "@/features/settings/privacy/network/use-network";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import { InboxBulkBar } from "../actions";
@@ -44,6 +45,8 @@ export default function InboxList() {
   // Errors carry keys from the `common` catalog (AD-3).
   const { t: tError } = useTranslation();
   const inbox = useInboxOffers();
+  // FR-115: the opt-in FX rates every card may label a converted salary with.
+  const fx = useFxSettings();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [sort, setSort] = useState<SortKey>("rank");
   // FR-63: Weak/Poor starts collapsed; the user opens it (or any other section).
@@ -128,7 +131,7 @@ export default function InboxList() {
                 <ul className="flex flex-col gap-2" aria-label={t(section.labelKey)}>
                   {inSection.map((card) => (
                     <li key={card.posting_id}>
-                      <OfferCard card={card} />
+                      <OfferCard card={card} fx={fx.data ?? null} />
                     </li>
                   ))}
                 </ul>

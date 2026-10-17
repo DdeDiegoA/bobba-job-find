@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import { convertWithRates, type FxRates } from "@/lib/format";
 import type { BadgeSource } from "@/lib/ipc/bindings";
 import { cn } from "@/lib/utils";
 import { OfferActions } from "../actions";
@@ -104,11 +105,17 @@ function Axis({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-export function OfferCard({ card }: { card: Card }) {
+export function OfferCard({ card, fx }: { card: Card; fx?: FxRates | null }) {
   const { t, i18n } = useTranslation("inbox");
   const verdict = verdictId(card);
   const VerdictIcon = verdict ? VERDICT_ICONS[verdict as keyof typeof VERDICT_ICONS] : null;
-  const salary = salaryLabel(card, i18n.language);
+  // FR-115: the original currency always; a converted amount only when the
+  // user turned FX on and the core's rates cover this currency.
+  const conversion =
+    fx && card.amount_minor !== null && card.currency !== null
+      ? convertWithRates(card.amount_minor, card.currency, fx)
+      : null;
+  const salary = salaryLabel(card, i18n.language, conversion);
   const age = ageDays(card);
   const workMode = WORK_MODE_LABELS[card.work_mode] ?? WORK_MODE_LABELS.unknown;
 

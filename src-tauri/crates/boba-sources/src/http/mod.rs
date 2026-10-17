@@ -183,6 +183,18 @@ impl HttpClient {
 
     /// GET through the shared client (AC2).
     pub async fn get(&self, request: FetchRequest<'_>) -> Result<HttpResponse, SourceError> {
+        self.get_for(boba_app::network_log::Purpose::Sources, request)
+            .await
+    }
+
+    /// GET for a purpose other than a Source (S10.4: the opt-in FX rate is the
+    /// one caller). The network-activity view records host and time only.
+    pub async fn get_for(
+        &self,
+        purpose: boba_app::network_log::Purpose,
+        request: FetchRequest<'_>,
+    ) -> Result<HttpResponse, SourceError> {
+        boba_app::network_log::record(purpose, request.url);
         self.fetch(
             request.url,
             request.kind,
@@ -197,6 +209,8 @@ impl HttpClient {
     /// is replayed only when doing so cannot double a side effect (S4.6 ruling:
     /// connect errors and 429/503 that carry `Retry-After`).
     pub async fn post(&self, request: PostRequest<'_>) -> Result<HttpResponse, SourceError> {
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Sources, request.url);
         if let (Some(key), Some(cap)) = (request.budget_key, request.limits.daily_cap) {
             self.check_budget(key, cap)?;
         }

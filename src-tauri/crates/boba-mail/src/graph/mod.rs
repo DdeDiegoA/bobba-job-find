@@ -120,9 +120,10 @@ impl GraphMail {
 
     /// The Graph file-attachment shape: `contentBytes` is base64.
     fn send_request(&self, token: &str) -> reqwest::RequestBuilder {
-        self.http
-            .post(format!("{}/me/sendMail", self.endpoints.api_base))
-            .bearer_auth(token)
+        let url = format!("{}/me/sendMail", self.endpoints.api_base);
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Email, &url);
+        self.http.post(url).bearer_auth(token)
     }
 }
 
@@ -231,6 +232,8 @@ impl GraphMail {
             .append_pair("$filter", &format!("receivedDateTime ge {since}"))
             .append_pair("$orderby", "receivedDateTime asc")
             .append_pair("$top", &limit.min(READ_PAGE_SIZE).to_string());
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Email, url.as_str());
         let response = self
             .http
             .get(url)

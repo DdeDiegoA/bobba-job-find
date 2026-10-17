@@ -266,6 +266,24 @@ export const commands = {
   agentModels: (cli: string) =>
     typedError<string[], AppError_Serialize>(__TAURI_INVOKE("agent_models", { cli })),
   /**
+   *  Settings → Privacy → Network activity (AC1): every destination contacted
+   *  this session, plus the ones the current configuration will contact, grouped
+   *  by purpose. There is no telemetry group: the model has none.
+   */
+  networkActivity: () =>
+    typedError<NetworkActivity, AppError_Serialize>(__TAURI_INVOKE("network_activity")),
+  /**  The FX opt-in and the last rates fetched (AC2). */
+  fxSettings: () => typedError<FxSettings, AppError_Serialize>(__TAURI_INVOKE("fx_settings")),
+  /**
+   *  Turn salary conversion on (fetching today's rates once) or off.
+   *
+   *  Enabling fetches the rates for the display currency before the setting is
+   *  stored: a failed fetch leaves FX off, so the UI can never say a conversion is
+   *  available when there is no rate behind it.
+   */
+  fxSetEnabled: (enabled: boolean) =>
+    typedError<FxSettings, AppError_Serialize>(__TAURI_INVOKE("fx_set_enabled", { enabled })),
+  /**
    *  What F3 can do right now: whether this build carries the encoder, whether
    *  the user opted in, where the model lives and what it costs (AC1, AC4).
    */
@@ -1297,6 +1315,25 @@ export type DecisionView = {
   reasons: ReasonView[];
 };
 
+/**  One destination row. */
+export type Destination = {
+  /**
+   *  The host (`remotive.com`) or, where there is no Boba-side HTTP call, the
+   *  label the caller recorded (`claude`, `imap.fastmail.com`).
+   */
+  name: string;
+  purpose: Purpose;
+  /**
+   *  When it was last contacted, UTC RFC 3339; `None` for a destination that
+   *  is merely configured (nothing has been sent yet this session).
+   */
+  last_seen: string | null;
+  /**  Requests recorded this session. */
+  requests: number;
+  /**  A short, non-secret detail (e.g. the model id); never a path or a token. */
+  note: string | null;
+};
+
 /**  One change between the previous draft and the current one (AC1). */
 export type DiffChange = "added" | "removed" | "changed";
 
@@ -1716,6 +1753,18 @@ export type FunnelStats = {
   by_language: RateRow[];
 };
 
+/**  The opt-in and the last rates fetched. Stored as one JSON row. */
+export type FxSettings = {
+  /**  The user turned conversions on (AC2: off by default). */
+  enabled: boolean;
+  /**  The currency salaries are converted *to* (ISO-4217, upper case). */
+  target: string;
+  /**  The date of the rates below, as the source published it. */
+  as_of: string | null;
+  /**  `1 target = rates[C] C` for every currency the source named. */
+  rates: { [key in string]: number | null };
+};
+
 /**  One question the Profile cannot answer itself (FR-6). */
 export type Gap = {
   kind: GapKind;
@@ -1944,6 +1993,17 @@ export type NarrationView = {
    *  screen can mark it as the agent's words, not the core's.
    */
   untrusted_origin: boolean;
+};
+
+/**  What Settings → Privacy → Network activity renders. */
+export type NetworkActivity = {
+  /**  One group per purpose that has a destination, in [`Purpose::ALL`] order. */
+  groups: PurposeGroup[];
+  /**
+   *  Always `false`: [`Purpose`] has no telemetry variant, so no endpoint
+   *  outside NFR-1 can be recorded or shown (AC1).
+   */
+  telemetry: boolean;
 };
 
 /**  Emitted when the user's click reaches the app: the UI opens Today (FR-45). */
@@ -2219,6 +2279,30 @@ export type ProposalView = {
   /**  Always `false` for a CV import (AC4): the user's own input. */
   untrusted_origin: boolean;
   created_at: string;
+};
+
+/**  Why the app contacted a destination (NFR-1 a–e, design §9.13). */
+export type Purpose =
+  /**  Enabled Sources, custom feeds and the browser driver's pages. */
+  | "sources"
+  /**  The connected email provider (OAuth, send, read, IMAP/SMTP). */
+  | "email"
+  /**
+   *  The Agent CLI's own provider: `cli:` labels, because the host is the
+   *  CLI's business, not Boba's.
+   */
+  | "agent_cli"
+  /**  Update checks, when the user enabled them. */
+  | "update"
+  /**  The optional local-model download. */
+  | "model_download"
+  /**  FX rates, when the user enabled them. */
+  | "fx";
+
+/**  One purpose's rows. */
+export type PurposeGroup = {
+  purpose: Purpose;
+  destinations: Destination[];
 };
 
 /**

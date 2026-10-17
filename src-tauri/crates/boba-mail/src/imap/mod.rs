@@ -134,6 +134,8 @@ pub async fn test_connection(
 /// The secured socket, and whether the server greeting has already been consumed
 /// (`STARTTLS` upgrades mid-session, so there is none after the upgrade).
 async fn connect(settings: &ImapSettings) -> Result<(SecuredStream, bool), ImapError> {
+    // The network-activity view (S10.4, NFR-1): host and time only.
+    boba_app::network_log::record_host(boba_app::network_log::Purpose::Email, settings.host.trim());
     let tcp = TcpStream::connect((settings.host.as_str(), settings.port))
         .await
         .map_err(|_| ImapError::Connect)?;

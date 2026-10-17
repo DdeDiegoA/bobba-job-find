@@ -157,6 +157,8 @@ impl<T: CdpTransport> PageDriver<T> {
 
 impl<T: CdpTransport> BrowserPort for PageDriver<T> {
     fn open(&self, _provider: AtsProvider, url: &str) -> Result<FormSnapshot, BrowserError> {
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Sources, url);
         self.transport.navigate(url)?;
         self.read()
     }

@@ -258,6 +258,8 @@ impl SessionPages for ChromeSessions {
         let transport = self
             .transport(source_id)
             .map_err(|error| error.to_string())?;
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Sources, url);
         transport.navigate(url).map_err(|error| error.to_string())?;
         transport
             .evaluate(script)
