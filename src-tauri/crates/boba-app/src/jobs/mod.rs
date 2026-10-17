@@ -353,10 +353,15 @@ pub trait JobHandler: Send + Sync {
 /// The schedules a tick reads: one per job the user turned on (FR-41).
 pub type Schedules = std::collections::HashMap<JobKind, Schedule>;
 
-/// The compiled default: one daily search every morning at 08:00 local. The
-/// other jobs run on the schedule their own slice configures (S5.3, S10.3).
+/// The compiled default: one daily search every morning at 08:00 local, and the
+/// retention sweep (S10.3, FR-113) every day at 03:00 local, when the machine
+/// is quiet. The other jobs run on the schedule their own slice configures
+/// (S5.3).
 pub fn default_schedules() -> Schedules {
-    Schedules::from([(JobKind::DailySearch, Schedule::daily_at(8, 0))])
+    Schedules::from([
+        (JobKind::DailySearch, Schedule::daily_at(8, 0)),
+        (JobKind::RetentionSweep, Schedule::daily_at(3, 0)),
+    ])
 }
 
 /// Everything one scheduler tick needs, as references: the ports, the state the
@@ -829,12 +834,19 @@ mod tests {
         assert_eq!(schedule[&JobKind::DailySearch].times.len(), 1);
     }
 
+    /// The daily search's schedule alone, for the ticks below: they exercise
+    /// that job, and the compiled defaults also carry the retention sweep
+    /// (03:00, S10.3) whose slots would otherwise join every assertion.
+    fn daily_only() -> Schedules {
+        Schedules::from([(JobKind::DailySearch, Schedule::daily_at(8, 0))])
+    }
+
     #[test]
     fn a_tick_plans_each_job_from_its_newest_row() {
         let repo = FakeRepo::default();
         let notifier = CountingNotifier::default();
         let clock = FixedClock("2026-10-16T08:00:00Z");
-        let schedules = default_schedules();
+        let schedules = daily_only();
 
         // The 08:00 slot of the day before was recorded: this tick runs 08:00.
         repo.rows.lock().unwrap().push(JobRun {
@@ -873,7 +885,7 @@ mod tests {
         let repo = FakeRepo::default();
         let notifier = CountingNotifier::default();
         let clock = FixedClock("2026-10-16T14:00:00Z");
-        let schedules = default_schedules();
+        let schedules = daily_only();
 
         let ticked = tick(&TickContext {
             repo: &repo,
@@ -897,7 +909,7 @@ mod tests {
     fn a_tick_after_a_long_sleep_catches_up_once_per_missed_day() {
         let repo = FakeRepo::default();
         let notifier = CountingNotifier::default();
-        let schedules = default_schedules();
+        let schedules = daily_only();
 
         // Asleep from 14 Oct 07:00 to 16 Oct 09:00, with the 14 Oct run done.
         repo.rows.lock().unwrap().push(JobRun {
@@ -970,7 +982,7 @@ mod tests {
         let repo = FakeRepo::default();
         let notifier = CountingNotifier::default();
         let clock = FixedClock("2026-10-16T09:00:00Z");
-        let schedules = default_schedules();
+        let schedules = daily_only();
 
         let ticked = tick(&TickContext {
             repo: &repo,
