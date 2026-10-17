@@ -35,6 +35,15 @@ jobs:
         run: node scripts/ci/check-workflow-policy.mjs
       - name: stories.yaml fresh, deps acyclic, MVP FRs covered
         run: python3 scripts/gen_stories.py --check
+      # S10.5 (AD-22): the updater pubkey in tauri.conf.json must stay a real
+      # minisign public key, and the macOS identity pin must stay populated.
+      - name: Release config guards
+        run: |
+          node scripts/release/verify-updater-pubkey.mjs
+          grep -Eq '^BOBA_MACOS_CERT_SHA1=[0-9a-f]{40}$' scripts/release/macos-identity.pin || {
+            echo "::error::scripts/release/macos-identity.pin has no pinned certificate (docs/install/RELEASING.md)"
+            exit 1
+          }
 
   web:
     name: Web (Biome, tsc, Vitest, i18n, bindings)
@@ -129,3 +138,42 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Tauri build, no bundle
         run: pnpm tauri build --no-bundle
+      # S10.5 AC3 / ADR-009: every macOS build is signed with the one persistent
+      # project identity, and CI fails if codesign reports an ad-hoc signature
+      # or a different designated requirement.
+      #
+      # SECURITY (review F1): the signing material is available ONLY on pushes.
+      # A same-repository pull_request receives secrets, so a PR branch could
+      # otherwise read the .p12; the import and the signing build are therefore
+      # scoped to `push`, and no step on a PR ever holds the secret.
+      - name: Import the macOS signing identity (push only)
+        id: macos-sign
+        if: runner.os == 'macOS' && github.event_name == 'push'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE" ]; then
+            echo "::notice::MACOS_CERTIFICATE is not configured; no macOS bundle is produced in CI. Releases are built by release.yml, which fails closed without the identity."
+            echo "sign=no" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bash scripts/release/import-macos-identity.sh
+          echo "sign=yes" >> "$GITHUB_OUTPUT"
+      - name: macOS app bundle must carry the pinned identity (ADR-009)
+        if: runner.os == 'macOS' && steps.macos-sign.outputs.sign == 'yes'
+        env:
+          CARGO_INCREMENTAL: "0"
+          APPLE_SIGNING_IDENTITY: Boba Job Find Self-Signed
+        run: |
+          host="$(rustc -vV | sed -n 's/^host: //p')"
+          bash scripts/release/build-sidecars.sh "$host"
+          pnpm tauri build --bundles app
+          node scripts/release/check-macos-signature.mjs "target/release/bundle/macos/Boba Job Find.app"
+      - name: macOS signing skipped (pull request or unprovisioned)
+        if: runner.os == 'macOS' && steps.macos-sign.outputs.sign != 'yes'
+        run: |
+          echo "::notice::No macOS bundle was produced: signing only runs on a push with MACOS_CERTIFICATE provisioned."
+      - name: Remove the temporary signing keychain
+        if: always() && runner.os == 'macOS'
+        run: security delete-keychain "$RUNNER_TEMP/boba-signing.keychain-db" 2>/dev/null || true

@@ -49,6 +49,9 @@ pub fn install<R: Runtime>(app: &AppHandle<R>) {
     crate::autostart::install(app);
     // The tray run controls and the state icon (S5.4, FR-42).
     crate::tray::run_controls::install(app);
+    // Opt-in update checks (S10.5, NFR-1/NFR-19): does nothing unless the user
+    // turned them on, and never checks more than once a day.
+    crate::updater::install(app);
 }
 
 /// Bring Boba to the front (AC3): "Open" from the tray, and the second-instance

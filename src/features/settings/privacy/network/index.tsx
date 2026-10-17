@@ -3,7 +3,13 @@ import { formatDateLabel, formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/i18n";
 import type { Purpose } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
-import { useFxSettings, useNetworkActivity, useSetFx } from "./use-network";
+import {
+  useFxSettings,
+  useNetworkActivity,
+  useSetFx,
+  useSetUpdateChecks,
+  useUpdateSettings,
+} from "./use-network";
 
 /** Every purpose's heading; a static map, so the i18n gate can see each key. */
 const PURPOSE_LABELS: Record<Purpose, string> = {
@@ -31,11 +37,16 @@ export default function SettingsPrivacyNetwork() {
   const activity = useNetworkActivity();
   const fx = useFxSettings();
   const setFx = useSetFx();
+  const update = useUpdateSettings();
+  const setUpdate = useSetUpdateChecks();
 
   const data = activity.data;
-  const failure = activity.error ?? fx.error ?? setFx.error ?? null;
+  const failure =
+    activity.error ?? fx.error ?? setFx.error ?? update.error ?? setUpdate.error ?? null;
   const fxData = fx.data;
   const fxOn = fxData?.enabled ?? false;
+  const updateOn = update.data?.enabled ?? false;
+  const updateFailed = Boolean(setUpdate.error);
 
   return (
     <section className="flex flex-col gap-4 p-6" aria-labelledby="settings-network-title">
@@ -46,7 +57,11 @@ export default function SettingsPrivacyNetwork() {
 
       {failure ? (
         <p role="alert" className="text-sm text-danger">
-          {isAppError(failure) ? renderAppError(failure, tError) : t("fx.error")}
+          {isAppError(failure)
+            ? renderAppError(failure, tError)
+            : updateFailed
+              ? t("update.error")
+              : t("fx.error")}
         </p>
       ) : null}
 
@@ -101,6 +116,26 @@ export default function SettingsPrivacyNetwork() {
       <p className="rounded-xl bg-surface-muted px-3 py-2 text-sm text-fg-muted">
         {t("no_telemetry")}
       </p>
+
+      <section
+        className="rounded-2xl border border-border bg-surface p-4"
+        aria-labelledby="settings-network-update"
+      >
+        <h2 id="settings-network-update" className="font-display text-lg text-fg">
+          {t("update.title")}
+        </h2>
+        <p className="mt-1 text-sm text-fg-muted">{t("update.description")}</p>
+        <label className="mt-3 flex items-center gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={updateOn}
+            disabled={update.isPending || setUpdate.isPending}
+            onChange={(event) => setUpdate.mutate(event.currentTarget.checked)}
+          />
+          {t("update.toggle")}
+        </label>
+        <p className="mt-2 text-sm text-fg-muted">{updateOn ? t("update.on") : t("update.off")}</p>
+      </section>
 
       <section
         className="rounded-2xl border border-border bg-surface p-4"

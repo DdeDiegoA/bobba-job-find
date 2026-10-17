@@ -1,5 +1,6 @@
 
 .hermad/generated/
+.hermad/keys/
 .hermad/worktrees/
 .hermad/inbox/
 .hermad/memory/

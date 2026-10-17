@@ -82,6 +82,11 @@ struct Installed;
 #[derive(Debug)]
 pub struct StartedHidden;
 
+/// This launch showed the window (a manual launch). Recorded for the same
+/// reason as [`StartedHidden`]: the mock runtime's visibility is a constant.
+#[derive(Debug)]
+pub struct StartedVisible;
+
 /// Run at startup from [`crate::lifecycle::install`]: reconcile the OS with the
 /// stored choice, and start hidden when the OS launched us (AC1).
 pub fn install<R: Runtime>(app: &AppHandle<R>) {
@@ -100,9 +105,14 @@ fn install_with<R: Runtime>(app: &AppHandle<R>, args: impl IntoIterator<Item = S
         reconcile(app, stored);
     }
     if login_launch {
-        // AC1: no window. The window exists (tauri.conf.json declares it), so it
-        // is hidden before the user ever sees it; the tray stays.
+        // AC1: no window. The window is declared `visible: false`, so it never
+        // flashes before setup; the tray stays.
         start_hidden(app);
+    } else {
+        // S5.4 F3: the window is created hidden so a login launch has no flash,
+        // so a manual launch has to show it explicitly. This is the only place
+        // the startup window becomes visible.
+        show_main(app);
     }
 }
 
@@ -188,6 +198,25 @@ fn start_hidden<R: Runtime>(app: &AppHandle<R>) -> bool {
         }
         Err(error) => {
             tracing::warn!(%error, "login launch window not hidden");
+            false
+        }
+    }
+}
+
+/// Show the one window on a manual launch (S5.4 F3). Returns whether a window
+/// was found.
+fn show_main<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(window) = app.get_webview_window(crate::lifecycle::MAIN_WINDOW) else {
+        tracing::warn!("no main window to show on a manual launch");
+        return false;
+    };
+    match window.show() {
+        Ok(()) => {
+            let _ = app.manage(StartedVisible);
+            true
+        }
+        Err(error) => {
+            tracing::warn!(%error, "manual launch window not shown");
             false
         }
     }
@@ -279,9 +308,11 @@ mod tests {
         );
     }
 
-    /// AC1's other half: a manual launch leaves the window alone.
+    /// AC1's other half: a manual launch shows the window (S5.4 F3: the window
+    /// is declared hidden so a login launch never flashes, so a manual launch
+    /// has to show it).
     #[test]
-    fn a_manual_launch_keeps_the_window() {
+    fn a_manual_launch_shows_the_window() {
         let app = mock_app();
         let _window = tauri::WebviewWindowBuilder::new(
             &app,
@@ -295,6 +326,10 @@ mod tests {
 
         assert!(
             app.try_state::<StartedHidden>().is_none(),
+            "a manual launch does not hide the window"
+        );
+        assert!(
+            app.try_state::<StartedVisible>().is_some(),
             "a manual launch shows the window"
         );
     }

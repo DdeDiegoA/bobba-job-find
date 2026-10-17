@@ -1,7 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commands, type FxSettings, type NetworkActivity } from "@/lib/ipc/bindings";
+import {
+  commands,
+  type FxSettings,
+  type NetworkActivity,
+  type UpdateSettings,
+} from "@/lib/ipc/bindings";
 import "@/lib/i18n";
 import SettingsPrivacyNetwork from "./index";
 
@@ -10,6 +15,8 @@ vi.mock("@/lib/ipc/bindings", () => ({
     networkActivity: vi.fn(),
     fxSettings: vi.fn(),
     fxSetEnabled: vi.fn(),
+    updateSettings: vi.fn(),
+    updateSetEnabled: vi.fn(),
   },
 }));
 
@@ -61,6 +68,11 @@ const fx = (over: Partial<FxSettings> = {}): FxSettings => ({
   ...over,
 });
 
+const updates = (over: Partial<UpdateSettings> = {}): UpdateSettings => ({
+  enabled: false,
+  ...over,
+});
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -74,6 +86,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(commands.networkActivity).mockImplementation(() => ok(activity()));
   vi.mocked(commands.fxSettings).mockImplementation(() => ok(fx()));
+  // Reading the setting cannot fail, so it returns the value, not a CommandResult.
+  vi.mocked(commands.updateSettings).mockImplementation(() => Promise.resolve(updates()));
 });
 
 describe("Settings → Privacy → Network activity (NFR-1, AC1)", () => {
@@ -123,5 +137,21 @@ describe("the salary-conversion opt-in (FR-115, AC2)", () => {
     renderPage();
 
     expect(await screen.findByText(/Rates from Oct 16, 2026, per 1 EUR/)).toBeTruthy();
+  });
+});
+
+describe("the update-check opt-in (S10.5, NFR-1, NFR-19)", () => {
+  it("is off by default and turning it on asks the core to check", async () => {
+    vi.mocked(commands.updateSetEnabled).mockImplementation(() => ok(updates({ enabled: true })));
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", { name: "Check for updates" });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText(/never contacts the update server/)).toBeTruthy();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(commands.updateSetEnabled).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.getByText(/Update checks are on/)).toBeTruthy());
   });
 });

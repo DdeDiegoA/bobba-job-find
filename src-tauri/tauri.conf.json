@@ -18,7 +18,8 @@
         "height": 800,
         "minWidth": 940,
         "minHeight": 600,
-        "resizable": true
+        "resizable": true,
+        "visible": false
       }
     ],
     "security": {
@@ -27,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app", "msi", "nsis", "deb", "appimage"],
+    "targets": ["dmg", "app", "msi", "nsis", "deb", "appimage", "rpm"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,15 +38,24 @@
     ],
     "externalBin": ["binaries/boba-mcp"],
     "category": "Productivity",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright (c) 2026 Boba Job Find contributors. Portions copyright (c) 2026 Mads Lorentzen (ai-job-search, MIT).",
+    "publisher": "Boba Job Find",
     "shortDescription": "Local-first, AI-assisted job search.",
-    "longDescription": "Boba Job Find onboards your job boards and email, runs a daily search, ranks every offer, tailors your CV and applies for you."
+    "longDescription": "Boba Job Find onboards your job boards and email, runs a daily search, ranks every offer, tailors your CV and applies for you.",
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
-      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM3Qjc5RTdGQzQ3NTRFQzYKUldUR1RuWEVmNTYzeDcxQ3BoMlpXY3BSL2tMQi9sWlRuQjRPVkhGSFRCYmZqRmtkZlBpVkk1K3MK",
       "endpoints": [
         "https://github.com/diegoarenas/boba-job-find/releases/latest/download/latest.json"
-      ]
+      ],
+      "requireSignedVersion": true
     }
   }
 }

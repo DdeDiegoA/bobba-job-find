@@ -124,12 +124,23 @@ pub fn store_config(app: &AppHandle<impl Runtime>) -> Result<StoreConfig, String
         .path()
         .app_data_dir()
         .map_err(|e| format!("app data dir unavailable: {e}"))?;
-    let (db, snapshots) = (dir.join("boba.db"), dir.join("snapshots"));
+    let (db, snapshots) = store_paths(dir, cfg!(debug_assertions));
     Ok(if cfg!(debug_assertions) {
         StoreConfig::dev(db, snapshots)
     } else {
         StoreConfig::new(db, snapshots)
     })
+}
+
+/// Where the database and its snapshots live inside an app-data directory.
+///
+/// A `tauri dev` build (debug) gets its own `dev/` subtree as well as its own
+/// keychain service, so a local run never opens, migrates or replaces a real
+/// user's database (ADR-009 §1, S10.5 AC3). Pure so it is tested without
+/// touching the real app-data directory.
+pub fn store_paths(base: PathBuf, debug: bool) -> (PathBuf, PathBuf) {
+    let dir = if debug { base.join("dev") } else { base };
+    (dir.join("boba.db"), dir.join("snapshots"))
 }
 
 /// Mount the composition root: open the store and wire its ports (ADR-012 §2/§4).
@@ -274,6 +285,20 @@ fn gate(app: &AppHandle<impl Runtime>) -> AppResult<()> {
 mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
+
+    /// S10.5 AC3 / ADR-009 §1: a local build keeps its data away from the real
+    /// store. Pure path check — no filesystem, no `mock_app` (whose data dir is
+    /// the real one).
+    #[test]
+    fn debug_builds_keep_their_own_data_directory() {
+        let base = std::env::temp_dir().join("boba-wiring-store-paths");
+        let (db, snapshots) = super::store_paths(base.clone(), true);
+        assert_eq!(db, base.join("dev").join("boba.db"));
+        assert_eq!(snapshots, base.join("dev").join("snapshots"));
+        let (release_db, release_snapshots) = super::store_paths(base.clone(), false);
+        assert_eq!(release_db, base.join("boba.db"));
+        assert_eq!(release_snapshots, base.join("snapshots"));
+    }
 
     use boba_app::error::{AppError, ErrorCode};
     use boba_app::ports::repo::agent::AgentRepo;

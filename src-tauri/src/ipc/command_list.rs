@@ -54,6 +54,8 @@ macro_rules! boba_commands {
             crate::commands::network::network_activity,
             crate::commands::network::fx_settings,
             crate::commands::network::fx_set_enabled,
+            crate::commands::updater::update_settings,
+            crate::commands::updater::update_set_enabled,
             crate::commands::embeddings::embeddings_status,
             crate::commands::embeddings::embeddings_opt_in,
             crate::commands::embeddings::embeddings_opt_out,

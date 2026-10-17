@@ -1,0 +1,227 @@
+# Release — tag-driven, signed, published (S10.5, AD-22, NFR-16/17/19).
+#
+# A `v*` tag (or a manual run naming an existing tag) builds:
+#   macOS   universal DMG (self-signed with the pinned project identity)
+#   Windows NSIS + MSI (unsigned, SmartScreen bypass documented until SignPath)
+#   Linux   AppImage + .deb + .rpm
+# signs the updater artifacts with the minisign key, publishes a release with
+# `latest.json`, and only then leaves draft. Nothing here runs on a push to main,
+# and CI never publishes (ci.yml has no secrets).
+#
+# One-time setup, key custody and rollback: docs/install/RELEASING.md.
+# Every third-party action is pinned to a commit SHA (scripts/ci/check-workflow-policy.mjs).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* tag to build and publish again (beta/CI artifact)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  guard:
+    name: Release guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+      - name: Resolve the tag
+        id: tag
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      # AD-22: the tag, package.json, tauri.conf.json and the Cargo workspace
+      # must agree, or version/tag drift causes update loops.
+      - name: Versions match the tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: node scripts/release/check-version.mjs "$TAG"
+      # AC2: the committed pubkey is a real minisign public key (never a
+      # placeholder, never a secret key).
+      - name: Updater pubkey is valid
+        run: node scripts/release/verify-updater-pubkey.mjs
+      # F5: latest.json is resolved from the endpoint's URL by every installed
+      # app, so it must name the repository that publishes the release.
+      - name: Updater endpoint matches this repository
+        run: node scripts/release/verify-updater-endpoint.mjs
+      # AC3: an empty pin would make the macOS check meaningless.
+      - name: macOS signing identity is pinned
+        run: |
+          if ! grep -Eq '^BOBA_MACOS_CERT_SHA1=[0-9a-f]{40}$' scripts/release/macos-identity.pin; then
+            echo "::error::scripts/release/macos-identity.pin has no certificate; run scripts/release/generate-macos-identity.sh once (docs/install/RELEASING.md)"
+            exit 1
+          fi
+      # Fail before a 20-minute build, not after it.
+      - name: Release secrets are configured
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PASSWORD TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::repository secret $name is not set (docs/install/RELEASING.md)"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: guard
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: universal-apple-darwin
+            bundles: dmg
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          # 22.04 for the oldest glibc the AppImage can run on (NFR-16).
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb,rpm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 11.5.3
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            rpm \
+            build-essential \
+            pkg-config \
+            libssl-dev
+      - name: Install (frozen lockfile, dependency scripts disabled)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      # AD-007: boba-mcp ships inside the bundle, so it is signed with the app.
+      # Universal macOS builds need a universal sidecar.
+      - name: Build the boba-mcp sidecar
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: bash scripts/release/build-sidecars.sh "${{ matrix.target }}"
+      # ADR-009: every macOS build uses the one persistent project identity.
+      - name: Import the macOS signing identity
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: bash scripts/release/import-macos-identity.sh
+      # Builds, minisign-signs the updater artifacts (latest.json included) and
+      # attaches everything to a DRAFT release: nothing is public until the
+      # publish job has verified it.
+      - name: Tauri release build
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: Boba Job Find Self-Signed
+          # Optional bundled clients (docs/install/RELEASING.md). Unset means
+          # only the BYO client path is offered; the code trims and treats an
+          # empty secret as absent.
+          BOBA_GRAPH_CLIENT_ID: ${{ secrets.BOBA_GRAPH_CLIENT_ID }}
+          BOBA_GMAIL_CLIENT_ID: ${{ secrets.BOBA_GMAIL_CLIENT_ID }}
+          BOBA_GMAIL_CLIENT_SECRET: ${{ secrets.BOBA_GMAIL_CLIENT_SECRET }}
+        with:
+          tagName: ${{ needs.guard.outputs.tag }}
+          releaseName: Boba Job Find ${{ needs.guard.outputs.tag }}
+          releaseDraft: true
+          prerelease: ${{ contains(needs.guard.outputs.tag, '-') }}
+          updaterJsonPreferNsis: true
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+      # ADR-009 / AC3: an ad-hoc signature or a different certificate leaf fails
+      # the run while the release is still a draft.
+      - name: macOS signature gate (ADR-009)
+        if: runner.os == 'macOS'
+        run: node scripts/release/check-macos-signature.mjs "target/universal-apple-darwin/release/bundle/macos/Boba Job Find.app"
+      - name: Remove the temporary signing keychain
+        if: always() && runner.os == 'macOS'
+        run: security delete-keychain "$RUNNER_TEMP/boba-signing.keychain-db" 2>/dev/null || true
+
+  publish:
+    name: Verify and publish
+    needs: [guard, build]
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+      - name: Download the draft assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          mkdir -p release-assets
+          gh release download "$TAG" --dir release-assets --pattern '*'
+      # AC1: every installer, a resolvable latest.json for every platform, and
+      # the release still unpublished (the script checks isDraft).
+      - name: Installers and latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: node scripts/release/verify-release.mjs "$TAG" release-assets
+      # The check runs on the artifact users actually install, not only on the
+      # build tree (a DMG could in theory wrap a different .app).
+      - name: The DMG carries the pinned identity
+        run: |
+          dmg="$(find release-assets -name '*.dmg' -print -quit)"
+          mnt="$RUNNER_TEMP/boba-dmg"
+          mkdir -p "$mnt"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
+          trap 'hdiutil detach "$mnt" -quiet || true' EXIT
+          app="$(find "$mnt" -maxdepth 2 -name '*.app' -print -quit)"
+          node scripts/release/check-macos-signature.mjs "$app"
+      # AC1: published, not left as a draft, so /releases/latest resolves.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          # A pre-release (v1.2.3-beta.1) never becomes /releases/latest: the
+          # updater's fixed endpoint keeps serving the last stable release.
+          case "$TAG" in
+            *-*) gh release edit "$TAG" --draft=false ;;
+            *) gh release edit "$TAG" --draft=false --latest ;;
+          esac
