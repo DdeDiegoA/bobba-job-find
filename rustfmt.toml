@@ -1,0 +1,7 @@
+# rustfmt (CH13). `cargo fmt --all --check` runs in CI's `rust` job.
+#
+# Only stable options, and only values the tree already satisfies, so adding
+# this file does not reformat the codebase in one sweeping diff.
+edition = "2024"
+max_width = 100
+newline_style = "Unix"

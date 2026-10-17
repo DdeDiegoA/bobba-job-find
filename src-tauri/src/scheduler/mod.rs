@@ -66,9 +66,8 @@ pub struct Handlers {
 
 impl Handlers {
     /// Register (or replace) the handler for `job`.
-    // `S5.2` registers the daily search; until it lands no handler is wired, and
-    // a due slot is recorded as failed ("no handler") rather than as a success.
-    #[allow(dead_code)]
+    // A due slot with no handler is recorded as failed ("no handler"), never as
+    // a success.
     pub fn register(&self, job: JobKind, handler: Arc<dyn JobHandler>) {
         self.by_job
             .lock()
@@ -107,8 +106,7 @@ pub fn handlers<R: Runtime>(app: &AppHandle<R>) -> Option<&Handlers> {
 }
 
 /// Register the handler a job runs. Called by the slice that owns the use case
-/// (S5.2 registers `daily_search`); a missing handler never blocks the tick.
-#[allow(dead_code)]
+/// (the daily-search mount registers it); a missing handler never blocks the tick.
 pub fn register_handler<R: Runtime>(
     app: &AppHandle<R>,
     job: JobKind,

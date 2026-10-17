@@ -1,11 +1,20 @@
 
+# Herdr / Hermad workspace state (local only; never committed)
 .hermad/generated/
 .hermad/keys/
 .hermad/worktrees/
 .hermad/inbox/
+.hermad/handoff/
 .hermad/memory/
 .hermad/state.json
-.opencode/agents/hermad-*
+.hermad/personas.env
+.hermad/scratch-*
+scratchpad-*.out
+
+# Agent harness state installed per checkout (Claude Code, OpenCode, generic agents)
+.claude/
+.opencode/
+.agents/
 
 # Node / frontend (build only, not shipped)
 node_modules/
@@ -19,6 +28,10 @@ target/
 
 # Tauri generated
 src-tauri/gen/
+
+# Python bytecode (scripts/gen_backlog.py and friends)
+__pycache__/
+*.pyc
 
 # Editor / OS
 .DS_Store

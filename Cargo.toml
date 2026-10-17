@@ -25,6 +25,20 @@ license = "MIT"
 rust-version = "1.92"
 repository = "https://github.com/diegoarenas/boba-job-find"
 
+# Workspace lints (CH13). Every member opts in with `[lints] workspace = true`;
+# CI runs `cargo clippy -- -D warnings`, so a `warn` here fails the build.
+# Keep the list short and already satisfied: a lint that fights existing code
+# is noise, not a gate.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+# `unimplemented` is intentionally allowed: mail test doubles stub the calls
+# the send/read path never makes ("not used by the send path").
+
 [workspace.dependencies]
 # --- Shell and platform (Stack table: Tauri 2.12.x) ---
 tauri = { version = "2.12", features = ["tray-icon"] }
