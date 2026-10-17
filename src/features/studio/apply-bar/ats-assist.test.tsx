@@ -34,6 +34,7 @@ function session(overrides: Partial<AtsSessionView> = {}): AtsSessionView {
     attached: ["cv"],
     unanswered: [],
     handoff: null,
+    duplicate: null,
     ...overrides,
   };
 }

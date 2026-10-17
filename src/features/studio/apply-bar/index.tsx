@@ -21,6 +21,7 @@ import { useApplyView, useExportPdfs, useMarkApplied } from "./use-apply-bar";
  */
 export default function StudioApplyBar({ applicationId }: { applicationId: string }) {
   const { t } = useTranslation("apply_bar");
+  const { t: tApplying } = useTranslation("applying");
   const { t: tError } = useTranslation();
   const view = useApplyView(applicationId);
   const mark = useMarkApplied(applicationId);
@@ -86,6 +87,19 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
         </div>
       </div>
       <p className="text-xs text-fg-muted">{t("mark_applied_hint")}</p>
+
+      {/* FR-92 (S9.5): a duplicate application is warned here, whatever the
+          channel; the core computes it, the bar only says it. */}
+      {bar.duplicate ? (
+        <p
+          role="alert"
+          className="text-xs text-warning"
+          data-duplicate={bar.duplicate.role}
+          title={bar.duplicate.role}
+        >
+          {tApplying("reason.duplicate")}
+        </p>
+      ) : null}
 
       <div>
         <h3 className="text-xs font-medium uppercase text-fg-muted">{t("channels.title")}</h3>

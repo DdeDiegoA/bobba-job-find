@@ -163,6 +163,9 @@ pub struct AtsSessionView {
     pub attached: Vec<String>,
     pub unanswered: Vec<UnansweredField>,
     pub handoff: Option<Handoff>,
+    /// An application to the same company and a similar role inside 30 days
+    /// (S9.5, FR-92). The assist panel warns before the user submits.
+    pub duplicate: Option<crate::apply::guard::DuplicateGuardView>,
 }
 
 /// The evidence a confirmed submission keeps (AC3, FR-88).
@@ -367,6 +370,13 @@ impl AtsFormService {
             attached,
             unanswered,
             handoff,
+            // FR-92 (S9.5): warned before the form is handed over.
+            duplicate: crate::apply::guard::duplicate_for(
+                self.apply.as_ref(),
+                application,
+                &self.clock.now_rfc3339(),
+            )
+            .map_err(ManualError::from)?,
         })
     }
 
@@ -1284,6 +1294,39 @@ mod tests {
         offer.apply.url = "https://nimbus.example/jobs/1".into();
         let error = h.service.start(&application(), &offer).unwrap_err();
         assert_eq!(error.message_key(), "errors.apply.ats_not_a_form");
+    }
+
+    // FR-92 (S9.5): the assist panel is warned before the form is handed over.
+    #[test]
+    fn starting_warns_when_a_similar_application_exists() {
+        let h = harness(vec![], true);
+        let mut target = application();
+        target.offer_snapshot_json = serde_json::json!({
+            "company": "Nimbus",
+            "title": "Backend Engineer",
+        })
+        .to_string();
+        seed_cv(&h.apply, &h.documents, &target.id);
+        h.apply.seed_application(Application {
+            id: "app_prior".into(),
+            posting_id: "pst_00".into(),
+            status: AppStatus::Applied,
+            offer_snapshot_json: target.offer_snapshot_json.clone(),
+            notes: None,
+            next_action: None,
+            created_at: "2026-10-15T00:00:00Z".into(),
+            updated_at: "2026-10-15T00:00:00Z".into(),
+        });
+
+        let session = h.service.start(&target, &offer()).unwrap();
+
+        assert_eq!(
+            session.duplicate,
+            Some(crate::apply::guard::DuplicateGuardView {
+                role: "Backend Engineer".into(),
+                days_ago: 2,
+            })
+        );
     }
 
     // AC1: identity from the CV's contact block, answers from the bank, the

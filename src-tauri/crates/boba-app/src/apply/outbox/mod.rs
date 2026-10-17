@@ -1673,6 +1673,31 @@ mod tests {
         assert!(rules.ledger().is_empty());
     }
 
+    // FR-92 (S9.5): a duplicate application never leaves the review queue,
+    // whatever the rule says.
+    #[test]
+    fn a_duplicate_candidate_is_never_sent_automatically() {
+        let items = Arc::new(FakeOutbox::default());
+        items.seed_dry(activated("rule_1"));
+        let rules = Arc::new(FakeAutoRules::with_rules(vec![rule("rule_1")]));
+        let service = service(items.clone(), rules, system(), None);
+        let Enqueued::Held { item } = service
+            .enqueue("app_01", &candidate(), "Backend Engineer", "Acme", 0)
+            .unwrap()
+        else {
+            panic!("held");
+        };
+        let mut duplicate = candidate();
+        duplicate.duplicate = true;
+
+        let released = service.release(&item.id, &duplicate, 0).unwrap();
+
+        assert!(
+            matches!(released, Release::Review(_)),
+            "a duplicate is reviewed, never auto-sent"
+        );
+    }
+
     #[test]
     fn a_release_finishes_sent_or_back_in_the_review_queue() {
         let items = Arc::new(FakeOutbox::default());

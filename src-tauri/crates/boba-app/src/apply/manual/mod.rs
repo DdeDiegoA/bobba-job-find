@@ -96,6 +96,9 @@ pub struct ManualView {
     /// Boba can fill its form in the user's own session (S11.2). `None` for
     /// every other Source, so the apply bar knows whether to offer it.
     pub session_board: Option<String>,
+    /// An application to the same company and a similar role inside 30 days
+    /// (S9.5, FR-92). The bar warns before anything is sent.
+    pub duplicate: Option<crate::apply::guard::DuplicateGuardView>,
 }
 
 /// One PDF the command writes to disk for the user to attach by hand.
@@ -211,6 +214,12 @@ impl ManualService {
             // and the fill itself re-checks Ready (S11.2).
             session_board: crate::apply::session::SessionBoard::of_source(&offer.source_id)
                 .map(|board| board.as_str().to_string()),
+            // FR-92 (S9.5): warned here, before any channel sends.
+            duplicate: crate::apply::guard::duplicate_for(
+                self.apply.as_ref(),
+                application,
+                &self.clock.now_rfc3339(),
+            )?,
         })
     }
 
@@ -555,6 +564,42 @@ mod tests {
         );
         assert_eq!(view.status, "drafted");
         assert_eq!(view.posting_id, "pst_01");
+    }
+
+    #[test]
+    fn the_view_warns_when_a_similar_application_exists() {
+        let apply = Arc::new(FakeApplyRepo::default());
+        let documents = Arc::new(FakeDocumentsRepo::default());
+        let service = service(&apply, &documents);
+        let snapshot = serde_json::json!({
+            "company": "Nimbus",
+            "title": "Backend Engineer",
+        })
+        .to_string();
+
+        // Sent three days ago to the same company for the same role (FR-92).
+        apply.seed_application(Application {
+            id: "app_prior".into(),
+            posting_id: "pst_00".into(),
+            status: AppStatus::Applied,
+            offer_snapshot_json: snapshot.clone(),
+            notes: None,
+            next_action: None,
+            created_at: "2026-10-14T00:00:00Z".into(),
+            updated_at: "2026-10-14T00:00:00Z".into(),
+        });
+        let mut target = application();
+        target.offer_snapshot_json = snapshot;
+
+        let view = service.view(&target, &offer()).unwrap();
+
+        assert_eq!(
+            view.duplicate,
+            Some(crate::apply::guard::DuplicateGuardView {
+                role: "Backend Engineer".into(),
+                days_ago: 3,
+            })
+        );
     }
 
     #[test]

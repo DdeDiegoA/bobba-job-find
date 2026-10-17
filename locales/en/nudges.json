@@ -1,1 +1,12 @@
-{}
+{
+  "title": "Follow-ups",
+  "check_in": "{title} at {company} has been quiet for {days} days. A short, warm follow-up goes a long way.",
+  "no_response": "{title} at {company} has had no reply for {days} days. Time to call it?",
+  "action.no_response": "Mark as No Response",
+  "confirm.no_response": "Move {title} to No Response?",
+  "confirm.yes": "Move to No Response",
+  "confirm.no": "Not yet",
+  "undo.label": "Moved {title} to No Response",
+  "undo.action": "Undo",
+  "error.move": "That move did not stick. Try again."
+}

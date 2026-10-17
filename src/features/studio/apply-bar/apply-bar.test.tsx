@@ -60,6 +60,7 @@ function view(overrides: Partial<ManualView> = {}): ManualView {
     pending: [],
     ready: true,
     session_board: null,
+    duplicate: null,
     ...overrides,
   };
 }
@@ -86,6 +87,7 @@ function emailView(overrides: Partial<EmailApplyView> = {}): EmailApplyView {
     pending: [],
     ready: true,
     last_attempt: null,
+    duplicate: null,
     ...overrides,
   };
 }
@@ -127,6 +129,18 @@ describe("StudioApplyBar", () => {
     expect(screen.getByText("ATS Form")).toBeTruthy();
     expect(screen.getByText("Manual")).toBeTruthy();
     expect(screen.getByText(/jobs@nimbus\.example/)).toBeTruthy();
+  });
+
+  it("warns before sending when a similar application already exists (FR-92)", async () => {
+    vi.mocked(commands.applyView).mockReturnValue(
+      ok(view({ duplicate: { role: "Backend Engineer", days_ago: 3 } })) as never,
+    );
+    renderBar();
+
+    const warning = await screen.findByText(
+      "You already applied to this company for a similar role.",
+    );
+    expect(warning.getAttribute("data-duplicate")).toBe("Backend Engineer");
   });
 
   it("opens the original page when the user applies by hand", async () => {

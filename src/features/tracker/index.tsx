@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Toaster } from "sonner";
 import { Board } from "./board/board";
+import TrackerNudges from "./nudges";
 
 /**
  * Tracker — the kanban board of Applications (S9.1, EXPERIENCE §9.6). The
@@ -17,6 +18,8 @@ export default function TrackerIndex() {
       <h1 id="tracker-title" className="font-display text-2xl text-fg">
         {t("title")}
       </h1>
+      {/* S9.5: follow-ups for applications that went quiet (FR-95). */}
+      <TrackerNudges />
       <Board />
       <Toaster />
     </section>

@@ -639,15 +639,22 @@ fn candidate_for<R: tauri::Runtime>(
             .unwrap_or(GateVerdict::Pass),
         // FR-60 (S6.8): a scam posting's badge blocks Auto here, which every
         // decide() caller (apply start, ATS/session and Outbox release) runs
-        // through. The duplicate guard (S9.5) is the remaining placeholder: no
-        // duplicate is known on this path until that slice lands.
+        // through.
         fraud_badge: fraud_badge(&offer, &ClockPort::now_rfc3339(&SystemClock)),
         documents_verified: !package.is_empty()
             && package.iter().all(|item| item.verified_at.is_some()),
         language_variant_confirmed: documents
             .iter()
             .all(|document| document.language_fallback_from.is_none()),
-        duplicate: false,
+        // FR-92 (S9.5): an application to the same company and a similar role
+        // inside 30 days blocks Auto on every decide() path.
+        duplicate: boba_app::apply::guard::duplicate_for(
+            wiring::port::<dyn ApplyRepo>(app)?.as_ref(),
+            &application,
+            &ClockPort::now_rfc3339(&SystemClock),
+        )
+        .map_err(|_| CommandError::Store.app_error())?
+        .is_some(),
         agent_used: false,
         cli_tool_lockdown: true,
         source_auto_opt_in: opt_in,
