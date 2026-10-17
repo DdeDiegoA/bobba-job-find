@@ -529,8 +529,14 @@ fn preferences(store: &Arc<Store>) -> Result<Value, String> {
     let Some(raw) = raw else {
         return Ok(json!({ "preferences": null }));
     };
-    let snapshot: crate::commands::preferences::PreferencesSnapshot =
-        serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+    // A row this build cannot parse is the defaults, never an error: the run
+    // drafts without preferences instead of failing on a settings row nobody
+    // can read (the same rule the Preferences screen and the salary floor use).
+    let Ok(snapshot) =
+        serde_json::from_str::<crate::commands::preferences::PreferencesSnapshot>(&raw)
+    else {
+        return Ok(json!({ "preferences": null }));
+    };
     Ok(json!({ "preferences": snapshot.values }))
 }
 
@@ -1065,6 +1071,32 @@ mod tests {
             )
             .expect("the score card slot");
         assert!(card["score_card"].is_null(), "{card}");
+    }
+
+    /// S7.7: a preferences row this build cannot parse is `null`, never an
+    /// error — a run drafts without them rather than failing on a settings row
+    /// nobody can read (the same rule the Preferences screen applies).
+    #[test]
+    fn an_unparseable_preferences_row_does_not_fail_the_run() {
+        let store = store("tailor-preferences-broken");
+        let key = crate::commands::preferences::KEY.to_string();
+        store
+            .execute(move |conn| {
+                boba_store::repos::settings::put(conn, &key, "{not json", "t")
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the broken row is stored");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let answer = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_preferences",
+                &json!({}),
+            )
+            .expect("a broken row is not a failed run");
+        assert!(answer["preferences"].is_null(), "{answer}");
     }
 
     /// S7.7: the preferences the user saved, and `null` when they saved none.
