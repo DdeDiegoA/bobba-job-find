@@ -113,6 +113,7 @@ macro_rules! boba_commands {
             crate::commands::backup::backup_create,
             crate::commands::backup::backup_restore,
             crate::commands::backup::reset_everything,
+            crate::commands::export::export_data,
             crate::commands::onboarding::onboarding_status,
             crate::commands::onboarding::onboarding_complete,
             crate::commands::capabilities::capabilities_snapshot,

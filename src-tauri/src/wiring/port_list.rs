@@ -199,6 +199,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The status-proposal owner keeps the reply verdicts and the proposals
     // (S8.4): `email_classification` is no other area's table.
     mount_port::<dyn boba_app::status_proposals::repo::StatusProposalRepo>(app, store.clone());
+    // The unencrypted export (S10.1, FR-110): the store owns every row the
+    // files are built from.
+    mount_port::<dyn boba_app::ports::export::ExportPort>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }
 

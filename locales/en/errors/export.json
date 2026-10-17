@@ -1,0 +1,4 @@
+{
+  "errors.export.destination": "Choose an existing folder to export into.",
+  "errors.export.internal": "The export did not finish. Some files may already be in the folder; check it before trying again."
+}
