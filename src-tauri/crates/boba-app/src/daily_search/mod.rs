@@ -34,6 +34,7 @@ use boba_domain::source::{
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
+use crate::digest::{self, DigestInput, DigestPort, NotificationSettings, TopMatch};
 use crate::ingest::dedup::{Outcome, ingest_deduped};
 use crate::ingest::lifecycle::{self, RunWindow};
 use crate::ports::agent::RunBudget;
@@ -184,6 +185,9 @@ pub struct DailySearch {
     features: Arc<ExtractFeatures>,
     clock: Arc<dyn ClockPort>,
     notifier: Option<Arc<dyn NotifierPort>>,
+    /// The digest the run announces (S5.3, FR-45). A host without one keeps the
+    /// plain top-matches notice the run has shown since S5.2.
+    digest: Option<Arc<dyn DigestPort>>,
     observer: Option<Arc<dyn RunObserver>>,
 }
 
@@ -202,8 +206,17 @@ impl DailySearch {
             features,
             clock,
             notifier,
+            digest: None,
             observer,
         }
+    }
+
+    /// Announce the run's result as the digest (S5.3, FR-45): counts by band,
+    /// the top matches the user chose to see, quiet hours and all. Without a
+    /// port, the run keeps S5.2's plain top-matches notice.
+    pub fn with_digest(mut self, digest: Option<Arc<dyn DigestPort>>) -> Self {
+        self.digest = digest;
+        self
     }
 
     /// Run the search (AC1): every Source, then ingestion, then the sweep, then
@@ -268,12 +281,15 @@ impl DailySearch {
 
         let agent_tasks_used =
             self.run_agent_pass(&options, &new_ids, inputs.as_ref(), &mut errors);
-        let (vetoed, ranked, top_matches) = match &inputs {
+        let tally = match &inputs {
             Some(inputs) => self.score(&seen, &new_ids, inputs, &mut errors),
-            None => (0, 0, 0),
+            None => ScoreTally::default(),
         };
-        // FR-46's product rule: a run that found top matches says so once.
-        notify_top_matches(self.notifier.as_deref(), top_matches);
+        // FR-46's product rule: a run that found top matches says so once. From
+        // S5.3 the announcement is the digest (counts by band, quiet hours and
+        // the user's choices); a host without the digest port keeps the plain
+        // top-matches notice.
+        self.announce(&tally, total);
 
         let finished_at = self.clock.now_rfc3339();
         let report = RunReport {
@@ -283,8 +299,8 @@ impl DailySearch {
             started_at,
             finished_at,
             sources: reports,
-            vetoed,
-            ranked,
+            vetoed: tally.vetoed,
+            ranked: tally.ranked,
             agent_tasks_used,
             errors,
         };
@@ -509,11 +525,9 @@ impl DailySearch {
         new_ids: &[String],
         inputs: &ScoringInputs,
         errors: &mut Vec<String>,
-    ) -> (u32, u32, u32) {
+    ) -> ScoreTally {
         let service = ScoringService::new(Arc::clone(&self.repos.scoring), Arc::clone(&self.clock));
-        let mut vetoed = 0;
-        let mut ranked = 0;
-        let mut top_matches = 0;
+        let mut tally = ScoreTally::default();
 
         for posting_id in posting_ids {
             let is_new = new_ids.iter().any(|new| new == posting_id);
@@ -535,7 +549,7 @@ impl DailySearch {
                     .iter()
                     .any(|result| result.verdict == GateVerdict::Veto)
             {
-                vetoed += 1;
+                tally.vetoed += 1;
             }
             let features = match self.features.features(posting_id) {
                 Ok(features) => features,
@@ -543,6 +557,12 @@ impl DailySearch {
                     errors.push(format!("features for {posting_id}: {error}"));
                     continue;
                 }
+            };
+            // The digest names the Offer (S5.3): keep the two fields before the
+            // request takes ownership of it.
+            let named = TopMatch {
+                title: offer.title.clone(),
+                company: offer.company.clone(),
             };
             let request = ScoreRequest {
                 posting_id: posting_id.clone(),
@@ -558,9 +578,11 @@ impl DailySearch {
             };
             match service.score(request) {
                 Ok(Some(card)) if is_new => {
-                    ranked += 1;
-                    if is_top_match(&card) {
-                        top_matches += 1;
+                    tally.ranked += 1;
+                    match top_band(&card) {
+                        Some(TopBand::Strong) => tally.strong.push(named),
+                        Some(TopBand::Good) => tally.good.push(named),
+                        None => {}
                     }
                 }
                 Ok(Some(_)) => {}
@@ -568,7 +590,32 @@ impl DailySearch {
                 Err(error) => errors.push(format!("scoring {posting_id}: {error}")),
             }
         }
-        (vetoed, ranked, top_matches)
+        tally
+    }
+
+    /// Announce what the run found (FR-45, S5.3): the digest when the host has
+    /// one, S5.2's plain top-matches notice otherwise.
+    fn announce(&self, tally: &ScoreTally, sources_checked: u32) {
+        let Some(port) = &self.digest else {
+            notify_top_matches(self.notifier.as_deref(), tally.top_match_count());
+            return;
+        };
+        let settings = NotificationSettings::from_json(
+            self.repos
+                .system
+                .setting_get(digest::settings::SETTINGS_KEY)
+                .ok()
+                .flatten()
+                .as_deref(),
+        );
+        let input = DigestInput {
+            strong: tally.strong.len() as u32,
+            good: tally.good.len() as u32,
+            sources_checked,
+            top: tally.top_matches().cloned().collect(),
+            hour: digest::local_hour(&self.clock.now_rfc3339()),
+        };
+        digest::announce(Some(port.as_ref()), &settings, input);
     }
 
     fn observe_started(&self, run_id: &str, total: u32) {
@@ -590,11 +637,49 @@ impl DailySearch {
     }
 }
 
+/// What the run's scoring added, for the report and the digest (S5.2, S5.3).
+#[derive(Debug, Default)]
+struct ScoreTally {
+    /// Offers the Gates VETOed among this run's new ones.
+    vetoed: u32,
+    /// New Offers that got a ScoreCard this run.
+    ranked: u32,
+    /// New Offers the run ranked Strong, in arrival order.
+    strong: Vec<TopMatch>,
+    /// New Offers the run ranked Good, in arrival order.
+    good: Vec<TopMatch>,
+}
+
+impl ScoreTally {
+    /// FR-46/S5.3: top matches, Strong before Good (the digest caps the list).
+    fn top_matches(&self) -> impl Iterator<Item = &TopMatch> {
+        self.strong.iter().chain(self.good.iter())
+    }
+
+    fn top_match_count(&self) -> u32 {
+        (self.strong.len() + self.good.len()) as u32
+    }
+}
+
+/// The band a top match belongs to (FR-46, S5.3's "3 Strong, 5 Good").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TopBand {
+    Strong,
+    Good,
+}
+
 /// FR-46: an Offer is a **top match** when its card says Strong or Good and is
 /// a real judgement — a Low Confidence card is a lead, not a verdict (FR-57),
 /// and a lead is not worth waking the user for.
-fn is_top_match(row: &ScoreCardRow) -> bool {
-    !row.card.is_lead() && matches!(row.card.verdict, BandVerdict::Strong | BandVerdict::Good)
+fn top_band(row: &ScoreCardRow) -> Option<TopBand> {
+    if row.card.is_lead() {
+        return None;
+    }
+    match row.card.verdict {
+        BandVerdict::Strong => Some(TopBand::Strong),
+        BandVerdict::Good => Some(TopBand::Good),
+        _ => None,
+    }
 }
 
 /// Show the run's one top-matches notification (FR-46). Nothing when the run

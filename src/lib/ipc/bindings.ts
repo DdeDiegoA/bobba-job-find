@@ -677,11 +677,20 @@ export const commands = {
    */
   capabilitiesSnapshot: () =>
     typedError<CapabilitySnapshot, AppError_Serialize>(__TAURI_INVOKE("capabilities_snapshot")),
+  /**  The current notification settings (FR-107). */
+  notificationsSnapshot: () =>
+    typedError<NotificationSettings, AppError_Serialize>(__TAURI_INVOKE("notifications_snapshot")),
+  /**  Save the notification settings (FR-107). */
+  notificationsSave: (settings: NotificationSettings) =>
+    typedError<NotificationSettings, AppError_Serialize>(
+      __TAURI_INVOKE("notifications_save", { settings }),
+    ),
 };
 
 /** Events */
 export const events = {
   killSwitchChanged: makeEvent<KillSwitchChanged>("kill_switch.changed"),
+  notificationOpened: makeEvent<NotificationOpened>("notification.opened"),
   runReportProgressed: makeEvent<RunReportProgressed>("run_report.progressed"),
   taskFinished: makeEvent<TaskFinished>("task.finished"),
   taskProgressed: makeEvent<TaskProgressed>("task.progressed"),
@@ -1622,6 +1631,29 @@ export type NarrationView = {
   untrusted_origin: boolean;
 };
 
+/**  Emitted when the user's click reaches the app: the UI opens Today (FR-45). */
+export type NotificationOpened = {
+  /**  Where the click wants to land; `today` is the only target today. */
+  target: string;
+};
+
+/**  Everything FR-107 lets the user choose. */
+export type NotificationSettings = {
+  events: NotifyEvents;
+  /**  How many top matches a digest names (0 = the counts alone). */
+  top_matches_shown: number;
+  /**  Notify about a run that found nothing new. */
+  notify_when_empty: boolean;
+  quiet_hours: QuietHours;
+};
+
+/**  Which events notify (FR-107). */
+export type NotifyEvents = {
+  digest: boolean;
+  outbox: boolean;
+  errors: boolean;
+};
+
 /**  One Offer as the Inbox lists it (FR-63/FR-64). */
 export type OfferCardView = {
   posting_id: string;
@@ -1882,6 +1914,17 @@ export type QuestionView = {
   optional: boolean;
   text_en: string | null;
   text_es: string | null;
+};
+
+/**  The window the user does not want to hear from Boba in, local time (FR-107). */
+export type QuietHours = {
+  enabled: boolean;
+  /**  First quiet hour, inclusive (0–23). */
+  from: number;
+  /**  First hour that is no longer quiet (0–23). */
+  to: number;
+  /**  Keep notifying anyway: the user set the hours for other apps, not Boba. */
+  notify_during: boolean;
 };
 
 /**

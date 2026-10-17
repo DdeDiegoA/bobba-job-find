@@ -14,7 +14,11 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
+use boba_app::digest::settings::SETTINGS_KEY;
+use boba_app::digest::{EventKind, NotificationSettings};
+use boba_app::ports::clock::ClockPort;
 use boba_app::ports::notifier::{Notification, NotifierError, NotifierPort};
+use boba_app::ports::repo::system::SystemRepo;
 
 const EN: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -140,6 +144,42 @@ fn parse(raw: &str, lang: &str) -> HashMap<String, String> {
         .collect()
 }
 
+/// Whether the user wants this notification at this hour (FR-107, S5.3).
+///
+/// Two gates, in this order: the events they chose to hear about, then the
+/// quiet hours they set. The security notices — a locked store, a paused
+/// session board — pass both (orquestador, 2026-10-17): a user who forgot to
+/// whitelist the night must still hear that Boba is stuck. A store that cannot
+/// be read (still locked) reads as the defaults, which notify: a silent app is
+/// the bug.
+fn allows(settings: &NotificationSettings, notification: Notification, hour: u8) -> bool {
+    match notification {
+        Notification::LockedSearch | Notification::SessionChallengePaused => true,
+        Notification::OutboxHold => settings.allows(EventKind::Outbox) && awake(settings, hour),
+        Notification::SourceFailing => settings.allows(EventKind::Errors) && awake(settings, hour),
+        // A host without the digest port (S5.3) still shows the plain notice,
+        // under the same "the daily digest" choice.
+        Notification::TopMatches { .. } => {
+            settings.allows(EventKind::Digest) && awake(settings, hour)
+        }
+    }
+}
+
+/// Whether `hour` is outside the quiet window (or the user keeps notifying in
+/// it). The digest applies the same rule in `boba_app::digest`; this is the
+/// other notifier's half of AC2.
+fn awake(settings: &NotificationSettings, hour: u8) -> bool {
+    !settings.quiet_hours.covers(hour) || settings.quiet_hours.notify_during
+}
+
+/// The stored notification settings; the defaults when the store is not open.
+fn stored_settings<R: Runtime>(app: &AppHandle<R>) -> NotificationSettings {
+    let raw = crate::wiring::port::<dyn SystemRepo>(app)
+        .ok()
+        .and_then(|repo| repo.setting_get(SETTINGS_KEY).ok().flatten());
+    NotificationSettings::from_json(raw.as_deref())
+}
+
 /// The [`NotifierPort`] adapter: one native notification through the OS.
 pub struct TauriNotifier<R: Runtime> {
     app: AppHandle<R>,
@@ -153,6 +193,10 @@ impl<R: Runtime> TauriNotifier<R> {
 
 impl<R: Runtime> NotifierPort for TauriNotifier<R> {
     fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
+        let hour = boba_app::digest::local_hour(&boba_app::system::SystemClock.now_rfc3339());
+        if !allows(&stored_settings(&self.app), notification, hour) {
+            return Ok(());
+        }
         let locale = crate::lifecycle::ui_locale(&self.app);
         let (title, body): (&str, String) = match notification {
             Notification::LockedSearch => (
@@ -239,6 +283,62 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// S5.3 (FR-107): the user's choices gate the events they can silence —
+    /// and never the security ones, which also ignore quiet hours.
+    #[test]
+    fn the_users_choices_gate_what_they_can_silence() {
+        use boba_app::digest::NotificationSettings;
+
+        let mut off = NotificationSettings::default();
+        off.events.outbox = false;
+        off.events.errors = false;
+        off.events.digest = false;
+
+        // Silenced when asked.
+        assert!(!allows(&off, Notification::OutboxHold, 10));
+        assert!(!allows(&off, Notification::SourceFailing, 10));
+        assert!(!allows(&off, Notification::TopMatches { count: 3 }, 10));
+
+        // Never silenced: a locked store and a paused board need the user.
+        assert!(allows(&off, Notification::LockedSearch, 10));
+        assert!(allows(&off, Notification::SessionChallengePaused, 10));
+
+        // Everything on by default.
+        let on = NotificationSettings::default();
+        for notification in [
+            Notification::OutboxHold,
+            Notification::SourceFailing,
+            Notification::TopMatches { count: 1 },
+        ] {
+            assert!(allows(&on, notification, 10));
+        }
+    }
+
+    /// S5.3 AC2 (review F3): quiet hours silence the non-security notices too,
+    /// not only the digest — and never the security ones.
+    #[test]
+    fn quiet_hours_silence_the_silenceable_notices() {
+        use boba_app::digest::NotificationSettings;
+
+        let mut night = NotificationSettings::default();
+        night.quiet_hours.enabled = true;
+        night.quiet_hours.from = 22;
+        night.quiet_hours.to = 7;
+
+        assert!(!allows(&night, Notification::OutboxHold, 23));
+        assert!(!allows(&night, Notification::SourceFailing, 2));
+        assert!(!allows(&night, Notification::TopMatches { count: 2 }, 6));
+        assert!(allows(&night, Notification::OutboxHold, 9));
+
+        // Security notices are exempt from quiet hours.
+        assert!(allows(&night, Notification::LockedSearch, 23));
+        assert!(allows(&night, Notification::SessionChallengePaused, 23));
+
+        // And a user who asked to keep hearing Boba at night still does.
+        night.quiet_hours.notify_during = true;
+        assert!(allows(&night, Notification::OutboxHold, 23));
     }
 
     #[test]

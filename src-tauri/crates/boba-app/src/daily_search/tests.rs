@@ -649,27 +649,150 @@ fn stored_card(verdict: Verdict, confidence: Confidence) -> ScoreCardRow {
 /// FR-46: only a Strong or Good card that is a real judgement is a top match.
 #[test]
 fn only_strong_or_good_judged_cards_are_top_matches() {
-    assert!(super::is_top_match(&stored_card(
-        Verdict::Strong,
-        Confidence::High
-    )));
-    assert!(super::is_top_match(&stored_card(
-        Verdict::Good,
-        Confidence::Medium
-    )));
-    assert!(!super::is_top_match(&stored_card(
-        Verdict::Moderate,
-        Confidence::High
-    )));
-    assert!(!super::is_top_match(&stored_card(
-        Verdict::Weak,
-        Confidence::High
-    )));
+    assert_eq!(
+        super::top_band(&stored_card(Verdict::Strong, Confidence::High)),
+        Some(super::TopBand::Strong)
+    );
+    assert_eq!(
+        super::top_band(&stored_card(Verdict::Good, Confidence::Medium)),
+        Some(super::TopBand::Good)
+    );
+    assert_eq!(
+        super::top_band(&stored_card(Verdict::Moderate, Confidence::High)),
+        None
+    );
+    assert_eq!(
+        super::top_band(&stored_card(Verdict::Weak, Confidence::High)),
+        None
+    );
     // FR-57: a Low Confidence card is a lead, not a verdict worth a toast.
-    assert!(!super::is_top_match(&stored_card(
-        Verdict::Strong,
-        Confidence::Low
-    )));
+    assert_eq!(
+        super::top_band(&stored_card(Verdict::Strong, Confidence::Low)),
+        None
+    );
+}
+
+/// A `DigestPort` that keeps what it was asked to show (S5.3).
+#[derive(Default)]
+struct RecordingDigestPort {
+    shown: std::sync::Mutex<Vec<crate::digest::Digest>>,
+}
+
+impl RecordingDigestPort {
+    fn shown(&self) -> Vec<crate::digest::Digest> {
+        self.shown.lock().unwrap().clone()
+    }
+}
+
+impl crate::digest::DigestPort for RecordingDigestPort {
+    fn show(
+        &self,
+        digest: &crate::digest::Digest,
+    ) -> Result<(), crate::ports::notifier::NotifierError> {
+        self.shown.lock().unwrap().push(digest.clone());
+        Ok(())
+    }
+}
+
+impl Harness {
+    /// The run with a digest port (S5.3): what the run hands the notification.
+    fn service_with_digest(&self, port: Arc<dyn crate::digest::DigestPort>) -> DailySearch {
+        self.service().with_digest(Some(port))
+    }
+}
+
+/// S5.3 AC1: a finished run hands the digest the numbers it ranked, once.
+#[test]
+fn a_finished_run_hands_the_digest_its_numbers_once() {
+    let harness = Harness::with_setting(
+        ScriptedSources::new([
+            (
+                source("remotive"),
+                Ok(vec![raw(
+                    "a1",
+                    "https://jobs.example.com/1",
+                    "Backend Engineer",
+                )]),
+            ),
+            (
+                source("hn"),
+                Err(SourceError::Http {
+                    url: "https://hn.example.com".to_string(),
+                    message: "HTTP 503".to_string(),
+                }),
+            ),
+        ]),
+        "notifications.settings",
+        // The fixture's card is not a top match: ask for the empty-run digest
+        // so the wiring is what this test reads.
+        r#"{"notify_when_empty":true}"#,
+    );
+    let port = Arc::new(RecordingDigestPort::default());
+
+    harness
+        .service_with_digest(Arc::clone(&port) as Arc<dyn crate::digest::DigestPort>)
+        .run(Harness::options())
+        .expect("the run finishes");
+
+    let shown = port.shown();
+    assert_eq!(shown.len(), 1, "one digest per run");
+    assert_eq!(shown[0].sources_checked, 2);
+    assert_eq!((shown[0].strong, shown[0].good), (0, 0));
+    assert!(shown[0].top.is_empty());
+}
+
+/// S5.3 AC2: nothing new means no digest under the default settings.
+#[test]
+fn an_empty_run_with_default_settings_shows_no_digest() {
+    let harness = Harness::new(ScriptedSources::new([(
+        source("remotive"),
+        Ok(vec![raw(
+            "a1",
+            "https://jobs.example.com/1",
+            "Backend Engineer",
+        )]),
+    )]));
+    let port = Arc::new(RecordingDigestPort::default());
+
+    harness
+        .service_with_digest(Arc::clone(&port) as Arc<dyn crate::digest::DigestPort>)
+        .run(Harness::options())
+        .expect("the run finishes");
+
+    assert!(port.shown().is_empty());
+}
+
+/// S5.3 AC2: quiet hours silence the run's digest even when it has news to tell.
+#[test]
+fn quiet_hours_silence_the_digest() {
+    // The run clock is fixed at 08:00 UTC; the window is built around whatever
+    // that is in the machine's local time, so the test holds in any timezone.
+    let hour = crate::digest::local_hour("2026-10-17T08:00:00Z");
+    let settings = serde_json::json!({
+        "notify_when_empty": true,
+        "quiet_hours": {"enabled": true, "from": hour, "to": (hour + 1) % 24, "notify_during": false},
+    })
+    .to_string();
+    let harness = Harness::with_setting(
+        ScriptedSources::new([(
+            source("remotive"),
+            Ok(vec![raw(
+                "a1",
+                "https://jobs.example.com/1",
+                "Backend Engineer",
+            )]),
+        )]),
+        "notifications.settings",
+        &settings,
+    );
+    let port = Arc::new(RecordingDigestPort::default());
+
+    harness
+        .service_with_digest(Arc::clone(&port) as Arc<dyn crate::digest::DigestPort>)
+        .run(Harness::options())
+        .expect("the run finishes");
+
+    assert!(port.shown().is_empty());
 }
 
 /// FR-46: one notification when the run found top matches, none when it did

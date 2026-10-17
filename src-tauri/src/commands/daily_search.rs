@@ -577,7 +577,12 @@ fn execute<R: Runtime>(
         clock,
         Some(notifier),
         Some(Arc::new(EventObserver { app: app.clone() })),
-    );
+    )
+    // S5.3: the run announces itself as the digest (counts by band, quiet
+    // hours, the user's choices) instead of S5.2's plain top-matches notice.
+    .with_digest(Some(Arc::new(crate::notifications::DigestNotifier::new(
+        app.clone(),
+    ))));
 
     let report = service
         .run(options)

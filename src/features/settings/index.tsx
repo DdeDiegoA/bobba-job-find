@@ -4,6 +4,7 @@ import { NavLink, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
 import SettingsAiEngine from "./ai-engine";
 import SettingsApplyingRules from "./applying/rules";
+import SettingsNotifications from "./notifications";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyBackup from "./privacy/backup";
 import SettingsPrivacySessions from "./privacy/sessions";
@@ -23,6 +24,7 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
   { id: "privacy/backup", labelKey: "backup:title", Component: SettingsPrivacyBackup },
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
   { id: "ai-engine", labelKey: "ai_engine:title", Component: SettingsAiEngine },
+  { id: "notifications", labelKey: "notifications:title", Component: SettingsNotifications },
 ];
 
 export default function SettingsIndex() {
