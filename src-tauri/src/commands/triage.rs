@@ -178,7 +178,7 @@ fn display_suggestion(suggestion: &Suggestion, company: Option<String>) -> AppRe
 fn prefs_error(error: PreferencesError) -> AppError {
     let code = match error {
         PreferencesError::Repo(_) => ErrorCode::Internal,
-        PreferencesError::Invalid(_) => ErrorCode::InvalidInput,
+        PreferencesError::Invalid(_) | PreferencesError::Weights(_) => ErrorCode::InvalidInput,
     };
     AppError::new(code, error.message_key())
 }

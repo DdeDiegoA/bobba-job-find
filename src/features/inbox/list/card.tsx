@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import {
   Ban,
   CircleHelp,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
+import type { BadgeSource } from "@/lib/ipc/bindings";
 import { cn } from "@/lib/utils";
 import { OfferActions } from "../actions";
 import {
@@ -37,6 +39,24 @@ import {
  * A vetoed Offer (FR-54) shows the Gate that vetoed it and its quote, so the
  * Excluded section never silently drops an Offer.
  */
+
+/**
+ * AC2 (S6.8): where a fraud/ghost signal was read from, as words. A quoted span
+ * is the posting's own untrusted text, rendered as text (AD-7); a field and a
+ * report resolve their own labels.
+ */
+function badgeSource(source: BadgeSource, t: TFunction): string {
+  switch (source.kind) {
+    case "text":
+      return source.value;
+    case "field":
+      return t(`settings_scoring:badge.source.field.${source.value}`, {
+        defaultValue: source.value,
+      });
+    case "report":
+      return t("settings_scoring:badge.source.report", { report: source.value });
+  }
+}
 
 /** The icon each Verdict chip carries (text + icon, NFR-15). */
 const VERDICT_ICONS = {
@@ -164,14 +184,23 @@ export function OfferCard({ card }: { card: Card }) {
 
         {card.badges.length > 0 ? (
           <ul className="flex flex-wrap gap-1.5" aria-label={t("card.badges")}>
-            {card.badges.map((badge) => (
-              <li
-                key={badge.id}
-                className="rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
-              >
-                {BADGE_LABELS[badge.id] ? t(BADGE_LABELS[badge.id]) : t("inbox:badge.check")}
-              </li>
-            ))}
+            {card.badges.map((badge) => {
+              const label = BADGE_LABELS[badge.id]
+                ? t(BADGE_LABELS[badge.id])
+                : t("inbox:badge.check");
+              // S6.8 (AC2): a fraud/ghost signal shows where it was read from.
+              const source = badge.source ? badgeSource(badge.source, t) : null;
+              return (
+                <li
+                  key={badge.id}
+                  title={source ?? undefined}
+                  className="max-w-full truncate rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
+                >
+                  {label}
+                  {source ? <span className="text-fg-muted"> · {source}</span> : null}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
       </Link>

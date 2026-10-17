@@ -18,10 +18,11 @@
 use boba_domain::posting::{Money, PayPeriod, WorkMode};
 use boba_domain::posting_features::Seniority;
 use boba_domain::profile::{FactKind, ProfileFact};
-use boba_domain::scoring::factors::{MarketData, Prefs, ProfileSnapshot};
+use boba_domain::scoring::factors::{FactorWeights, MarketData, Prefs, ProfileSnapshot};
 use boba_domain::scoring::gates::{
     Cefr, DeclaredLanguage, GateInputs, Hardness, PermitKind, SalaryFloor, WorkAuthorization,
 };
+use boba_domain::scoring::weights as weight_rules;
 use boba_domain::source::SearchQuery;
 use serde::Deserialize;
 
@@ -144,6 +145,40 @@ struct Values {
     deal_breaker_keywords: Vec<String>,
     #[serde(default)]
     excluded_companies: Vec<String>,
+    /// S6.8's weights, in whole percent. A document written before that slice
+    /// has no such object, and each missing field keeps the PRD's default.
+    #[serde(default)]
+    weights: Option<StoredWeights>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct StoredWeights {
+    #[serde(default)]
+    skills: Option<u16>,
+    #[serde(default)]
+    experience: Option<u16>,
+    #[serde(default)]
+    semantic: Option<u16>,
+    #[serde(default)]
+    location: Option<u16>,
+    #[serde(default)]
+    education: Option<u16>,
+    #[serde(default)]
+    language: Option<u16>,
+    #[serde(default)]
+    compensation: Option<u16>,
+    #[serde(default)]
+    company: Option<u16>,
+    #[serde(default)]
+    terms: Option<u16>,
+    #[serde(default)]
+    legitimacy: Option<u16>,
+    #[serde(default)]
+    alignment: Option<u16>,
+    #[serde(default)]
+    fit: Option<u16>,
+    #[serde(default)]
+    quality: Option<u16>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -208,8 +243,43 @@ fn prefs_of(values: &Values) -> Prefs {
         working_languages: values.working_languages.clone(),
         excluded_companies: values.excluded_companies.clone(),
         deal_breaker_keywords: values.deal_breaker_keywords.clone(),
+        // S6.8 (FR-58): the weights the user set, normalised by the same rule
+        // the Settings page validated with.
+        weights: weights_of(values.weights.as_ref()),
         ..Prefs::default()
     }
+}
+
+/// The stored weights in the engine's shape (S6.8, FR-58); a document no
+/// score could be formed from falls back to the PRD's defaults — a bad row
+/// must not stop the daily run (AD-1).
+fn weights_of(stored: Option<&StoredWeights>) -> FactorWeights {
+    let Some(stored) = stored else {
+        return FactorWeights::DEFAULT;
+    };
+    // A field the document does not carry keeps the default it would have had.
+    let default = FactorWeights::DEFAULT;
+    let weights = FactorWeights {
+        f1: stored.skills.map_or(default.f1, share),
+        f2: stored.experience.map_or(default.f2, share),
+        f3: stored.semantic.map_or(default.f3, share),
+        f4: stored.location.map_or(default.f4, share),
+        f5: stored.education.map_or(default.f5, share),
+        f6: stored.language.map_or(default.f6, share),
+        q1: stored.compensation.map_or(default.q1, share),
+        q2: stored.company.map_or(default.q2, share),
+        q3: stored.terms.map_or(default.q3, share),
+        q4: stored.legitimacy.map_or(default.q4, share),
+        q5: stored.alignment.map_or(default.q5, share),
+        fit: stored.fit.map_or(default.fit, share),
+        quality: stored.quality.map_or(default.quality, share),
+    };
+    weight_rules::normalize(weights).unwrap_or(FactorWeights::DEFAULT)
+}
+
+/// A stored whole-percent weight in the engine's share.
+fn share(percent: u16) -> f32 {
+    f32::from(percent) / 100.0
 }
 
 fn work_modes(modes: &WorkModes) -> Vec<WorkMode> {
@@ -431,5 +501,62 @@ mod tests {
     fn a_draft_with_only_its_text_is_read_as_no_detail_at_all() {
         let draft = FactDraft::new(FactKind::Skill);
         assert_eq!(draft.detail_json, "{}");
+    }
+
+    // S6.8 (AC1): the weights the user saved are the ones the run scores with.
+    #[test]
+    fn the_stored_weights_are_the_ones_a_run_scores_with() {
+        let values = Values {
+            weights: Some(StoredWeights {
+                skills: Some(50),
+                ..StoredWeights::default()
+            }),
+            ..Values::default()
+        };
+        let prefs = prefs_of(&values);
+        // 50 replaces the default 35; the axis renormalises, so the shares move.
+        assert!(prefs.weights.f1 > FactorWeights::DEFAULT.f1);
+        assert_ne!(prefs.weights, FactorWeights::DEFAULT);
+        assert!((prefs.weights.fit - 0.65).abs() < 1e-6, "axis untouched");
+    }
+
+    #[test]
+    fn a_document_without_weights_scores_with_the_defaults() {
+        let prefs = prefs_of(&Values::default());
+        assert_eq!(prefs.weights, FactorWeights::DEFAULT);
+    }
+
+    #[test]
+    fn a_partial_weights_object_keeps_the_defaults_it_omits() {
+        let values = Values {
+            weights: Some(StoredWeights {
+                fit: Some(80),
+                quality: Some(20),
+                ..StoredWeights::default()
+            }),
+            ..Values::default()
+        };
+        let weights = weights_of(values.weights.as_ref());
+        assert!((weights.fit - 0.8).abs() < 1e-6);
+        assert!((weights.quality - 0.2).abs() < 1e-6);
+        assert!((weights.f1 - FactorWeights::DEFAULT.f1).abs() < 1e-6);
+    }
+
+    // A stored document the engine cannot score with must not stop the run.
+    #[test]
+    fn unscorable_stored_weights_fall_back_to_the_defaults() {
+        let values = Values {
+            weights: Some(StoredWeights {
+                skills: Some(0),
+                experience: Some(0),
+                semantic: Some(0),
+                location: Some(0),
+                education: Some(0),
+                language: Some(0),
+                ..StoredWeights::default()
+            }),
+            ..Values::default()
+        };
+        assert_eq!(prefs_of(&values).weights, FactorWeights::DEFAULT);
     }
 }

@@ -1,1 +1,61 @@
-{}
+{
+  "title": "Scoring",
+  "intro": "How much each part of an Offer counts when Boba ranks it. Saving creates a new preferences version, and your open Offers are re-scored with it.",
+  "version": "v{version}",
+  "version.hint": "Every change to your weights creates a new version, so Boba knows which scores are out of date.",
+  "stale": "Scores are out of date: your weights changed. Offers are re-scored on the next run.",
+  "loading": "Loading your weights…",
+  "saved": "Weights saved. Open Offers are re-scored with the new version.",
+  "save": "Save weights",
+  "reset": "Reset to defaults",
+  "fit": {
+    "title": "Fit weights",
+    "hint": "How much each answer counts toward whether you can get the job."
+  },
+  "quality": {
+    "title": "Quality weights",
+    "hint": "How much each answer counts toward whether you want the job."
+  },
+  "axes": {
+    "title": "Fit vs Quality",
+    "hint": "How the two sides combine into the Rank. The two are rebalanced to 100 together.",
+    "fit": "Fit weight",
+    "quality": "Quality weight"
+  },
+  "factor": {
+    "skills": "Skills (F1)",
+    "experience": "Experience (F2)",
+    "semantic": "Semantic match (F3)",
+    "location": "Location (F4)",
+    "education": "Education (F5)",
+    "language": "Language (F6)",
+    "compensation": "Compensation vs market (Q1)",
+    "company": "Company signals (Q2)",
+    "terms": "Role and terms (Q3)",
+    "legitimacy": "Legitimacy (Q4)",
+    "alignment": "Career alignment (Q5)"
+  },
+  "error": {
+    "load": "Boba could not read your weights.",
+    "save": "Boba could not save your weights.",
+    "range": "Every weight must be a whole number between 0 and 100.",
+    "axis": "Each side needs at least one weight above zero, and Fit and Quality can't both be zero."
+  },
+  "badge": {
+    "pay_to_apply": "Asks for a fee",
+    "off_platform_contact": "Off-platform contact",
+    "implausible_pay": "Implausible pay",
+    "ghost_stale_posting": "Stale posting",
+    "ghost_vague_description": "Vague description",
+    "ghost_no_salary": "No salary",
+    "ghost_talent_pool": "Talent-pool wording",
+    "source": {
+      "field": {
+        "money": "Source: the pay field",
+        "description_text": "Source: the posting text",
+        "posted_at": "Source: the posting date"
+      },
+      "report": "Source: {report}"
+    }
+  }
+}

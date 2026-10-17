@@ -8,6 +8,7 @@ import SettingsNotifications from "./notifications";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyBackup from "./privacy/backup";
 import SettingsPrivacySessions from "./privacy/sessions";
+import SettingsScoring from "./scoring";
 
 /**
  * Settings container (S3.7 owns it, backlog convention 7): a sub-page list plus
@@ -25,6 +26,7 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
   { id: "ai-engine", labelKey: "ai_engine:title", Component: SettingsAiEngine },
   { id: "notifications", labelKey: "notifications:title", Component: SettingsNotifications },
+  { id: "scoring", labelKey: "settings_scoring:title", Component: SettingsScoring },
 ];
 
 export default function SettingsIndex() {

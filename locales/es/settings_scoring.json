@@ -1,1 +1,61 @@
-{}
+{
+  "title": "Puntuación",
+  "intro": "Cuánto cuenta cada parte de una oferta cuando Boba la ordena. Al guardar se crea una nueva versión de preferencias y tus ofertas abiertas se vuelven a puntuar con ella.",
+  "version": "v{version}",
+  "version.hint": "Cada cambio en tus pesos crea una versión nueva, así Boba sabe qué puntuaciones están desactualizadas.",
+  "stale": "Las puntuaciones están desactualizadas: cambiaron tus pesos. Las ofertas se vuelven a puntuar en la próxima ejecución.",
+  "loading": "Cargando tus pesos…",
+  "saved": "Pesos guardados. Las ofertas abiertas se vuelven a puntuar con la nueva versión.",
+  "save": "Guardar pesos",
+  "reset": "Restablecer los valores por defecto",
+  "fit": {
+    "title": "Pesos de encaje",
+    "hint": "Cuánto cuenta cada respuesta sobre si puedes conseguir el puesto."
+  },
+  "quality": {
+    "title": "Pesos de calidad",
+    "hint": "Cuánto cuenta cada respuesta sobre si quieres el puesto."
+  },
+  "axes": {
+    "title": "Encaje frente a calidad",
+    "hint": "Cómo se combinan los dos lados en la puntuación final. Los dos se reequilibran juntos a 100.",
+    "fit": "Peso de encaje",
+    "quality": "Peso de calidad"
+  },
+  "factor": {
+    "skills": "Habilidades (F1)",
+    "experience": "Experiencia (F2)",
+    "semantic": "Coincidencia semántica (F3)",
+    "location": "Ubicación (F4)",
+    "education": "Formación (F5)",
+    "language": "Idioma (F6)",
+    "compensation": "Salario frente al mercado (Q1)",
+    "company": "Señales de la empresa (Q2)",
+    "terms": "Puesto y condiciones (Q3)",
+    "legitimacy": "Legitimidad (Q4)",
+    "alignment": "Alineación profesional (Q5)"
+  },
+  "error": {
+    "load": "Boba no pudo leer tus pesos.",
+    "save": "Boba no pudo guardar tus pesos.",
+    "range": "Cada peso debe ser un número entero entre 0 y 100.",
+    "axis": "Cada lado necesita al menos un peso mayor que cero, y encaje y calidad no pueden ser ambos cero."
+  },
+  "badge": {
+    "pay_to_apply": "Pide dinero",
+    "off_platform_contact": "Contacto fuera de la plataforma",
+    "implausible_pay": "Salario inverosímil",
+    "ghost_stale_posting": "Oferta antigua",
+    "ghost_vague_description": "Descripción vaga",
+    "ghost_no_salary": "Sin salario",
+    "ghost_talent_pool": "Texto de bolsa de talento",
+    "source": {
+      "field": {
+        "money": "Fuente: el campo de salario",
+        "description_text": "Fuente: el texto de la oferta",
+        "posted_at": "Fuente: la fecha de publicación"
+      },
+      "report": "Fuente: {report}"
+    }
+  }
+}

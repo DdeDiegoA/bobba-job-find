@@ -54,6 +54,22 @@ pub struct BadgeView {
     pub id: String,
     /// The Gate it came from, when it came from one (`eligibility` … `deadline`).
     pub gate: Option<String>,
+    /// AC2: a ghost/fraud signal names its source — the posting's own words,
+    /// the Offer field it read, or the report its threshold comes from. Gate
+    /// badges carry none: their evidence is the Gate's own quote.
+    pub source: Option<BadgeSource>,
+}
+
+/// Where a badge's signal was read from (S6.8, FR-60).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum BadgeSource {
+    /// The posting's own words, plain text — untrusted data (AD-7).
+    Text(String),
+    /// A structured Offer field, by name (`money`, `posted_at`).
+    Field(String),
+    /// The published report a threshold comes from.
+    Report(String),
 }
 
 /// Why an Offer sits in Excluded (FR-54, EXPERIENCE §9.11): the Gate that vetoed
@@ -246,6 +262,7 @@ impl OffersInbox {
                     view.badges.push(BadgeView {
                         id: boba_domain::posting_features::NOT_YET_ANALYSED.to_string(),
                         gate: None,
+                        source: None,
                     });
                 }
                 // FR-66: the dismissal is S4.4's lifecycle row, which is what a
@@ -560,7 +577,7 @@ pub fn card_view(
         verdict: card.map(|row| row.card.verdict.as_str().to_string()),
         confidence: card.map(|row| confidence(row.card.confidence).to_string()),
         lead: card.is_some_and(|row| row.card.is_lead()),
-        badges: badges(card),
+        badges: badges(offer, card),
         exclusion: card.and_then(|row| exclusion(&row.gates)),
         closing_soon: card.is_some_and(|row| {
             row.gates
@@ -606,13 +623,38 @@ fn exclusion(gates: &GateReport) -> Option<ExclusionView> {
     })
 }
 
-/// The badges a card shows (FR-60/FR-64): one per Gate that told the user
-/// something, plus FR-57's Lead. Ordered by Gate, deduplicated.
-fn badges(card: Option<&ScoreCardRow>) -> Vec<BadgeView> {
+/// The badges a card shows (FR-60/FR-64): the fraud and ghost signals S6.8
+/// detects, one per Gate that told the user something, and FR-57's Lead. Each
+/// signal carries its source; the Gate badges are deduplicated.
+///
+/// The fraud/ghost pass reads the Offer alone — "now" for the stale signal is
+/// when its source last saw the posting (`last_seen`), so a card is a function
+/// of the stored data and does not change between two reads (FR-61).
+///
+/// `MarketData` is empty because no benchmark source ships yet (see
+/// `boba_domain::scoring::fraud`): the currency-banded ceiling is the rule that
+/// fires here; the same-currency 3× p50 rule runs once a caller has benchmarks.
+fn badges(offer: &Offer, card: Option<&ScoreCardRow>) -> Vec<BadgeView> {
+    let mut badges: Vec<BadgeView> = boba_domain::scoring::fraud::detect(
+        offer,
+        &boba_domain::scoring::factors::MarketData::default(),
+        &offer.last_seen,
+    )
+    .signals
+    .into_iter()
+    .map(|signal| BadgeView {
+        id: signal.kind.as_str().to_string(),
+        gate: None,
+        source: Some(match signal.source {
+            boba_domain::scoring::fraud::Source::Text(span) => BadgeSource::Text(span.text),
+            boba_domain::scoring::fraud::Source::Field(name) => BadgeSource::Field(name),
+            boba_domain::scoring::fraud::Source::Report(report) => BadgeSource::Report(report),
+        }),
+    })
+    .collect();
     let Some(card) = card else {
-        return Vec::new();
+        return badges;
     };
-    let mut badges: Vec<BadgeView> = Vec::new();
     for result in &card.gates.results {
         // A Gate that passed says nothing worth a badge.
         if result.verdict == GateVerdict::Pass {
@@ -625,6 +667,7 @@ fn badges(card: Option<&ScoreCardRow>) -> Vec<BadgeView> {
         badges.push(BadgeView {
             id: id.to_string(),
             gate: Some(result.gate.as_str().to_string()),
+            source: None,
         });
     }
     // FR-57: the card could barely see the Offer, so it is a lead. The Verdict
@@ -634,6 +677,7 @@ fn badges(card: Option<&ScoreCardRow>) -> Vec<BadgeView> {
         badges.push(BadgeView {
             id: "lead".to_string(),
             gate: None,
+            source: None,
         });
     }
     badges
@@ -1853,5 +1897,63 @@ mod tests {
         assert!(cards[0].overridden);
         assert!(!cards[0].dismissed);
         assert!(cards[0].exclusion.is_some(), "the Gate is still on record");
+    }
+
+    // S6.8 (AC2): a scam posting carries a fraud badge, its quote as the
+    // source, and no card is needed for the badge to show.
+    #[test]
+    fn a_scam_posting_carries_a_fraud_badge_with_its_quote() {
+        let mut scam = offer();
+        scam.description_text =
+            "Remote data entry. A 200 USD application fee is required before the interview."
+                .to_string();
+        let view = card_view(&scam, None, Vec::new());
+
+        let badge = view
+            .badges
+            .iter()
+            .find(|badge| badge.id == "pay_to_apply")
+            .expect("a fraud badge");
+        match &badge.source {
+            Some(BadgeSource::Text(quote)) => {
+                assert!(quote.contains("application fee"), "{quote}")
+            }
+            other => panic!("expected the quoted sentence, got {other:?}"),
+        }
+    }
+
+    // S6.8 (AC2): a ghost signal shows with its source, and it is not a Gate.
+    #[test]
+    fn a_ghost_signal_shows_with_its_source() {
+        let mut stale = offer();
+        stale.posted_at = Some("2026-06-01T00:00:00Z".to_string());
+        let view = card_view(&stale, None, Vec::new());
+
+        let badge = view
+            .badges
+            .iter()
+            .find(|badge| badge.id == "ghost_stale_posting")
+            .expect("a ghost badge");
+        assert_eq!(badge.gate, None);
+        assert!(matches!(
+            &badge.source,
+            Some(BadgeSource::Report(report)) if report.contains("Unlisted")
+        ));
+    }
+
+    #[test]
+    fn a_clean_offer_has_no_fraud_or_ghost_badges() {
+        let view = card_view(&offer(), None, Vec::new());
+        assert!(
+            view.badges
+                .iter()
+                .all(|badge| !badge.id.starts_with("ghost_")
+                    && !matches!(
+                        badge.id.as_str(),
+                        "pay_to_apply" | "off_platform_contact" | "implausible_pay"
+                    )),
+            "{:?}",
+            view.badges
+        );
     }
 }

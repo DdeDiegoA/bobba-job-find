@@ -1,0 +1,6 @@
+{
+  "errors.settings_scoring.negative": "A weight can't be below zero.",
+  "errors.settings_scoring.not_finite": "A weight has to be a number.",
+  "errors.settings_scoring.empty_axis": "Each side needs at least one weight above zero.",
+  "errors.settings_scoring.no_axis_weight": "Fit and Quality can't both weigh zero."
+}
