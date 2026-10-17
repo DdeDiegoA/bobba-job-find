@@ -1,6 +1,6 @@
 # Boba Job Find — Accepted Residual Risks
 
-> **Status:** v1, 2026-10-17 · **Owner:** architect · Every row is a risk that was **accepted** (by Diego's gate or the standing OK to take the recommended option) and not fixed in v1. Source: `docs/reviews/*.md`, the build memory and `deny.toml`. Companion to [`security-model.md`](./security-model.md).
+> **Status:** v1, 2026-10-17 · **Owner:** architect · Every row in sections 1–7 is a security risk that was **accepted** (by Diego's gate or the standing OK to take the recommended option) and not fixed in v1. Section 8 lists low-severity quality notes that are not security gates. Source: `docs/reviews/*.md`, the build memory and `deny.toml`. Companion to [`security-model.md`](./security-model.md).
 > Items that were fixed in their slice are not listed. Severity is the reviewer's, where given.
 
 ## 1. Advisory ignores (`deny.toml`)
@@ -92,6 +92,7 @@
 | R-S10.1-2 | Export | `audit.csv` keeps `prev_hash` and `hash`; profile facts and notes ship as written | Chain evidence, not keys; the user's own data and a warning covers it | None |
 | R-S9.9-1 | Audit viewer | `detail_json` is shown verbatim; wrapped error strings could carry sensitive text | The payload builders read carry no cookies or tokens | Redact errors at the source |
 | R-S9.9-2 | Audit export | `audit_log_export_csv` writes to any path it receives | The UI passes the save-dialog path | Restrict to dialog paths |
+| R-S6.9-1 | Embeddings download | The optional model download uses `hf-hub` (fastembed's client), outside `HttpClient`: no private-address rejection or redirect policy | Opt-in; checksum verified before the model loads; recorded in the network log; fixed HF model host | Route the download through `HttpClient` or pin the host |
 | R-S8.1-4 | Tokens | `TokenSet` and `TokenResponse` derive `Debug`, which prints tokens if ever logged | Nothing logs them today | Replace with a redacting `Debug` |
 
 ## 7. Release pipeline
@@ -105,3 +106,13 @@
 | R-S10.5-keys | Signing keys | The updater minisign key and the macOS identity sit in `.hermad/keys/` (gitignored) | Interim | Move to CI secrets plus an offline backup; **never delete the directory** first |
 | R-S10.5-win | Windows | Login-launch window flash (S5.4 F3) | Cosmetic | Set `visible=false` at launch when autostarted |
 | R-S10.5-sig | Signing | Windows signing depends on SignPath Foundation approval; macOS needs the documented Gatekeeper bypass | Free OSS path (ADR-009) | Apple Developer ID later |
+
+## 8. Non-security quality notes (not gates)
+
+| ID | Area | Note | Follow-up |
+|---|---|---|---|
+| R-S5.2-1 | Daily search | `score()` is O(seen × new); a `HashSet` fixes it | Matters only at large inboxes |
+| R-S5.2-2 | Run report | `merge_retry` sums work time, not wall clock | Label or compute from timestamps |
+| R-S5.2-3 | Run report | A failed row read reports placeholder source id `sources` | Use the searched Source id |
+| R-S5.2-4 | Run report | A retry after a newer run shows only the retried Sources | UI copy should say so |
+| R-S5.2-5 | Daily search | Gates and feature reads run for every seen offer each run | Watch in a performance pass |

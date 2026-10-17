@@ -25,7 +25,7 @@ The app is local-first with **no server and no account**. There is no cloud comp
 | T5 | **Token theft or redirect hijack in OAuth.** | §8: loopback, PKCE S256, single-use state, no deep link |
 | T6 | **Hidden network activity.** The app talks to a host the user does not expect. | §9: one outbound policy, an observed network log |
 | T7 | **Malicious update or poisoned release.** | §10: minisign-verified updates, signed builds, tag-driven CI |
-| T8 | **SSRF through custom sources.** A user-added URL points at localhost or the LAN. | AD-10: private, loopback and link-local addresses rejected at connect time; redirects off |
+| T8 | **SSRF through custom sources.** A user-added URL points at localhost or the LAN. | AD-10: private, loopback and link-local addresses rejected at connect time (not IP-pinned, so DNS rebinding stays theoretical: R-S4.8-2); redirects off |
 | T9 | **Board bans and ToS risk** from session automation. | AD-9 and AD-11: opt-in with warning, strict caps, kill switch, audit |
 
 **Out of scope.** An attacker who already runs code as the same OS user can read process memory and the keychain after unlock. We reduce what a casual local reader gets; we do not defend against a compromised user session (ADR-009, ADR-013).
@@ -97,7 +97,7 @@ One control, always reachable: the tray, the header chip and the global shortcut
 
 ## 9. Network policy and the network log (AD-10, S10.4)
 
-All outbound HTTP goes through one hardened `HttpClient` with https-only apply URLs, redirects off, private-address rejection and secret-free error messages. Every request is recorded in the **network activity** view from **all** choke points, including the embeddings model download, so the user can see what the app contacted. Embeddings are opt-in; the model download shows its checksum step and real size (487 MB).
+All outbound HTTP goes through one hardened `HttpClient`, with one exception (below) with https-only apply URLs, redirects off, private-address rejection and secret-free error messages. **Exception:** the optional embeddings model download uses `hf-hub` (fastembed's own client, `boba-embed/src/encoder.rs`) behind the `embeddings` feature, so the `HttpClient` guards do not apply to it. It is opt-in, checksum-verified before the model loads, and recorded in the network log (residual R-S6.9-1). Every request is recorded in the **network activity** view from **all** choke points, including the embeddings model download, so the user can see what the app contacted. Embeddings are opt-in; the model download shows its checksum step and real size (487 MB).
 
 ## 10. Releases and updates (AD-22, ADR-009, S10.5)
 
