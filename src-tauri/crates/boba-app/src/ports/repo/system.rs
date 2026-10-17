@@ -103,6 +103,13 @@ pub trait SystemRepo: Send + Sync {
     /// Walk the whole chain, re-hashing every row (AD-12 tamper check).
     fn audit_verify_chain(&self) -> Result<ChainStatus, SystemRepoError>;
 
+    /// Every row, in chain order: what the Audit Log viewer lists (S9.9,
+    /// FR-89). The default is empty for test doubles that never render the
+    /// viewer; the SQL adapter overrides it.
+    fn audit_rows(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
+        Ok(Vec::new())
+    }
+
     /// `intent` rows with no matching `outcome` (crash recovery, FR-89).
     fn audit_unresolved_intents(&self) -> Result<Vec<AuditRow>, SystemRepoError>;
 

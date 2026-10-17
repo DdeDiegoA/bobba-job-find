@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod apply;
+pub mod audit_stats;
 pub mod backup;
 pub mod capabilities;
 pub mod daily_search;
