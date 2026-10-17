@@ -365,6 +365,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_transport_error_never_carries_the_keys() {
+        // The credentials sit in the query string, and reqwest includes the
+        // full URL in its Display's message (F1).
+        let adapter = Adzuna::test_with(keys(), "us", "http://127.0.0.1:1", RateLimits::default());
+        let error = adapter
+            .search(&SearchQuery::default(), &ctx(&client()))
+            .await
+            .expect_err("connection refused");
+        let text = error.to_string();
+        assert!(!text.contains("super-secret-key"), "{text}");
+        assert!(!text.contains("app-id-123"), "{text}");
+    }
+
+    #[tokio::test]
     async fn detail_refetches_the_page_and_finds_the_id() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))

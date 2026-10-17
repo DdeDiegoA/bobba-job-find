@@ -385,7 +385,7 @@ impl HttpClient {
                 Err(error) => {
                     return Err(SourceError::Http {
                         url: url.to_string(),
-                        message: error.to_string(),
+                        message: transport_message(error),
                     });
                 }
             };
@@ -428,7 +428,7 @@ impl HttpClient {
                 Err(error) => {
                     return Err(SourceError::Http {
                         url: url.to_string(),
-                        message: error.to_string(),
+                        message: transport_message(error),
                     });
                 }
             };
@@ -495,9 +495,9 @@ impl HttpClient {
         let body = response
             .bytes()
             .await
-            .map_err(|e| SourceError::Http {
+            .map_err(|error| SourceError::Http {
                 url: url.to_string(),
-                message: e.to_string(),
+                message: transport_message(error),
             })?
             .to_vec();
         if body.len() > self.config.max_body_bytes {
@@ -530,6 +530,16 @@ impl HttpClient {
     fn backoff(&self, attempt: u32) -> Duration {
         self.config.retry_base_delay * 2u32.pow(attempt.min(6))
     }
+}
+
+/// A transport error's text, **without its URL**.
+///
+/// reqwest's `Display` appends ` for url (<full url>)`, and a source URL can
+/// carry a secret in its path (Jooble's key) or query (Adzuna's). The URL is
+/// already reported — redacted by the caller — so the message must not repeat
+/// it (S4.6 review F1).
+fn transport_message(error: reqwest::Error) -> String {
+    error.without_url().to_string()
 }
 
 /// Sanitise untrusted posting HTML before any UI use (AD-7).

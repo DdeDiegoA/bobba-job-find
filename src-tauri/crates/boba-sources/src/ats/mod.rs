@@ -12,7 +12,9 @@
 
 mod ashby;
 mod greenhouse;
-mod json;
+// `https_url` is the one apply-URL validator (S4.6 review F2): the feed and
+// aggregator adapters reuse it rather than keeping a copy.
+pub(crate) mod json;
 mod lever;
 mod smartrecruiters;
 mod workable;

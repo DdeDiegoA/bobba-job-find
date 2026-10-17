@@ -288,6 +288,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_transport_error_never_carries_the_key() {
+        // A closed port fails the connect, and reqwest appends
+        // " for url (<full url>)" to its Display — the message must not carry
+        // the key that sits in the path (F1).
+        let adapter = Jooble::test_with(
+            "secret-key-123",
+            "http://127.0.0.1:1",
+            RateLimits::default(),
+        );
+        let error = adapter
+            .search(&SearchQuery::default(), &ctx(&client()))
+            .await
+            .expect_err("connection refused");
+        let text = error.to_string();
+        assert!(!text.contains("secret-key-123"), "{text}");
+        assert!(text.contains("<key>"), "{text}");
+    }
+
+    #[tokio::test]
     async fn detail_refetches_and_finds_the_id() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

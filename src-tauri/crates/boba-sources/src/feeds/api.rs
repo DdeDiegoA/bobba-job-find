@@ -170,29 +170,11 @@ pub(crate) fn provenance(value: &Value) -> String {
     value.to_string()
 }
 
-/// A posting URL a source sent, kept only when it is an absolute `https://` URL.
-///
-/// Feed payloads are untrusted and `RawPosting.url` ends up as a clickable link
-/// in the app webview, so `javascript:`, `data:`, `http:` and anything malformed
-/// are refused (the S4.5 rule, applied to feeds and aggregators too). The
-/// adapter then uses the URL it builds itself.
-pub(crate) fn https_url(candidate: Option<String>) -> Option<String> {
-    let url = candidate?;
-    if !url
-        .get(..8)
-        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
-    {
-        return None;
-    }
-    let rest = &url[8..];
-    if rest.is_empty() || rest.starts_with('/') {
-        return None;
-    }
-    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return None;
-    }
-    Some(url)
-}
+/// The one apply-URL validator, re-exported from the ATS module (S4.6 review
+/// F2): feed payloads are untrusted and `RawPosting.url` becomes a clickable
+/// link in the app webview, so `javascript:`, `data:`, `http:` and anything
+/// malformed are refused by the same check S4.5 uses.
+pub(crate) use crate::ats::json::https_url;
 
 /// Whether a location or title label reads as remote work.
 pub(crate) fn is_remote(location: &str) -> bool {
