@@ -12,6 +12,7 @@
 //! never marks, moves, deletes or sends anything, and it fetches no attachment
 //! bytes. The scoped sync (S8.3) decides what is stored.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use base64::Engine as _;
@@ -37,13 +38,8 @@ pub const GMAIL_READ_SCOPE: &str = "https://www.googleapis.com/auth/gmail.readon
 pub const READ_PAGE_SIZE: usize = 100;
 
 /// How many ids one listing call asks for while the reader walks down to the
-/// oldest end of the window.
-const SCAN_CHUNK: usize = 100;
-
-/// How far down the reader will walk to find the bottom of a window. Each round
-/// asks for the chunk below the previous one, so a busy mailbox settles in a
-/// couple of rounds instead of paging through thousands of unrelated messages.
-const MAX_DESCENT_ROUNDS: usize = 12;
+/// oldest end of the window. Gmail caps a page at 500.
+const SCAN_CHUNK: usize = 500;
 
 /// The largest answer accepted for one message. Gmail returns bodies inline with
 /// `format=full`, so a single oversized message is refused before a run holds it
@@ -243,32 +239,47 @@ impl GmailReader {
         since: i64,
         limit: usize,
     ) -> Result<Vec<String>, MailError> {
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let mut bottom: Vec<String> = Vec::new();
         let mut before: Option<i64> = None;
-        let mut page = self.list_page(token, since, before, SCAN_CHUNK).await?;
-        let mut rounds = 0;
-        while page.len() == SCAN_CHUNK && rounds < MAX_DESCENT_ROUNDS {
+        loop {
+            let page = self.list_page(token, since, before, SCAN_CHUNK).await?;
+            let fresh: Vec<String> = page
+                .iter()
+                .filter(|id| !seen.contains(*id))
+                .cloned()
+                .collect();
+            // Nothing new at this level: Gmail cannot order any deeper, so this
+            // is as far down as the pass can see (the degenerate case is a
+            // same-second group larger than one page).
+            if fresh.is_empty() {
+                break;
+            }
+            seen.extend(fresh.iter().cloned());
+            bottom = fresh;
+            if page.len() < SCAN_CHUNK {
+                // The window ends here: this chunk holds its oldest messages.
+                break;
+            }
             let Some(oldest) = page.last() else { break };
             let Some(date) = self.received_at(token, oldest).await? else {
                 break;
             };
-            // Gmail's `before:` is second-granular but dates can disagree with
-            // the receipt time; a round that would not move is the bottom.
-            if before.is_some_and(|previous| date >= previous) {
+            // `+1` keeps the second the page ends on visible, so a same-second
+            // group split by the page boundary is not jumped over; `seen` keeps
+            // its already-scanned members out of the next chunk. The bound only
+            // moves downwards, so the walk terminates at the bottom of the
+            // window (the lookback bounds how far that is).
+            let next = date.saturating_add(1);
+            if before.is_some_and(|previous| next >= previous) {
                 break;
             }
-            before = Some(date);
-            rounds += 1;
-            let deeper = self.list_page(token, since, before, SCAN_CHUNK).await?;
-            if deeper.is_empty() {
-                // The previous chunk *was* the bottom of the window.
-                break;
-            }
-            page = deeper;
+            before = Some(next);
         }
-        // The page is newest-first: its tail is the oldest end, reversed to the
-        // order the sync reads.
-        let take = limit.min(page.len());
-        let mut oldest: Vec<String> = page.split_off(page.len() - take);
+        // The bottom chunk is newest-first: its tail is the oldest end, reversed
+        // to the order the sync reads.
+        let take = limit.min(bottom.len());
+        let mut oldest = bottom.split_off(bottom.len() - take);
         oldest.reverse();
         Ok(oldest)
     }
@@ -1238,10 +1249,10 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/users/me/messages/n099"))
+            .and(path(format!("/users/me/messages/n{:03}", SCAN_CHUNK - 1)))
             .and(query_param("format", "metadata"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "n099",
+                "id": format!("n{:03}", SCAN_CHUNK - 1),
                 "internalDate": (boundary * 1000).to_string()
             })))
             .expect(1)
@@ -1250,7 +1261,10 @@ mod tests {
         // The bottom of the window: two messages, newest first.
         Mock::given(method("GET"))
             .and(path("/users/me/messages"))
-            .and(query_param("q", format!("after:{since} before:{boundary}")))
+            .and(query_param(
+                "q",
+                format!("after:{since} before:{}", boundary + 1),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "messages": [{"id": "b1"}, {"id": "b0"}]
             })))
@@ -1304,28 +1318,34 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/users/me/messages/n099"))
+            .and(path(format!("/users/me/messages/n{:03}", SCAN_CHUNK - 1)))
             .and(query_param("format", "metadata"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "id": "n099",
+                "id": format!("n{:03}", SCAN_CHUNK - 1),
                 "internalDate": (boundary * 1000).to_string()
             })))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
             .and(path("/users/me/messages"))
-            .and(query_param("q", format!("after:{since} before:{boundary}")))
+            .and(query_param(
+                "q",
+                format!("after:{since} before:{}", boundary + 1),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": [] })))
             .mount(&server)
             .await;
-        for id in ["n098", "n099"] {
+        for id in [
+            format!("n{:03}", SCAN_CHUNK - 2),
+            format!("n{:03}", SCAN_CHUNK - 1),
+        ] {
             Mock::given(method("GET"))
                 .and(path(format!("/users/me/messages/{id}")))
                 .and(query_param("format", "full"))
                 .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                     "id": id,
                     "internalDate": ((NOW - 3 * DAY) * 1000).to_string(),
-                    "payload": {"mimeType": "text/plain", "body": {"data": encoded(id)}}
+                    "payload": {"mimeType": "text/plain", "body": {"data": encoded(&id)}}
                 })))
                 .mount(&server)
                 .await;
@@ -1344,8 +1364,164 @@ mod tests {
                 .iter()
                 .map(|m| m.provider_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["n099", "n098"],
+            vec![
+                format!("n{:03}", SCAN_CHUNK - 1),
+                format!("n{:03}", SCAN_CHUNK - 2)
+            ],
             "the tail of the page, oldest first"
+        );
+    }
+
+    /// R2b: a busy window takes many steps down, and there is no round budget
+    /// that could stop the walk on a full page — a pass that returned messages
+    /// from the middle of the window would let the cursor skip everything below
+    /// them for good.
+    #[tokio::test]
+    async fn a_deep_window_is_walked_to_its_oldest_message() {
+        /// Full pages before the window's bottom one.
+        const FULL_PAGES: usize = 14;
+
+        let server = MockServer::start().await;
+        let since = NOW - 60 * DAY;
+        let mut before: Option<i64> = None;
+        let mut date = NOW - 5 * DAY;
+        for page_index in 0..=FULL_PAGES {
+            let count = if page_index == FULL_PAGES {
+                3
+            } else {
+                SCAN_CHUNK
+            };
+            let ids: Vec<Value> = (0..count)
+                .map(|index| json!({ "id": format!("p{page_index:02}{index:03}") }))
+                .collect();
+            let query = match before {
+                Some(bound) => format!("after:{since} before:{bound}"),
+                None => format!("after:{since}"),
+            };
+            Mock::given(method("GET"))
+                .and(path("/users/me/messages"))
+                .and(query_param("q", query))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": ids })))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            if page_index == FULL_PAGES {
+                break;
+            }
+            // A full page moves the window's top below its oldest message.
+            let oldest = format!("p{page_index:02}{:03}", SCAN_CHUNK - 1);
+            Mock::given(method("GET"))
+                .and(path(format!("/users/me/messages/{oldest}")))
+                .and(query_param("format", "metadata"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "id": oldest,
+                    "internalDate": (date * 1000).to_string()
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+            before = Some(date + 1);
+            date -= DAY;
+        }
+        let oldest_id = format!("p{FULL_PAGES:02}002");
+        Mock::given(method("GET"))
+            .and(path(format!("/users/me/messages/{oldest_id}")))
+            .and(query_param("format", "full"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": oldest_id,
+                "internalDate": ((NOW - 55 * DAY) * 1000).to_string(),
+                "payload": {"mimeType": "text/plain", "body": {"data": encoded("oldest")}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let messages = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, since, NOW, 1)
+        .await
+        .expect("read");
+
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![oldest_id],
+            "the bottom of a {FULL_PAGES}-page window, not a page in the middle"
+        );
+    }
+
+    /// A same-second group straddling a page boundary is re-listed (the bound is
+    /// `before: <date> + 1`), and the walk does not read the boundary message
+    /// twice.
+    #[tokio::test]
+    async fn a_same_second_group_at_a_page_boundary_is_not_skipped() {
+        let server = MockServer::start().await;
+        let since = NOW - DAY;
+        let shared = NOW - 5 * DAY;
+        let page: Vec<Value> = (0..SCAN_CHUNK)
+            .map(|index| json!({ "id": format!("n{index:03}") }))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param("q", format!("after:{since}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "messages": page })))
+            .mount(&server)
+            .await;
+        let boundary_id = format!("n{:03}", SCAN_CHUNK - 1);
+        Mock::given(method("GET"))
+            .and(path(format!("/users/me/messages/{boundary_id}")))
+            .and(query_param("format", "metadata"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": boundary_id,
+                "internalDate": (shared * 1000).to_string()
+            })))
+            .mount(&server)
+            .await;
+        // The older half of the same-second group is still visible, next to mail
+        // from before it.
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param(
+                "q",
+                format!("after:{since} before:{}", shared + 1),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "messages": [{"id": boundary_id}, {"id": "s0"}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages/s0"))
+            .and(query_param("format", "full"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "s0",
+                "internalDate": (shared * 1000).to_string(),
+                "payload": {"mimeType": "text/plain", "body": {"data": encoded("same second")}}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let messages = reader(
+            &server,
+            FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>,
+        )
+        .fetch_inbox(ACC, since, NOW, 1)
+        .await
+        .expect("read");
+
+        assert_eq!(
+            messages
+                .iter()
+                .map(|m| m.provider_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["s0"],
+            "the boundary message is seen once and the group's older half is read"
         );
     }
 
