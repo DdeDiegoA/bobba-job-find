@@ -13,6 +13,8 @@ boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# A read that cannot find the end of its window says so instead of guessing (S8.5).
+tracing = { workspace = true }
 # Graph / OAuth (S8.1): the loopback flow, the token endpoint and the Graph API.
 reqwest = { workspace = true }
 tokio = { workspace = true, features = ["net", "io-util"] }
