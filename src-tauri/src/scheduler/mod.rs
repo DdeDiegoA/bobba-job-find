@@ -470,14 +470,17 @@ fn read_schedules(system: &dyn SystemRepo) -> Option<Schedules> {
     }
 }
 
-/// Fill in the compiled default for every job the stored document omits: a
+/// Fill in the compiled retention default when the stored document omits it: a
 /// user who saved a daily-search schedule (FR-41) must not silently switch the
-/// retention sweep (S10.3) off. An explicit entry — including an empty `days`
-/// list — always wins.
-fn with_defaults(stored: Schedules) -> Schedules {
-    let mut schedules = default_schedules();
-    schedules.extend(stored);
-    schedules
+/// sweep (S10.3) off. Only the sweep is filled in — the stored map is the set
+/// of jobs the user turned on, so adding any other job back would override a
+/// choice the user made by leaving it out. An explicit sweep entry, including
+/// an empty `days` list, always wins.
+fn with_defaults(mut stored: Schedules) -> Schedules {
+    if let Some(sweep) = default_schedules().get(&JobKind::RetentionSweep).cloned() {
+        stored.entry(JobKind::RetentionSweep).or_insert(sweep);
+    }
+    stored
 }
 
 /// When this install first ran the scheduler (FR-43): stored once, then read.
@@ -664,6 +667,26 @@ mod tests {
             schedules[&JobKind::RetentionSweep].times,
             vec![Time::from_hms(3, 0, 0).unwrap()],
             "an omitted job keeps its compiled default"
+        );
+    }
+
+    #[test]
+    fn a_stored_schedule_without_the_daily_search_does_not_get_it_back() {
+        // FR-41: the stored map is the set of jobs the user turned on, so a job
+        // it omits stays off. Only the retention sweep (S10.3) is filled in.
+        let stored =
+            schedules_from_json(r#"{"retention_sweep": {"times": ["03:00"], "days": ["mon"]}}"#)
+                .expect("valid document");
+
+        let schedules = with_defaults(stored);
+
+        assert!(
+            !schedules.contains_key(&JobKind::DailySearch),
+            "an omitted daily search is the user turning it off"
+        );
+        assert_eq!(
+            schedules[&JobKind::RetentionSweep].days,
+            vec![time::Weekday::Monday]
         );
     }
 
