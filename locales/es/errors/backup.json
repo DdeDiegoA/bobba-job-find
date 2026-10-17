@@ -6,5 +6,6 @@
   "errors.backup.too_new": "Esta copia se hizo con una versión más reciente de Boba. Actualiza Boba y vuelve a restaurarla.",
   "errors.backup.wrong_confirmation": "Escribe DELETE exactamente para confirmar.",
   "errors.backup.keychain": "El llavero del sistema rechazó el cambio.",
-  "errors.backup.internal": "La operación de copia de seguridad falló. No se cambió nada."
+  "errors.backup.internal": "La operación de copia de seguridad falló. No se cambió nada.",
+  "errors.backup.recovery_required": "Crea una copia de seguridad de recuperación antes de que pueda empezar una búsqueda."
 }

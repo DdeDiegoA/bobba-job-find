@@ -101,6 +101,8 @@ macro_rules! boba_commands {
             crate::commands::backup::backup_create,
             crate::commands::backup::backup_restore,
             crate::commands::backup::reset_everything,
+            crate::commands::onboarding::onboarding_status,
+            crate::commands::onboarding::onboarding_complete,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

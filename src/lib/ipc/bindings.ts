@@ -598,6 +598,15 @@ export const commands = {
     typedError<ResetReportView, AppError_Serialize>(
       __TAURI_INVOKE("reset_everything", { confirmation }),
     ),
+  /**  The completion state the first-launch gate reads. */
+  onboardingStatus: () =>
+    typedError<OnboardingStatus, AppError_Serialize>(__TAURI_INVOKE("onboarding_status")),
+  /**
+   *  Record that setup finished. Idempotent: the first completion time wins, so
+   *  a retried call (or a double effect) never moves it.
+   */
+  onboardingComplete: () =>
+    typedError<OnboardingStatus, AppError_Serialize>(__TAURI_INVOKE("onboarding_complete")),
 };
 
 /** Events */
@@ -1589,6 +1598,13 @@ export type OfferDetailView = {
    *  has not written one.
    */
   narration: NarrationView | null;
+};
+
+/**  Whether setup finished, and when (FR-10). */
+export type OnboardingStatus = {
+  completed: boolean;
+  /**  UTC RFC 3339; `None` until the wizard finishes. */
+  completed_at: string | null;
 };
 
 /**  One Outbox item, as the screen and the tray show it (FR-85). */

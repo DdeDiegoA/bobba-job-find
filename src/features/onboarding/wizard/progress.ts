@@ -52,7 +52,12 @@ export function clearProgress(): void {
   }
 }
 
-/** First run until the wizard finishes once (AC1). */
+/**
+ * The local mirror of the core's answer (S3.8): `onboarding_status` is the
+ * source of truth, and [`useOnboardingGate`] refreshes this mirror from it on
+ * every launch. It exists so Today opens without waiting for a round trip, and
+ * so a locked store (which cannot answer) still behaves as it did before.
+ */
 export function isOnboarded(): boolean {
   try {
     return localStorage.getItem(DONE_KEY) === "1";
@@ -66,5 +71,14 @@ export function markOnboarded(): void {
     localStorage.setItem(DONE_KEY, "1");
   } catch {
     // Storage disabled: onboarding repeats next launch.
+  }
+}
+
+/** The core says setup is not done (a reset wiped it): drop the stale mirror. */
+export function clearOnboarded(): void {
+  try {
+    localStorage.removeItem(DONE_KEY);
+  } catch {
+    // Storage disabled: nothing to clear.
   }
 }

@@ -100,6 +100,12 @@ impl AppError {
         Self::new(ErrorCode::Locked, message_key)
     }
 
+    /// The request conflicts with current state (S3.8: a run without a
+    /// recovery backup).
+    pub fn conflict(message_key: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Conflict, message_key)
+    }
+
     /// The task was cancelled.
     pub fn cancelled(message_key: impl Into<String>) -> Self {
         Self::new(ErrorCode::Cancelled, message_key)
