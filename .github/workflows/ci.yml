@@ -23,6 +23,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Tauri v2 Linux prerequisites (https://tauri.app/start/prerequisites/).
+  # The Rust gate and the Linux build both compile the desktop crate, so both
+  # jobs install this one list; it lives here so the two cannot drift.
+  LINUX_APT_PACKAGES: >-
+    libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+    libxdo-dev build-essential pkg-config libssl-dev curl wget file
 
 jobs:
   hygiene:
@@ -89,6 +95,14 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The workspace compiles the Tauri shell, whose Linux build scripts need
+      # the GTK/WebKit headers: without them glib-sys fails pkg-config and
+      # clippy dies with exit 101 before any lint runs (CH15).
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.LINUX_APT_PACKAGES }}
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy
@@ -130,14 +144,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential \
-            pkg-config \
-            libssl-dev
+          sudo apt-get install -y ${{ env.LINUX_APT_PACKAGES }}
       - name: Install (frozen lockfile, dependency scripts disabled)
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Tauri build, no bundle
