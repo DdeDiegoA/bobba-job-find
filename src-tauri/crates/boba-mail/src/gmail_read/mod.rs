@@ -388,8 +388,13 @@ impl GmailReader {
             }
 
             // A 401 means the access token went away (revoked, or expired early).
-            // Renew once and repeat; a second 401 is the user's to fix.
-            if status == reqwest::StatusCode::UNAUTHORIZED && !renewed {
+            // Renew once and repeat. A second 401 with a token renewed from the
+            // stored refresh token means the grant itself is gone, so the user is
+            // asked to connect again instead of being shown an HTTP status.
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                if renewed {
+                    return Err(MailError::Reauthorize);
+                }
                 *token = self.renew_access_token(account).await?;
                 renewed = true;
                 continue;
@@ -1244,6 +1249,42 @@ mod tests {
                 .access_token,
             "at-2",
             "the renewed token is what the retry carried and what is stored"
+        );
+    }
+
+    /// A renewed token that is refused too means the grant is gone, not stale:
+    /// the reader asks for authorisation again instead of reporting an HTTP
+    /// status the user cannot act on.
+    #[tokio::test]
+    async fn a_second_401_asks_for_authorisation_again() {
+        let server = MockServer::start().await;
+        let list = Script::new(vec![json!({"status": 401})]);
+        Mock::given(method("GET"))
+            .and(path("/users/me/messages"))
+            .and(query_param_is_missing("pageToken"))
+            .respond_with(list)
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "access_token": "at-2",
+                "expires_in": 3600
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        assert_eq!(
+            reader(
+                &server,
+                FakeSecrets::with(REF, stored()) as Arc<dyn SecretPort>
+            )
+            .fetch_inbox(ACC, NOW - DAY, NOW, 10)
+            .await,
+            Err(MailError::Reauthorize),
+            "one renewal, then the user is asked to connect again"
         );
     }
 
