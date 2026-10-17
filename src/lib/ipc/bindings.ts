@@ -611,6 +611,15 @@ export const commands = {
    */
   onboardingComplete: () =>
     typedError<OnboardingStatus, AppError_Serialize>(__TAURI_INVOKE("onboarding_complete")),
+  /**
+   *  Everything the UI gates on, for the stored engine choice (AC1–AC3).
+   *
+   *  The probe runs bounded subprocesses, so never on the UI thread. No choice
+   *  stored (or a choice this build cannot read) is Limited mode, exactly what a
+   *  probe of nothing would produce.
+   */
+  capabilitiesSnapshot: () =>
+    typedError<CapabilitySnapshot, AppError_Serialize>(__TAURI_INVOKE("capabilities_snapshot")),
 };
 
 /** Events */
@@ -820,6 +829,23 @@ export type BoardColumn = {
 /**  The whole Tracker in one read (AC1). */
 export type BoardView = {
   columns: BoardColumn[];
+};
+
+/**  What the UI gates on for this session (AC4). */
+export type CapabilitySnapshot = {
+  /**  No agent can run: every AI-only capability is off (FR-4 Limited mode). */
+  limited: boolean;
+  /**  Every capability, in [`Capability::ALL`] order. */
+  capabilities: CapabilityState[];
+};
+
+/**  One capability as the UI sees it. */
+export type CapabilityState = {
+  /**  [`Capability::id`]. */
+  id: string;
+  available: boolean;
+  /**  Why it is off; never set when it is on. */
+  reason: UnavailableReason | null;
 };
 
 /**  One way to apply, as the apply bar shows it (FR-81). */
@@ -2359,6 +2385,16 @@ export type UnansweredField = {
   kind: string;
   required: boolean;
 };
+
+/**
+ *  Why an AI-only capability is unavailable: the reason the UI shows next to
+ *  the disabled action (AC2, AC3).
+ */
+export type UnavailableReason =
+  /**  No working Agent CLI: Limited mode, "Connect an agent" (FR-4). */
+  | "no_agent"
+  /**  The chosen CLI has no verified `tool_lockdown` for this task (ADR-010). */
+  | "cli_unsupported";
 
 /**  Whether the store is open or the unlock screen must act (AC2). */
 export type UnlockState = "ready" | "locked";

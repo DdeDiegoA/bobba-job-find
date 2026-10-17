@@ -1,1 +1,10 @@
-{}
+{
+  "notice": {
+    "limitedTitle": "AI features are off — no Agent CLI connected.",
+    "limitedBody": "Search, scoring and the Tracker still work. Tailoring, Profile extraction and email reading need an Agent CLI.",
+    "connect": "Connect an agent",
+    "unsupportedTitle": "This action needs a fully locked-down CLI.",
+    "unsupportedBody": "Your Agent CLI can't run tasks that read untrusted content safely. Pick another CLI or keep using Limited mode.",
+    "changeCli": "Change CLI"
+  }
+}
