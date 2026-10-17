@@ -215,7 +215,9 @@ fn ats_service(app: &tauri::AppHandle) -> AppResult<AtsFormService> {
         wiring::port::<dyn SystemRepo>(app)?,
         std::sync::Arc::new(SystemClock),
         // The Kill Switch (S9.8, FR-86): no page opens while it is engaged.
-        wiring::port::<dyn KillSwitchPort>(app).ok(),
+        // A missing port is a locked/unbuilt store, never "not engaged": the
+        // read fails closed exactly like the other ports above.
+        Some(wiring::port::<dyn KillSwitchPort>(app)?),
     ))
 }
 
@@ -879,8 +881,9 @@ fn outbox_service<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Out
             app.clone(),
         ))),
         // The Kill Switch (S9.8): the check point every release and every
-        // pre-submit pass reads. Mounted with the other apply ports.
-        wiring::port::<dyn KillSwitchPort>(app).ok(),
+        // pre-submit pass reads. Mounted with the other apply ports; a missing
+        // one fails closed (L-3), never "not engaged".
+        Some(wiring::port::<dyn KillSwitchPort>(app)?),
     ))
 }
 

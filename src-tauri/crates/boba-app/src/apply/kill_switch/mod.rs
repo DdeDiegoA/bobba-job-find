@@ -222,11 +222,10 @@ impl KillSwitchService {
     /// already in is a no-op, so the tray, the header and the shortcut never
     /// audited the same change twice.
     ///
-    /// Engaging flips the flag **first** (every check point stops from that
-    /// instant), then persists it, parks the live Outbox items, cancels the
-    /// tracked runs and closes the browser. A persist failure leaves the flag
-    /// on: stopping automation is the safe direction, and the next launch
-    /// simply starts off.
+    /// The switch is a panic control, so the flag flips **first**: before the
+    /// store write, the audit, the Outbox pass, the cancellations and the
+    /// browser close. Nothing that can fail stands between the user and a
+    /// stopped automation; the audit is written afterwards, best effort (H-1).
     pub fn set(&self, engaged: bool) -> Result<Engagement, KillSwitchError> {
         if self.engaged() == engaged {
             return Ok(Engagement {
@@ -237,31 +236,14 @@ impl KillSwitchService {
             });
         }
         let now = self.clock.now_rfc3339();
-        let intent = self.system.audit_append_intent(&NewIntent {
-            action: AUDIT_ACTION.to_string(),
-            correlation_id: format!("kill_switch_{}_{}", value_of(engaged), stamp(&now)),
-            actor: "user".to_string(),
-            target_kind: "setting".to_string(),
-            target_id: Some(KILL_SWITCH_KEY.to_string()),
-            detail_json: serde_json::json!({ "engaged": engaged }).to_string(),
-            payload_blake3: None,
-            created_at: now.clone(),
-        })?;
 
+        // FR-86 first: from this instant every check point stops.
         self.engaged.store(engaged, Ordering::SeqCst);
         *self.since.lock().unwrap_or_else(|p| p.into_inner()) = engaged.then(|| now.clone());
-        if let Err(error) = self.persist(engaged, &now) {
-            // The change is live in memory (the flag flips before the write,
-            // because stopping is the safe direction), so the audit says it did
-            // not survive the restart instead of leaving an open intent.
-            let _ = self.system.audit_append_outcome(
-                &intent,
-                AuditOutcome::Failed,
-                &serde_json::json!({ "engaged": engaged, "persisted": false }).to_string(),
-                &now,
-            );
-            return Err(error.into());
-        }
+        // Persist before the rest so a successful return means the state
+        // survives a restart; a failed write still leaves the flag where the
+        // user put it (stopping is the safe direction).
+        let persisted = self.persist(engaged, &now);
 
         let (parked, cancelled_runs, browser_closed) = if engaged {
             (
@@ -275,25 +257,59 @@ impl KillSwitchService {
             (0, 0, false)
         };
 
-        self.system.audit_append_outcome(
-            &intent,
-            AuditOutcome::Ok,
-            &serde_json::json!({
-                "engaged": engaged,
-                "parked": parked,
-                "cancelled_runs": cancelled_runs,
-                "browser_closed": browser_closed,
-            })
-            .to_string(),
-            &now,
-        )?;
+        // FR-89/AD-12: the event goes on record, but a broken log never keeps
+        // automation running — it is reported and the switch stays effective.
+        self.record_audit(engaged, &now, parked, cancelled_runs, browser_closed);
 
+        persisted?;
         Ok(Engagement {
             view: self.view(),
             parked,
             cancelled_runs,
             browser_closed,
         })
+    }
+
+    /// Append the intent + outcome pair, best effort (H-1): the switch stops
+    /// sends even when the audit cannot record it. A missing pair is logged;
+    /// startup recovery reports an intent that never got its outcome (S1.7).
+    fn record_audit(
+        &self,
+        engaged: bool,
+        now: &str,
+        parked: u32,
+        cancelled_runs: u32,
+        browser_closed: bool,
+    ) {
+        let intent = match self.system.audit_append_intent(&NewIntent {
+            action: AUDIT_ACTION.to_string(),
+            correlation_id: format!("kill_switch_{}_{}", value_of(engaged), stamp(now)),
+            actor: "user".to_string(),
+            target_kind: "setting".to_string(),
+            target_id: Some(KILL_SWITCH_KEY.to_string()),
+            detail_json: serde_json::json!({ "engaged": engaged }).to_string(),
+            payload_blake3: None,
+            created_at: now.to_string(),
+        }) {
+            Ok(intent) => intent,
+            Err(error) => {
+                tracing::warn!(%error, "kill switch: audit intent not written");
+                return;
+            }
+        };
+        let detail = serde_json::json!({
+            "engaged": engaged,
+            "parked": parked,
+            "cancelled_runs": cancelled_runs,
+            "browser_closed": browser_closed,
+        })
+        .to_string();
+        if let Err(error) =
+            self.system
+                .audit_append_outcome(&intent, AuditOutcome::Ok, &detail, now)
+        {
+            tracing::warn!(%error, "kill switch: audit outcome not written");
+        }
     }
 
     /// Write (or clear) the persisted state.

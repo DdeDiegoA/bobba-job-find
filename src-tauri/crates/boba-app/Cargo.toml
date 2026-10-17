@@ -18,6 +18,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 specta = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
+# The Kill Switch (S9.8) logs an audit append it could not write: a panic
+# control must keep stopping automation even when the log is unavailable.
+tracing = { workspace = true }
 html2text = { workspace = true }
 ammonia = { workspace = true }
 lingua = { workspace = true, default-features = false, features = ["english", "spanish"] }

@@ -569,6 +569,41 @@ fn a_send_stops_mid_flow_when_the_switch_engages_before_the_submit() {
 
 // ---- the audit ------------------------------------------------------------
 
+/// H-1: the switch is a panic control, so a broken audit log must never keep
+/// automation running. Engaging still flips the flag, persists it, parks the
+/// live items and cancels the runs; the audit failure is only reported.
+#[test]
+fn an_audit_failure_never_keeps_automation_running() {
+    let system = Arc::new(FakeSystemRepo::default());
+    system.fail_audit();
+    let outbox = FakeOutbox::with(vec![item("held", OutboxState::Held, None)]);
+    let runs = Arc::new(RunCancellations::default());
+    let run = CancelToken::new();
+    runs.track("run_1", run.clone());
+    let switch = service(
+        Arc::clone(&system),
+        Arc::clone(&outbox),
+        None,
+        Arc::clone(&runs),
+    );
+
+    let engagement = switch
+        .set(true)
+        .expect("engaging must not depend on the log");
+
+    assert!(switch.engaged());
+    assert_eq!(
+        system.setting_get(KILL_SWITCH_KEY).unwrap().as_deref(),
+        Some(ENGAGED),
+        "the flag is persisted even with the log down"
+    );
+    assert_eq!(outbox.state_of("held"), OutboxState::NeedsReview);
+    assert_eq!(outbox.note_of("held").as_deref(), Some(NOTE));
+    assert!(run.is_cancelled());
+    assert!(engagement.view.engaged);
+    assert_eq!(system.rows().len(), 0, "nothing reached the log");
+}
+
 #[test]
 fn every_change_is_audited_as_an_intent_and_an_outcome() {
     let system = Arc::new(FakeSystemRepo::default());

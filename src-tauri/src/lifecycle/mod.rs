@@ -235,9 +235,15 @@ mod tests {
     /// AC1/AC2: `install` registers the state and wires close-to-tray; a second
     /// call (a language change re-localizing the menu) must not re-register the
     /// window handler. Without a tray icon the menu is skipped, not fatal.
+    ///
+    /// The mock app carries the global-shortcut plugin, exactly as `lib.rs`
+    /// registers it: `install` reads that plugin's state (S9.8, FR-86).
     #[test]
     fn install_wires_what_is_there_and_only_the_window_handler_once() {
-        let app = tauri::test::mock_app();
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
         let _window =
             tauri::WebviewWindowBuilder::new(&app, MAIN_WINDOW, tauri::WebviewUrl::default())
                 .build()
