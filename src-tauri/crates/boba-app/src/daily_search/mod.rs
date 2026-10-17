@@ -416,6 +416,11 @@ impl DailySearch {
         let Some(pass) = &options.agent else {
             return 0;
         };
+        // FR-20 (S2.5): `new_ids` is already in the run's deterministic
+        // ingestion order (same Sources, same pages, same order), so the same
+        // Offers are always the ones analysed. Past the cap, an Offer keeps the
+        // deterministic features the scoring pass gives every Offer, and the
+        // Inbox marks it "not yet analysed" (no agent pass for it).
         let mut used = 0;
         for posting_id in new_ids.iter().take(pass.max_tasks as usize) {
             used += 1;

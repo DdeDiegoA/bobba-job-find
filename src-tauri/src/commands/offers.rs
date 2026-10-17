@@ -36,8 +36,10 @@ fn service(app: &tauri::AppHandle) -> AppResult<OffersInbox> {
     )
     .with_triage(wiring::port::<dyn TriageRepo>(app)?)
     // S2.5: the Profile version the "not yet analysed" badge is measured
-    // against (FR-20).
-    .with_profile(wiring::port::<dyn ProfileRepo>(app)?))
+    // against (FR-20), and only while an engine is chosen — with no engine no
+    // agent pass ever runs, so the badge would say nothing.
+    .with_profile(wiring::port::<dyn ProfileRepo>(app)?)
+    .with_agent_marking(crate::commands::agent::stored_choice(app).is_some()))
 }
 
 /// Map a use-case failure onto the typed IPC error (AD-3).

@@ -175,6 +175,10 @@ pub struct OffersInbox {
     /// The Profile owner (S2.5): its version is what "not yet analysed" is
     /// measured against. A build without the port marks nothing.
     profile: Option<Arc<dyn ProfileRepo>>,
+    /// Whether an agent pass is even part of the run (S2.5): with no engine
+    /// chosen (Limited mode) nothing is "waiting to be analysed", so marking
+    /// every Offer would be noise. Off by default.
+    agent_marking: bool,
 }
 
 impl OffersInbox {
@@ -186,7 +190,16 @@ impl OffersInbox {
             scoring,
             triage: None,
             profile: None,
+            agent_marking: false,
         }
+    }
+
+    /// Turn on the FR-20 marker (S2.5). The composition root sets it only when
+    /// an engine is chosen: without one no Offer is ever analysed, so the badge
+    /// would be true of every Offer and mean nothing.
+    pub fn with_agent_marking(mut self, enabled: bool) -> Self {
+        self.agent_marking = enabled;
+        self
     }
 
     /// Add the Profile owner (S2.5): the current version and, through the
@@ -251,6 +264,9 @@ impl OffersInbox {
     /// Profile with no facts yet (`version == 0`), marks nothing: there is no
     /// version to measure a pass against.
     fn not_analysed(&self, ids: &[String]) -> Result<HashSet<String>, OffersError> {
+        if !self.agent_marking {
+            return Ok(HashSet::new());
+        }
         let Some(profile) = self.profile.as_ref() else {
             return Ok(HashSet::new());
         };
@@ -1095,7 +1111,8 @@ mod tests {
             done: ["pst_01".to_string()].into_iter().collect(),
         };
         let inbox = OffersInbox::new(Arc::new(postings), Arc::new(BatchedScoring::default()))
-            .with_profile(Arc::new(FakeProfile { version: 3 }));
+            .with_profile(Arc::new(FakeProfile { version: 3 }))
+            .with_agent_marking(true);
 
         let cards = inbox.cards(500, 0).expect("read");
         let marker = boba_domain::posting_features::NOT_YET_ANALYSED;
@@ -1109,6 +1126,30 @@ mod tests {
             cards[1].badges.iter().any(|badge| badge.id == marker),
             "a deferred Offer is marked not yet analysed: {:?}",
             cards[1].badges
+        );
+    }
+
+    /// FR-20 (S2.5), reviewer-2 F2: with no engine chosen (Limited mode) no
+    /// agent pass ever runs, so the marker would say something about every
+    /// Offer and nothing about any of them. It stays off.
+    #[test]
+    fn without_an_agent_pass_nothing_is_marked_not_yet_analysed() {
+        let postings = BatchedPostings {
+            offers: vec![offer()],
+            ..BatchedPostings::default()
+        };
+        let inbox = OffersInbox::new(Arc::new(postings), Arc::new(BatchedScoring::default()))
+            .with_profile(Arc::new(FakeProfile { version: 3 }))
+            .with_agent_marking(false);
+
+        let cards = inbox.cards(500, 0).expect("read");
+        assert!(
+            cards[0]
+                .badges
+                .iter()
+                .all(|badge| badge.id != boba_domain::posting_features::NOT_YET_ANALYSED),
+            "{:?}",
+            cards[0].badges
         );
     }
 

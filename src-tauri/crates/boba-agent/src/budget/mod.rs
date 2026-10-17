@@ -3,11 +3,12 @@
 //! Two questions, one module:
 //!
 //! * **How much may one run spend on Offers?** [`BudgetSettings`] holds the
-//!   user's per-run cap (default 30, FR-20); [`plan`] splits the run's ranked
-//!   candidates into the ones the agent may analyse and the ones that stay on
-//!   deterministic features, each marked [`NOT_YET_ANALYSED`] so the UI can
-//!   show a lead instead of a judgement. The input order is the rank order, so
-//!   the split is deterministic: same offers in, same split out.
+//!   user's per-run cap (default 30, FR-20). The run itself applies it when it
+//!   picks the Offers the agent analyses (the daily search's agent pass): the
+//!   ones past the cap stay on deterministic features and are marked
+//!   `not_yet_analysed` in the Inbox, so the user sees a lead instead of a
+//!   judgement. The pick is the run's own ingestion order, so it is
+//!   deterministic: same Offers in, same split out.
 //! * **How much may one task spend while it runs?** [`default_budget`] gives
 //!   every task kind its turn, tool-call and wall-clock limits, and [`Meter`]
 //!   counts a live run against them, so the runtime fails a run with
@@ -24,11 +25,6 @@ pub const DEFAULT_OFFERS_PER_RUN: u32 = 30;
 /// The most offers one run may be asked to analyse: a sanity cap on a typo,
 /// not a product limit.
 pub const MAX_OFFERS_PER_RUN: u32 = 500;
-
-/// The marker a deferred Offer carries: ranked from deterministic factors
-/// only, never analysed by the agent this run (FR-20). One string, shared with
-/// the Inbox badge that shows it.
-pub use boba_domain::posting_features::NOT_YET_ANALYSED;
 
 /// Settings → AI engine: how many Offers one Search Run may hand to the agent
 /// (FR-20). One `setting` row, read by every run.
@@ -52,44 +48,6 @@ impl BudgetSettings {
         Self {
             offers_per_run: self.offers_per_run.clamp(1, MAX_OFFERS_PER_RUN),
         }
-    }
-}
-
-/// One Offer that needs LLM features, already in deterministic rank order.
-pub type Candidate = String;
-
-/// An Offer the run deferred, with the marker the UI reads.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeferredOffer {
-    pub id: String,
-    /// Always [`NOT_YET_ANALYSED`]; a field so the marker travels with the id.
-    pub marker: &'static str,
-}
-
-/// One run's split: who gets analysed, who waits.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct AnalysisPlan {
-    /// The first N candidates, in rank order: the run hands these to the agent.
-    pub analyse: Vec<Candidate>,
-    /// The rest, in rank order, each marked not-yet-analysed (FR-20).
-    pub deferred: Vec<DeferredOffer>,
-}
-
-/// Split `ranked` (deterministic rank order) by the run's budget. Deterministic
-/// pre-filtering ran before this: the candidates are already the Offers that
-/// need LLM features.
-pub fn plan(ranked: &[Candidate], settings: &BudgetSettings) -> AnalysisPlan {
-    let cap = settings.clone().normalized().offers_per_run as usize;
-    let (analyse, deferred) = ranked.split_at(ranked.len().min(cap));
-    AnalysisPlan {
-        analyse: analyse.to_vec(),
-        deferred: deferred
-            .iter()
-            .map(|id| DeferredOffer {
-                id: id.clone(),
-                marker: NOT_YET_ANALYSED,
-            })
-            .collect(),
     }
 }
 
@@ -242,10 +200,6 @@ impl Usage {
 mod tests {
     use super::*;
 
-    fn ranked(ids: &[&str]) -> Vec<Candidate> {
-        ids.iter().map(|id| (*id).to_string()).collect()
-    }
-
     #[test]
     fn the_default_budget_is_thirty_offers() {
         assert_eq!(BudgetSettings::default().offers_per_run, 30);
@@ -263,43 +217,6 @@ mod tests {
         assert_eq!(huge.offers_per_run, MAX_OFFERS_PER_RUN);
         let fine = BudgetSettings { offers_per_run: 12 }.normalized();
         assert_eq!(fine.offers_per_run, 12);
-    }
-
-    #[test]
-    fn only_the_top_n_candidates_get_llm_features() {
-        let candidates = ranked(&["pst_a", "pst_b", "pst_c", "pst_d", "pst_e"]);
-        let plan = plan(&candidates, &BudgetSettings { offers_per_run: 3 });
-
-        assert_eq!(plan.analyse, ranked(&["pst_a", "pst_b", "pst_c"]));
-        assert_eq!(
-            plan.deferred
-                .iter()
-                .map(|offer| offer.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["pst_d", "pst_e"]
-        );
-        assert!(
-            plan.deferred
-                .iter()
-                .all(|offer| offer.marker == NOT_YET_ANALYSED),
-            "a deferred Offer is marked not yet analysed"
-        );
-    }
-
-    #[test]
-    fn the_budget_never_reorders_the_rank() {
-        let candidates = ranked(&["pst_3", "pst_1", "pst_2"]);
-        let plan = plan(&candidates, &BudgetSettings { offers_per_run: 2 });
-        assert_eq!(plan.analyse, ranked(&["pst_3", "pst_1"]));
-        assert_eq!(plan.deferred[0].id, "pst_2");
-    }
-
-    #[test]
-    fn a_budget_larger_than_the_candidates_analyses_them_all() {
-        let candidates = ranked(&["pst_a", "pst_b"]);
-        let plan = plan(&candidates, &BudgetSettings { offers_per_run: 30 });
-        assert_eq!(plan.analyse, candidates);
-        assert!(plan.deferred.is_empty());
     }
 
     #[test]
