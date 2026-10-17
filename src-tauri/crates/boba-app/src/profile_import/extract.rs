@@ -184,7 +184,22 @@ fn pdf_text(name: &str, bytes: &[u8]) -> Result<String, TextError> {
 /// A PDF `lopdf` cannot parse is not judged here: `pdf-extract` fails on it
 /// the same way, and the caller reports `NoText`.
 fn pdf_streams_within_cap(bytes: &[u8]) -> bool {
-    let Ok(document) = lopdf::Document::load_mem(bytes) else {
+    // Object streams and cross-reference streams are decoded **during** load,
+    // before any of our code runs (S3.5 re-review F2), so the same cap is given
+    // to the loader itself.
+    //
+    // A stop at the cap is the one verdict this pass owns. The lenient loader
+    // swallows it (it carries on with an empty body), so the detection pass is
+    // strict: strict reports the error without changing what a real CV does,
+    // because every other strict failure is ignored here and left to the
+    // lenient load and `pdf-extract`, which reports NoText for a file it cannot
+    // read.
+    if let Err(lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded { .. })) =
+        lopdf::Document::load_mem_with_options(bytes, pdf_detect_options())
+    {
+        return false;
+    }
+    let Ok(document) = lopdf::Document::load_mem_with_options(bytes, pdf_load_options()) else {
         return true;
     };
     let mut total: u64 = 0;
@@ -207,6 +222,24 @@ fn pdf_streams_within_cap(bytes: &[u8]) -> bool {
         }
     }
     true
+}
+
+/// The loader options the pre-scan uses: the standard lenient parse (real CVs
+/// are often slightly non-conforming) with the per-stream decompression cap.
+fn pdf_load_options() -> lopdf::LoadOptions {
+    lopdf::LoadOptions {
+        max_decompressed_size: Some(MAX_PDF_STREAM_BYTES as usize),
+        ..lopdf::LoadOptions::default()
+    }
+}
+
+/// The detection pass's options: the same cap, strict so the loader's limit
+/// error reaches this code instead of being swallowed.
+fn pdf_detect_options() -> lopdf::LoadOptions {
+    lopdf::LoadOptions {
+        strict: true,
+        ..pdf_load_options()
+    }
 }
 
 /// Every filter an object names, flattened: a stream's `/Filter` is one name or
@@ -537,6 +570,53 @@ mod tests {
         bytes
     }
 
+    /// A valid PDF carrying `inflated` bytes of spaces as an `/ObjStm`
+    /// *object stream*: `lopdf` decodes these eagerly while loading, before any
+    /// caller can look at them (S3.5 re-review F2). Written by hand because
+    /// lopdf's own writer skips objects typed `/ObjStm` — it regenerates those.
+    fn pdf_with_object_stream_bomb(inflated: usize) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(&vec![b' '; inflated])
+            .expect("deflate bomb");
+        let compressed = encoder.finish().expect("finish");
+
+        let mut bomb = format!(
+            "4 0 obj\n<</Type/ObjStm/N 0/First 0/Filter/FlateDecode/Length {}>>\nstream\n",
+            compressed.len()
+        )
+        .into_bytes();
+        bomb.extend_from_slice(&compressed);
+        bomb.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let objects: Vec<Vec<u8>> = vec![
+            b"1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n".to_vec(),
+            b"2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n".to_vec(),
+            b"3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>\nendobj\n".to_vec(),
+            bomb,
+        ];
+
+        let mut bytes = b"%PDF-1.5\n".to_vec();
+        let mut offsets = Vec::new();
+        for object in &objects {
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(object);
+        }
+        let xref_start = bytes.len();
+        bytes.extend_from_slice(b"xref\n0 5\n0000000000 65535 f \n");
+        for offset in offsets {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!("trailer\n<</Size 5/Root 1 0 R>>\nstartxref\n{xref_start}\n%%EOF\n").as_bytes(),
+        );
+        bytes
+    }
+
     /// The content stream of a one-page PDF with `line` drawn on it.
     fn text_ops(line: &str) -> Vec<u8> {
         use lopdf::Object;
@@ -640,6 +720,30 @@ mod tests {
         let error = extract(&[file("bomb.pdf", pdf_bytes_deflated(&payload))]).unwrap_err();
         assert_eq!(error, TextError::TooLarge);
         assert_eq!(error.message_key(), "errors.profile_import.too_large");
+    }
+
+    // S3.5 re-review F2: object streams decode during load, so the cap must be
+    // given to the loader; the post-load scan then catches what the lenient
+    // loader swallowed.
+    #[test]
+    fn a_pdf_with_a_decompression_bomb_object_stream_is_refused() {
+        let bomb = pdf_with_object_stream_bomb((MAX_PDF_STREAM_BYTES + 1024 * 1024) as usize);
+        let error = extract(&[file("objstm-bomb.pdf", bomb)]).unwrap_err();
+        assert_eq!(error, TextError::TooLarge);
+    }
+
+    #[test]
+    fn the_pdf_pre_scan_hands_the_loader_the_same_cap() {
+        let options = pdf_load_options();
+        assert_eq!(
+            options.max_decompressed_size,
+            Some(MAX_PDF_STREAM_BYTES as usize),
+            "an unbounded load inflates object streams before the scan"
+        );
+        assert!(
+            !options.strict,
+            "lenient stays on: real CVs are often slightly non-conforming"
+        );
     }
 
     // AC1: a real PDF's text layer is extracted.
