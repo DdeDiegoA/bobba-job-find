@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Gated } from "@/components/gated";
 import { Button } from "@/components/ui/button";
 import {
   commands,
@@ -142,12 +143,16 @@ export default function GapsStep({ setAnswer }: StepProps) {
     <div className="flex flex-col gap-6">
       <p className="text-fg-muted">{t("onboarding_gaps:step.body")}</p>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button disabled={ask.isPending} onClick={() => ask.mutate()}>
-          {ask.isPending ? t("onboarding_gaps:ask.running") : t("onboarding_gaps:ask.action")}
-        </Button>
-        <span className="text-sm text-fg-muted">{t("onboarding_gaps:ask.hint")}</span>
-      </div>
+      {/* S3.3: in Limited mode the interview's AI actions are gated — the
+          standard questions below stay answerable by hand (FR-4). */}
+      <Gated capability="profile_gaps">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button disabled={ask.isPending} onClick={() => ask.mutate()}>
+            {ask.isPending ? t("onboarding_gaps:ask.running") : t("onboarding_gaps:ask.action")}
+          </Button>
+          <span className="text-sm text-fg-muted">{t("onboarding_gaps:ask.hint")}</span>
+        </div>
+      </Gated>
 
       {errorText ? <p className="text-sm text-danger">{errorText}</p> : null}
       {notice ? (
@@ -392,11 +397,13 @@ function LanguageRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface p-3">
       <span className="whitespace-pre-wrap break-words text-fg">{text ?? fact.kind}</span>
-      <Button variant="outline" disabled={busy} onClick={() => onDraft(missing)}>
-        {busy
-          ? t("onboarding_gaps:languages.drafting")
-          : t("onboarding_gaps:languages.draft", { lang: missing.toUpperCase() })}
-      </Button>
+      <Gated capability="profile_translation">
+        <Button variant="outline" disabled={busy} onClick={() => onDraft(missing)}>
+          {busy
+            ? t("onboarding_gaps:languages.drafting")
+            : t("onboarding_gaps:languages.draft", { lang: missing.toUpperCase() })}
+        </Button>
+      </Gated>
     </li>
   );
 }

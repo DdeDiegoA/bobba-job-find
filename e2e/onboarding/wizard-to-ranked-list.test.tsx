@@ -24,6 +24,7 @@ const ipc = vi.hoisted(() => {
       agentTestCall: vi.fn(),
       agentEngineChoose: vi.fn(),
       profileImportProposals: vi.fn(),
+      capabilitiesSnapshot: vi.fn(),
       profileGapsQuestions: vi.fn(),
       profileSnapshot: vi.fn(),
       preferencesSnapshot: vi.fn(),
@@ -170,6 +171,17 @@ beforeEach(() => {
   );
 
   vi.mocked(commands.profileImportProposals).mockReturnValue(ok([]));
+  // S3.3: the fake CLI is healthy, so the AI-only actions on the gap step are
+  // available (S3.6 gates them through <Gated>).
+  vi.mocked(commands.capabilitiesSnapshot).mockReturnValue(
+    ok({
+      limited: false,
+      capabilities: [
+        { id: "profile_gaps", available: true, reason: null },
+        { id: "profile_translation", available: true, reason: null },
+      ],
+    }),
+  );
   // S3.6: the gap interview has nothing to ask in this fixture, so the step
   // renders its empty state and Next continues.
   vi.mocked(commands.profileGapsQuestions).mockReturnValue(ok([]));

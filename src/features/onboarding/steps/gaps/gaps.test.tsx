@@ -1,8 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  type CapabilitySnapshot,
   commands,
   type FactView,
   type Gap,
@@ -17,6 +20,7 @@ import GapsStep from "./index";
 
 vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
+    capabilitiesSnapshot: vi.fn(),
     profileGapsQuestions: vi.fn(),
     profileGapsStart: vi.fn(),
     profileGapsAnswer: vi.fn(),
@@ -82,6 +86,15 @@ const fact = (over: Partial<FactView> = {}): FactView => ({
   ...over,
 });
 
+/** The capabilities the wizard's engine step would report (S3.3): AI on. */
+const capabilities = (available = true): CapabilitySnapshot => ({
+  limited: !available,
+  capabilities: [
+    { id: "profile_gaps", available, reason: available ? null : "no_agent" },
+    { id: "profile_translation", available, reason: available ? null : "no_agent" },
+  ],
+});
+
 function renderStep() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() {
@@ -98,13 +111,18 @@ function renderStep() {
   }
   return render(
     <QueryClientProvider client={client}>
-      <Harness />
+      <MemoryRouter initialEntries={["/onboarding"]}>
+        <Routes>
+          <Route path="/onboarding" element={<Harness />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
 beforeEach(() => {
   for (const fn of Object.values(commands)) vi.mocked(fn).mockReset();
+  vi.mocked(commands.capabilitiesSnapshot).mockImplementation(() => ok(capabilities()));
   vi.mocked(commands.profileGapsQuestions).mockImplementation(() => ok([gap()]));
   vi.mocked(commands.profileSnapshot).mockImplementation(() => ok(snapshot()));
   vi.mocked(commands.profileGapsStart).mockImplementation(() => ok(outcome([])));
@@ -251,6 +269,20 @@ describe("profile gap interview (FR-6, S3.6)", () => {
         detail_json: "{}",
       }),
     );
+  });
+
+  // S3.3 AC2/AC4: with no working CLI the interview's AI actions are disabled
+  // by the shared <Gated> state, and the manual questions stay answerable.
+  it("disables the AI actions and keeps the questions answerable in Limited mode", async () => {
+    vi.mocked(commands.capabilitiesSnapshot).mockImplementation(() => ok(capabilities(false)));
+    vi.mocked(commands.profileSnapshot).mockImplementation(() => ok(snapshot([fact()])));
+    renderStep();
+
+    expect(await screen.findByText("AI features are off — no Agent CLI connected.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ask Boba for questions" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Draft ES" })).toBeDisabled();
+    // The answer itself is the user's own fact, not an AI action.
+    expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
   });
 
   // AC4: a proposal the run made from third-party text says so.
