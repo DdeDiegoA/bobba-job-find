@@ -174,6 +174,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
         app.manage(kill_switch),
         "duplicate kill switch state in port_list"
     );
+    // Backup, restore and Reset everything (S10.2): the open store is the
+    // adapter, because a restore swaps its pages and a reset erases it.
+    mount_port::<dyn boba_app::ports::backup::BackupPort>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }
 

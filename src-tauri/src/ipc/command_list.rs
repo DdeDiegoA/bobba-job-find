@@ -94,6 +94,10 @@ macro_rules! boba_commands {
             crate::commands::triage::inbox_decide_suggestion,
             crate::commands::kill_switch::kill_switch_status,
             crate::commands::kill_switch::kill_switch_set,
+            crate::commands::backup::backup_status,
+            crate::commands::backup::backup_create,
+            crate::commands::backup::backup_restore,
+            crate::commands::backup::reset_everything,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

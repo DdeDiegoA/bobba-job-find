@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod apply;
+pub mod backup;
 pub mod daily_search;
 pub mod email;
 pub mod ingest;
