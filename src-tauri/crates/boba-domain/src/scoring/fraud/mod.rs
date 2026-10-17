@@ -14,6 +14,12 @@
 //! from, the structured field it read, or the published report whose threshold
 //! it uses — AC2's "Ghost signals show with their source". Detection is pure,
 //! offline and deterministic (AD-8, FR-61): no LLM, no clock of its own.
+//!
+//! **Benchmarks.** [`detect`] takes [`MarketData`] so the same-currency 3× p50
+//! rule can run wherever a caller holds benchmarks. No benchmark source ships
+//! yet — the Inbox and the Apply paths pass `MarketData::default()` — so today
+//! the currency-banded absolute ceiling is what fires in production, and the
+//! benchmark rule is exercised by this module's tests until a source lands.
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
@@ -42,6 +48,16 @@ const HOURS_PER_YEAR: i64 = 2_080;
 /// Pay above this yearly equivalent is implausible (minor units: 1,000,000 a
 /// year, or 481 an hour — an outlier no honest remote posting reaches).
 const IMPLAUSIBLE_YEARLY_MINOR: i64 = 100_000_000;
+
+/// The currencies this ceiling reads safely: a hundredth minor unit, and a
+/// million a year that is an outlier in the market. Everywhere else the
+/// nominal amount says nothing — ARS 2,000,000 a month, INR 1,000,000 a year
+/// and JPY 1,000,000 a year are ordinary pay — so only a same-currency
+/// benchmark may call those amounts implausible (review R1 F1).
+const CEILING_CURRENCIES: &[&str] = &[
+    "USD", "EUR", "GBP", "CAD", "AUD", "NZD", "CHF", "SGD", "AED", "SEK", "NOK", "DKK", "PLN",
+    "CZK", "RON",
+];
 
 /// An offer paying this many times the benchmark's p50 is implausible.
 const BENCHMARK_MULTIPLIER: f32 = 3.0;
@@ -267,16 +283,23 @@ fn implausible_pay(offer: &Offer, market: &MarketData) -> bool {
     let Some(money) = &offer.money else {
         return false;
     };
-    if yearly_minor(money) > IMPLAUSIBLE_YEARLY_MINOR {
+    if CEILING_CURRENCIES.contains(&money.currency.as_str())
+        && yearly_minor(money) > IMPLAUSIBLE_YEARLY_MINOR
+    {
         return true;
     }
-    let title = offer.title.to_lowercase();
+    let title = offer.title.trim().to_lowercase();
+    if title.is_empty() {
+        return false;
+    }
     market.salary.iter().any(|benchmark| {
-        benchmark.currency == money.currency
+        let role = benchmark.role.trim().to_lowercase();
+        // An empty role on either side contains everything (review R1 F3).
+        !role.is_empty()
+            && benchmark.currency == money.currency
             && benchmark.period == money.period
             && benchmark.p50_minor > 0
-            && (title.contains(&benchmark.role.to_lowercase())
-                || benchmark.role.to_lowercase().contains(&title))
+            && (title.contains(&role) || role.contains(&title))
             && money.amount_minor as f32 > benchmark.p50_minor as f32 * BENCHMARK_MULTIPLIER
     })
 }
@@ -454,6 +477,68 @@ mod tests {
                 currency: "EUR".to_string(),
                 period: PayPeriod::Year,
                 p50_minor: 1_000_000,
+                basis: BenchmarkBasis::User,
+                as_of: "2026-09-30T00:00:00Z".to_string(),
+            }],
+            ..MarketData::default()
+        };
+        assert!(
+            detect(&offer, &market, NOW)
+                .find(SignalKind::ImplausiblePay)
+                .is_some()
+        );
+    }
+
+    // Review R1 (F1): nominal amounts outside the hard-currency band say
+    // nothing on their own — ARS 2,000,000 a month is an ordinary salary.
+    #[test]
+    fn a_large_amount_in_a_high_denomination_currency_is_not_flagged_without_a_benchmark() {
+        let mut offer = clean();
+        offer.money = Some(money(200_000_000, "ARS", PayPeriod::Month));
+        assert!(
+            detect(&offer, &market(), NOW)
+                .find(SignalKind::ImplausiblePay)
+                .is_none()
+        );
+    }
+
+    // Review R1 (F3): an empty role in a benchmark must match nothing.
+    #[test]
+    fn an_empty_benchmark_role_matches_nothing() {
+        let mut offer = clean();
+        offer.money = Some(money(50_000_000, "EUR", PayPeriod::Year)); // 500k, under the ceiling
+        let market = MarketData {
+            salary: vec![SalaryBenchmark {
+                role: String::new(),
+                location: "madrid".to_string(),
+                currency: "EUR".to_string(),
+                period: PayPeriod::Year,
+                p50_minor: 1_000_000,
+                basis: BenchmarkBasis::User,
+                as_of: "2026-09-30T00:00:00Z".to_string(),
+            }],
+            ..MarketData::default()
+        };
+        assert!(
+            detect(&offer, &market, NOW)
+                .find(SignalKind::ImplausiblePay)
+                .is_none()
+        );
+    }
+
+    // Review R1 (F1): the same-currency benchmark is what makes a nominal
+    // outlier in any currency a signal.
+    #[test]
+    fn a_same_currency_benchmark_flags_pay_outside_the_hard_currency_band() {
+        let mut offer = clean();
+        offer.money = Some(money(200_000_000, "ARS", PayPeriod::Month));
+        let market = MarketData {
+            salary: vec![SalaryBenchmark {
+                role: "data engineer".to_string(),
+                location: "buenos aires".to_string(),
+                currency: "ARS".to_string(),
+                period: PayPeriod::Month,
+                p50_minor: 10_000_000,
                 basis: BenchmarkBasis::User,
                 as_of: "2026-09-30T00:00:00Z".to_string(),
             }],

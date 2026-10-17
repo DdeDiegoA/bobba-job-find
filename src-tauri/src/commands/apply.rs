@@ -590,6 +590,8 @@ pub fn apply_rules_explain(
 /// `PolicyCandidate.fraud_badge` every `decide()` call reads, and the policy
 /// refuses Auto on it — no rule, threshold or override gets past it.
 fn fraud_badge(offer: &Offer, now: &str) -> bool {
+    // No benchmark source ships yet, so the currency-banded absolute ceiling
+    // is what fires here; the benchmark rule waits for that source (S6.8 R1).
     fraud::detect(offer, &MarketData::default(), now).blocks_auto()
 }
 

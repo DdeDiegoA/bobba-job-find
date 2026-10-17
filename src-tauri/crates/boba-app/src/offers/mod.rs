@@ -630,6 +630,10 @@ fn exclusion(gates: &GateReport) -> Option<ExclusionView> {
 /// The fraud/ghost pass reads the Offer alone — "now" for the stale signal is
 /// when its source last saw the posting (`last_seen`), so a card is a function
 /// of the stored data and does not change between two reads (FR-61).
+///
+/// `MarketData` is empty because no benchmark source ships yet (see
+/// `boba_domain::scoring::fraud`): the currency-banded ceiling is the rule that
+/// fires here; the same-currency 3× p50 rule runs once a caller has benchmarks.
 fn badges(offer: &Offer, card: Option<&ScoreCardRow>) -> Vec<BadgeView> {
     let mut badges: Vec<BadgeView> = boba_domain::scoring::fraud::detect(
         offer,
