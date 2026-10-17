@@ -79,6 +79,43 @@ pub(crate) fn number(value: &Value, key: &str) -> Option<f64> {
     value.get(key).and_then(Value::as_f64)
 }
 
+/// A posting URL a board sent, kept only when it is an absolute `https://` URL.
+///
+/// Board payloads are untrusted and `RawPosting.url` ends up as a clickable
+/// link in the app webview, so `javascript:`, `data:`, `http:` and anything
+/// malformed are refused; the adapter then uses the URL it builds itself.
+pub(crate) fn https_url(candidate: Option<String>) -> Option<String> {
+    let url = candidate?;
+    if !url
+        .get(..8)
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https://"))
+    {
+        return None;
+    }
+    let rest = &url[8..];
+    if rest.is_empty() || rest.starts_with('/') {
+        return None;
+    }
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return None;
+    }
+    Some(url)
+}
+
+/// Percent-encode an id before it becomes one path segment, so a source id of
+/// `../admin` cannot walk out of the board path.
+pub(crate) fn encode_segment(segment: &str) -> String {
+    let mut encoded = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
 /// A boolean field.
 pub(crate) fn boolean(value: &Value, key: &str) -> Option<bool> {
     value.get(key).and_then(Value::as_bool)
@@ -206,7 +243,14 @@ pub(crate) fn date_to_rfc3339(date: &str) -> Option<String> {
     {
         return None;
     }
-    Some(format!("{date}T00:00:00Z"))
+    // The store wants a real date; 2026-99-99 is not one.
+    let year: u32 = year.parse().ok().filter(|year| *year >= 1000)?;
+    let month: u32 = month
+        .parse()
+        .ok()
+        .filter(|month| (1..=12).contains(month))?;
+    let day: u32 = day.parse().ok().filter(|day| (1..=31).contains(day))?;
+    Some(format!("{year:04}-{month:02}-{day:02}T00:00:00Z"))
 }
 
 /// The `salary_text` a pay range renders as; `None` when the source gave none.
@@ -372,5 +416,42 @@ mod tests {
         let matched = retain_matching(postings, &backend);
         assert_eq!(matched.len(), 1);
         assert_eq!(matched[0].title, "Senior Backend Engineer");
+    }
+    #[test]
+    fn only_https_urls_are_kept() {
+        assert_eq!(
+            https_url(Some("https://example.test/j".into())).as_deref(),
+            Some("https://example.test/j")
+        );
+        assert_eq!(
+            https_url(Some("HTTPS://example.test/j".into())).as_deref(),
+            Some("HTTPS://example.test/j")
+        );
+        assert_eq!(https_url(Some("http://example.test/j".into())), None);
+        assert_eq!(https_url(Some("javascript:alert(1)".into())), None);
+        assert_eq!(https_url(Some("data:text/html,x".into())), None);
+        assert_eq!(https_url(Some("https:///nohost".into())), None);
+        assert_eq!(https_url(Some("https://exa mple.test".into())), None);
+        assert_eq!(https_url(None), None);
+    }
+
+    #[test]
+    fn a_path_segment_is_percent_encoded() {
+        assert_eq!(encode_segment("abc-123_x.y~z"), "abc-123_x.y~z");
+        assert_eq!(encode_segment("../evil"), "..%2Fevil");
+        assert_eq!(encode_segment("a b"), "a%20b");
+        assert_eq!(encode_segment("ñ"), "%C3%B1");
+    }
+
+    #[test]
+    fn a_day_only_date_checks_its_ranges() {
+        assert_eq!(date_to_rfc3339("2026-99-99"), None);
+        assert_eq!(date_to_rfc3339("2026-13-01"), None);
+        assert_eq!(date_to_rfc3339("2026-00-10"), None);
+        assert_eq!(date_to_rfc3339("2026-12-32"), None);
+        assert_eq!(
+            date_to_rfc3339("2026-12-31").as_deref(),
+            Some("2026-12-31T00:00:00Z")
+        );
     }
 }

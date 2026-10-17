@@ -59,9 +59,16 @@ impl Ashby {
 fn parse_job(job: &Value, board: &BoardRef) -> Option<RawPosting> {
     let external_id = json::text(job, "id")?;
     let title = json::text(job, "title")?;
-    let url = json::text(job, "jobUrl")
-        .or_else(|| json::text(job, "applyUrl"))
-        .unwrap_or_else(|| format!("https://jobs.ashbyhq.com/{}/{external_id}", board.token));
+    // The payload is untrusted and this URL becomes a clickable link (F1).
+    let url = json::https_url(json::text(job, "jobUrl"))
+        .or_else(|| json::https_url(json::text(job, "applyUrl")))
+        .unwrap_or_else(|| {
+            format!(
+                "https://jobs.ashbyhq.com/{}/{}",
+                board.token,
+                json::encode_segment(&external_id)
+            )
+        });
     let mut locations = Vec::new();
     for location in std::iter::once(json::text(job, "location"))
         .chain(
@@ -220,5 +227,34 @@ mod tests {
             .await
             .expect_err("an unknown id must fail");
         assert!(matches!(error, SourceError::InvalidPayload { .. }));
+    }
+    const UNSAFE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ats/ashby_unsafe_urls.json"
+    ));
+
+    #[tokio::test]
+    async fn a_posting_url_that_is_not_https_falls_back_to_the_board_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/posting-api/job-board/bobalabs"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(UNSAFE, "application/json"))
+            .mount(&server)
+            .await;
+        let adapter = Ashby::with_base(server.uri(), board());
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let postings = adapter.search(&SearchQuery::default(), &ctx).await.unwrap();
+        assert_eq!(
+            postings[0].url,
+            "https://jobs.ashbyhq.com/bobalabs/aaaa1111-bbbb-2222-cccc-3333dddd4444"
+        );
+        assert_eq!(
+            postings[1].url,
+            "https://jobs.ashbyhq.com/bobalabs/eeee5555-ffff-6666-0000-111122223333"
+        );
     }
 }

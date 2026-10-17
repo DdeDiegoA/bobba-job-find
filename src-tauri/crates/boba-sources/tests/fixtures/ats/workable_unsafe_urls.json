@@ -1,0 +1,26 @@
+{
+  "name": "Boba Labs",
+  "jobs": [
+    {
+      "id": "aaaa0001",
+      "shortcode": "SCRIPT0001",
+      "title": "Script Job",
+      "url": "javascript:alert(1)",
+      "application_url": "javascript:alert(2)",
+      "location": { "city": "Berlin", "country": "Germany" },
+      "telecommuting": true,
+      "published_on": "2026-09-29",
+      "description": "&lt;p&gt;Hi&lt;/p&gt;"
+    },
+    {
+      "id": "aaaa0002",
+      "shortcode": "PLAIN00002",
+      "title": "Plaintext Job",
+      "url": "http://apply.workable.com/bobalabs/j/PLAIN00002/",
+      "location": { "city": "Lisbon", "country": "Portugal" },
+      "telecommuting": false,
+      "published_on": "2026-09-18",
+      "description": "&lt;p&gt;Hi&lt;/p&gt;"
+    }
+  ]
+}

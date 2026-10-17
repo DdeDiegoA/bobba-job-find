@@ -60,12 +60,14 @@ impl Workable {
 fn parse_job(job: &Value, board: &BoardRef, company: &str) -> Option<RawPosting> {
     let external_id = json::text(job, "shortcode").or_else(|| json::text(job, "id"))?;
     let title = json::text(job, "title")?;
-    let url = json::text(job, "url")
-        .or_else(|| json::text(job, "application_url"))
+    // The payload is untrusted and this URL becomes a clickable link (F1).
+    let url = json::https_url(json::text(job, "url"))
+        .or_else(|| json::https_url(json::text(job, "application_url")))
         .unwrap_or_else(|| {
             format!(
-                "https://apply.workable.com/{}/j/{external_id}/",
-                board.token
+                "https://apply.workable.com/{}/j/{}/",
+                board.token,
+                json::encode_segment(&external_id)
             )
         });
     let mut parts = Vec::new();
@@ -214,5 +216,34 @@ mod tests {
         let posting = adapter.detail("F6G7H8I9J0", &ctx).await.unwrap();
         assert_eq!(posting.title, "Office Manager");
         assert_eq!(posting.locations, vec!["Lisbon, Portugal"]);
+    }
+    const UNSAFE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ats/workable_unsafe_urls.json"
+    ));
+
+    #[tokio::test]
+    async fn a_posting_url_that_is_not_https_falls_back_to_the_board_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/widget/accounts/bobalabs"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(UNSAFE, "application/json"))
+            .mount(&server)
+            .await;
+        let adapter = Workable::with_base(server.uri(), board());
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let postings = adapter.search(&SearchQuery::default(), &ctx).await.unwrap();
+        assert_eq!(
+            postings[0].url,
+            "https://apply.workable.com/bobalabs/j/SCRIPT0001/"
+        );
+        assert_eq!(
+            postings[1].url,
+            "https://apply.workable.com/bobalabs/j/PLAIN00002/"
+        );
     }
 }

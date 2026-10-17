@@ -45,7 +45,9 @@ impl Greenhouse {
     fn detail_url(&self, external_id: &str) -> String {
         format!(
             "{}/v1/boards/{}/jobs/{}",
-            self.base, self.board.token, external_id
+            self.base,
+            self.board.token,
+            json::encode_segment(external_id)
         )
     }
 }
@@ -59,10 +61,12 @@ fn parse_job(job: &Value, board: &BoardRef) -> Option<RawPosting> {
     };
     let title = json::text(job, "title")?;
     let location = json::nested_text(job, &["location", "name"]);
-    let url = json::text(job, "absolute_url").unwrap_or_else(|| {
+    // The payload is untrusted and this URL becomes a clickable link (F1).
+    let url = json::https_url(json::text(job, "absolute_url")).unwrap_or_else(|| {
         format!(
-            "https://boards.greenhouse.io/{}/jobs/{external_id}",
-            board.token
+            "https://boards.greenhouse.io/{}/jobs/{}",
+            board.token,
+            json::encode_segment(&external_id)
         )
     });
     let pay = job
@@ -275,5 +279,42 @@ mod tests {
             .await
             .expect_err("404 must fail");
         assert!(matches!(error, SourceError::Http { .. }));
+    }
+    const UNSAFE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ats/greenhouse_unsafe_urls.json"
+    ));
+
+    #[tokio::test]
+    async fn a_posting_url_that_is_not_https_falls_back_to_the_board_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/boards/bobalabs/jobs"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(UNSAFE, "application/json"))
+            .mount(&server)
+            .await;
+        let adapter = Greenhouse::with_base(server.uri(), board());
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let postings = adapter.search(&SearchQuery::default(), &ctx).await.unwrap();
+        assert_eq!(
+            postings[0].url,
+            "https://boards.greenhouse.io/bobalabs/jobs/9900001"
+        );
+        assert_eq!(
+            postings[1].url,
+            "https://boards.greenhouse.io/bobalabs/jobs/9900002"
+        );
+    }
+
+    #[test]
+    fn a_detail_id_cannot_escape_the_board_path() {
+        let adapter = Greenhouse::new(board());
+        let url = adapter.detail_url("../evil");
+        assert!(url.ends_with("/jobs/..%2Fevil"), "{url}");
+        assert!(!url.contains("/../"), "{url}");
     }
 }

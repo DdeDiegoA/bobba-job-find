@@ -45,7 +45,9 @@ impl Lever {
     fn detail_url(&self, external_id: &str) -> String {
         format!(
             "{}/v0/postings/{}/{}",
-            self.base, self.board.token, external_id
+            self.base,
+            self.board.token,
+            json::encode_segment(external_id)
         )
     }
 }
@@ -60,9 +62,16 @@ fn parse_posting(posting: &Value, board: &BoardRef) -> Option<RawPosting> {
     } else {
         "https://jobs.lever.co"
     };
-    let url = json::text(posting, "hostedUrl")
-        .or_else(|| json::text(posting, "applyUrl"))
-        .unwrap_or_else(|| format!("{fallback_host}/{}/{external_id}", board.token));
+    // The payload is untrusted and this URL becomes a clickable link (F1).
+    let url = json::https_url(json::text(posting, "hostedUrl"))
+        .or_else(|| json::https_url(json::text(posting, "applyUrl")))
+        .unwrap_or_else(|| {
+            format!(
+                "{fallback_host}/{}/{}",
+                board.token,
+                json::encode_segment(&external_id)
+            )
+        });
     let salary = posting.get("salaryRange");
     let salary_text = salary.and_then(|range| {
         json::salary_text(
@@ -239,5 +248,43 @@ mod tests {
         assert!(adapter.list_url().starts_with(API_EU));
         let global = Lever::new(BoardRef::new(AtsKind::Lever, "bobalabs").unwrap());
         assert!(global.list_url().starts_with(API));
+    }
+    const UNSAFE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ats/lever_unsafe_urls.json"
+    ));
+
+    #[tokio::test]
+    async fn a_posting_url_that_is_not_https_falls_back_to_the_board_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v0/postings/bobalabs"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(UNSAFE, "application/json"))
+            .mount(&server)
+            .await;
+        let board = BoardRef::new(AtsKind::Lever, "bobalabs").unwrap();
+        let adapter = Lever::with_base(server.uri(), board);
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let postings = adapter.search(&SearchQuery::default(), &ctx).await.unwrap();
+        assert_eq!(
+            postings[0].url,
+            "https://jobs.lever.co/bobalabs/11111111-2222-3333-4444-555555555555"
+        );
+        assert_eq!(
+            postings[1].url,
+            "https://jobs.lever.co/bobalabs/66666666-7777-8888-9999-000000000000"
+        );
+    }
+
+    #[test]
+    fn a_detail_id_cannot_escape_the_board_path() {
+        let adapter = Lever::new(BoardRef::new(AtsKind::Lever, "bobalabs").unwrap());
+        let url = adapter.detail_url("../evil");
+        assert!(url.ends_with("/bobalabs/..%2Fevil"), "{url}");
+        assert!(!url.contains("/../"), "{url}");
     }
 }

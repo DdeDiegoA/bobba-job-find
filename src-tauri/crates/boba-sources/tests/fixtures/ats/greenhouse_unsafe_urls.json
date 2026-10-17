@@ -1,0 +1,21 @@
+{
+  "jobs": [
+    {
+      "id": 9900001,
+      "title": "Script Job",
+      "location": { "name": "Remote" },
+      "absolute_url": "javascript:alert(document.cookie)",
+      "content": "&lt;p&gt;Hi&lt;/p&gt;",
+      "company_name": "Boba Labs"
+    },
+    {
+      "id": 9900002,
+      "title": "Plaintext Job",
+      "location": { "name": "Remote" },
+      "absolute_url": "http://boards.greenhouse.io/bobaboard/jobs/9900002",
+      "content": "&lt;p&gt;Hi&lt;/p&gt;",
+      "company_name": "Boba Labs"
+    }
+  ],
+  "meta": { "total": 2 }
+}

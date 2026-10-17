@@ -46,7 +46,9 @@ impl SmartRecruiters {
     fn detail_url(&self, external_id: &str) -> String {
         format!(
             "{}/v1/companies/{}/postings/{}",
-            self.base, self.board.token, external_id
+            self.base,
+            self.board.token,
+            json::encode_segment(external_id)
         )
     }
 }
@@ -259,5 +261,12 @@ mod tests {
             html.find("Boba Labs makes job search calm.") < html.find("<li>Threat modelling</li>"),
             "sections keep their reading order"
         );
+    }
+    #[test]
+    fn a_detail_id_cannot_escape_the_company_path() {
+        let adapter = SmartRecruiters::new(board());
+        let url = adapter.detail_url("../evil");
+        assert!(url.ends_with("/Boba/postings/..%2Fevil"), "{url}");
+        assert!(!url.contains("/../"), "{url}");
     }
 }
