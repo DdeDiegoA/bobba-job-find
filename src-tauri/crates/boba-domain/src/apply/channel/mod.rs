@@ -101,7 +101,13 @@ pub fn detect(offer: &Offer) -> Vec<ApplyChannel> {
     // Manual is the original page: only a page we can open is a channel.
     let url = offer.apply.url.trim();
     if let Some(host) = host_of(url) {
-        if let Some(provider) = AtsProvider::from_host(host) {
+        // The ATS Form channel is driven by Boba, so it is https only: an
+        // `http` form would be filled and submitted over a connection anyone
+        // on the path can rewrite (S9.4 review N1; S4.6 already normalises
+        // apply URLs upstream — this is the second lock).
+        if is_https(url)
+            && let Some(provider) = AtsProvider::from_host(host)
+        {
             channels.push(ApplyChannel::AtsForm {
                 provider,
                 url: url.to_string(),
@@ -112,6 +118,12 @@ pub fn detect(offer: &Offer) -> Vec<ApplyChannel> {
         });
     }
     channels
+}
+
+/// Whether a URL's scheme is `https` (case-insensitive).
+fn is_https(url: &str) -> bool {
+    url.split_once("://")
+        .is_some_and(|(scheme, _)| scheme.trim().eq_ignore_ascii_case("https"))
 }
 
 /// The host of an `http(s)` URL, `None` for anything that is not one.
@@ -274,6 +286,22 @@ mod tests {
                 url: "HTTPS://WWW.Boards.Greenhouse.io:443/nimbus/jobs/1".into()
             }
         );
+    }
+
+    #[test]
+    fn a_plain_http_form_is_not_an_ats_channel() {
+        // The channel is filled and submitted by Boba, so it must be https
+        // (S9.4 review N1); the page can still be opened by hand.
+        for url in [
+            "http://boards.greenhouse.io/nimbus/jobs/123",
+            "HTTP://jobs.lever.co/nimbus/abc",
+        ] {
+            assert_eq!(
+                detect(&offer(url, None)),
+                vec![ApplyChannel::Manual { url: url.into() }],
+                "{url}"
+            );
+        }
     }
 
     #[test]

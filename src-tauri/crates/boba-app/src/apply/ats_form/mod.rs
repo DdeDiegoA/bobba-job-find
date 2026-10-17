@@ -353,6 +353,10 @@ impl AtsFormService {
         attempt_id: &str,
         application: &Application,
     ) -> Result<AtsOutcome, AtsFormError> {
+        // Revoking the opt-in stops even a read of the open page (AC1, F3).
+        if !self.opted_in()? {
+            return Err(AtsFormError::OptInRequired);
+        }
         let intent = self
             .system
             .audit_unresolved_intents()?
@@ -869,6 +873,8 @@ mod tests {
         closes: Mutex<u32>,
         png_blake3: Mutex<String>,
         refused: Mutex<bool>,
+        /// Whether a window is open: `snapshot`/`screenshot` never launch one.
+        live: Mutex<bool>,
     }
 
     impl Default for FakeBrowser {
@@ -888,6 +894,7 @@ mod tests {
                 closes: Mutex::new(0),
                 png_blake3: Mutex::new(String::new()),
                 refused: Mutex::new(false),
+                live: Mutex::new(false),
             }
         }
     }
@@ -917,10 +924,14 @@ mod tests {
             if *self.refused.lock().unwrap() {
                 return Err(BrowserError::NotRunning);
             }
+            *self.live.lock().unwrap() = true;
             Ok(self.snapshot.lock().unwrap().clone())
         }
 
         fn snapshot(&self) -> Result<FormSnapshot, BrowserError> {
+            if !*self.live.lock().unwrap() {
+                return Err(BrowserError::NotRunning);
+            }
             Ok(self.snapshot.lock().unwrap().clone())
         }
 
@@ -950,6 +961,9 @@ mod tests {
         }
 
         fn screenshot(&self) -> Result<Screenshot, BrowserError> {
+            if !*self.live.lock().unwrap() {
+                return Err(BrowserError::NotRunning);
+            }
             *self.screenshots.lock().unwrap() += 1;
             Ok(Screenshot {
                 png_blake3: self.png_blake3.lock().unwrap().clone(),
@@ -958,6 +972,7 @@ mod tests {
 
         fn close(&self) -> Result<(), BrowserError> {
             *self.closes.lock().unwrap() += 1;
+            *self.live.lock().unwrap() = false;
             Ok(())
         }
     }
@@ -1510,6 +1525,57 @@ mod tests {
         assert!(h.system.audit_unresolved_intents().unwrap().is_empty());
         assert_eq!(h.system.audit_verify_chain().unwrap().rows, 2);
         assert_eq!(*h.browser.screenshots.lock().unwrap(), 1);
+    }
+
+    // F3: after a restart (or a closed window) confirm must not open a fresh
+    // browser; the attempt stays unresolved so it can be checked later.
+    #[test]
+    fn confirming_with_no_live_window_keeps_the_attempt_unresolved() {
+        let h = harness(vec![], true);
+        let application = application();
+        seed_cv(&h.apply, &h.documents, &application.id);
+        let session = h.service.start(&application, &offer()).unwrap();
+        // The user closed the Chrome window.
+        *h.browser.live.lock().unwrap() = false;
+
+        let error = h
+            .service
+            .confirm(&session.attempt_id, &application)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            AtsFormError::Browser(BrowserError::NotRunning)
+        ));
+        assert_eq!(
+            h.system.audit_unresolved_intents().unwrap().len(),
+            1,
+            "the attempt stays open for a later check"
+        );
+        assert_eq!(
+            h.system.audit_verify_chain().unwrap().rows,
+            1,
+            "no outcome is recorded for a page that was never read"
+        );
+        assert!(h.apply.events().is_empty());
+    }
+
+    // F3: revoking the opt-in stops a read too.
+    #[test]
+    fn confirming_without_the_opt_in_is_refused() {
+        let h = harness(vec![], true);
+        let application = application();
+        seed_cv(&h.apply, &h.documents, &application.id);
+        let session = h.service.start(&application, &offer()).unwrap();
+        h.system.setting_delete(OPT_IN_KEY).unwrap();
+
+        let error = h
+            .service
+            .confirm(&session.attempt_id, &application)
+            .unwrap_err();
+
+        assert_eq!(error.message_key(), "errors.apply.ats_opt_in");
+        assert_eq!(h.system.audit_unresolved_intents().unwrap().len(), 1);
     }
 
     #[test]

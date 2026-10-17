@@ -243,69 +243,84 @@ fn upload_error(error: std::io::Error) -> BrowserError {
     BrowserError::Upload(error.to_string())
 }
 
-/// The production adapter mounted as a port: it launches the browser on the
-/// first apply session and closes it when the session ends.
-pub struct ChromeDriver {
-    profile: PathBuf,
-    upload_dir: PathBuf,
-    session: Mutex<Option<PageDriver<ChromeTransport>>>,
+/// A port over one lazily-launched browser session.
+///
+/// `open` is the only call that launches a browser; the rest act on the live
+/// session and report [`BrowserError::NotRunning`] when there is none — a
+/// `confirm` after a restart must never open an empty window (S9.4 review F3).
+/// Any failed step drops the session: the user may have closed the window, and
+/// the next `open` then relaunches instead of erroring forever (S9.4 review F1).
+pub struct SessionDriver<T: CdpTransport> {
+    launch: Box<dyn Fn() -> Result<PageDriver<T>, BrowserError> + Send + Sync>,
+    session: Mutex<Option<PageDriver<T>>>,
 }
 
-impl ChromeDriver {
-    /// Build the adapter without launching anything: `app_data` is where the
-    /// profile and the upload scratch folder live.
-    pub fn new(app_data: impl AsRef<Path>) -> Self {
-        let app_data = app_data.as_ref();
+impl<T: CdpTransport> SessionDriver<T> {
+    /// Build the port without launching anything; `launch` builds a session
+    /// when one is needed.
+    pub fn new(
+        launch: impl Fn() -> Result<PageDriver<T>, BrowserError> + Send + Sync + 'static,
+    ) -> Self {
         Self {
-            profile: profile_dir(app_data),
-            upload_dir: app_data.join(UPLOAD_DIR),
+            launch: Box::new(launch),
             session: Mutex::new(None),
         }
     }
 
-    /// Run `step` against the live session, launching the browser on demand.
-    fn with_driver<R>(
+    /// Run `step` against the session; launch it first only when `start`.
+    fn with_session<R>(
         &self,
-        step: impl FnOnce(&PageDriver<ChromeTransport>) -> Result<R, BrowserError>,
+        start: bool,
+        step: impl FnOnce(&PageDriver<T>) -> Result<R, BrowserError>,
     ) -> Result<R, BrowserError> {
         let mut slot = self
             .session
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         if slot.is_none() {
-            let transport = ChromeTransport::launch(&self.profile)?;
-            *slot = Some(PageDriver::new(transport, &self.upload_dir));
+            if !start {
+                return Err(BrowserError::NotRunning);
+            }
+            *slot = Some((self.launch)()?);
         }
-        match slot.as_ref() {
+        let result = match slot.as_ref() {
             Some(driver) => step(driver),
             None => Err(BrowserError::NotRunning),
+        };
+        if result.is_err() {
+            // A dead transport must not be reused: drop it (and close it
+            // best-effort) so the next call starts a fresh browser (F1).
+            if let Some(driver) = slot.take() {
+                let _ = driver.close();
+            }
         }
+        result
     }
 }
 
-impl BrowserPort for ChromeDriver {
+impl<T: CdpTransport> BrowserPort for SessionDriver<T> {
     fn open(&self, provider: AtsProvider, url: &str) -> Result<FormSnapshot, BrowserError> {
-        self.with_driver(|driver| driver.open(provider, url))
+        self.with_session(true, |driver| driver.open(provider, url))
     }
 
     fn snapshot(&self) -> Result<FormSnapshot, BrowserError> {
-        self.with_driver(PageDriver::snapshot)
+        self.with_session(false, PageDriver::snapshot)
     }
 
     fn fill_text(&self, handle: &str, value: &str) -> Result<(), BrowserError> {
-        self.with_driver(|driver| driver.fill_text(handle, value))
+        self.with_session(false, |driver| driver.fill_text(handle, value))
     }
 
     fn choose(&self, handle: &str) -> Result<(), BrowserError> {
-        self.with_driver(|driver| driver.choose(handle))
+        self.with_session(false, |driver| driver.choose(handle))
     }
 
     fn attach(&self, handle: &str, file: &Upload) -> Result<(), BrowserError> {
-        self.with_driver(|driver| driver.attach(handle, file))
+        self.with_session(false, |driver| driver.attach(handle, file))
     }
 
     fn screenshot(&self) -> Result<Screenshot, BrowserError> {
-        self.with_driver(PageDriver::screenshot)
+        self.with_session(false, PageDriver::screenshot)
     }
 
     fn close(&self) -> Result<(), BrowserError> {
@@ -318,6 +333,58 @@ impl BrowserPort for ChromeDriver {
             Some(driver) => driver.close(),
             None => Ok(()),
         }
+    }
+}
+
+/// The production adapter mounted as a port: the user's own Chrome, launched
+/// on the first apply session and closed when the session ends.
+pub struct ChromeDriver {
+    driver: SessionDriver<ChromeTransport>,
+}
+
+impl ChromeDriver {
+    /// Build the adapter without launching anything: `app_data` is where the
+    /// profile and the upload scratch folder live.
+    pub fn new(app_data: impl AsRef<Path>) -> Self {
+        let app_data = app_data.as_ref();
+        let profile = profile_dir(app_data);
+        let upload_dir = app_data.join(UPLOAD_DIR);
+        Self {
+            driver: SessionDriver::new(move || {
+                let transport = ChromeTransport::launch(&profile)?;
+                Ok(PageDriver::new(transport, &upload_dir))
+            }),
+        }
+    }
+}
+
+impl BrowserPort for ChromeDriver {
+    fn open(&self, provider: AtsProvider, url: &str) -> Result<FormSnapshot, BrowserError> {
+        self.driver.open(provider, url)
+    }
+
+    fn snapshot(&self) -> Result<FormSnapshot, BrowserError> {
+        self.driver.snapshot()
+    }
+
+    fn fill_text(&self, handle: &str, value: &str) -> Result<(), BrowserError> {
+        self.driver.fill_text(handle, value)
+    }
+
+    fn choose(&self, handle: &str) -> Result<(), BrowserError> {
+        self.driver.choose(handle)
+    }
+
+    fn attach(&self, handle: &str, file: &Upload) -> Result<(), BrowserError> {
+        self.driver.attach(handle, file)
+    }
+
+    fn screenshot(&self) -> Result<Screenshot, BrowserError> {
+        self.driver.screenshot()
+    }
+
+    fn close(&self) -> Result<(), BrowserError> {
+        self.driver.close()
     }
 }
 
@@ -361,31 +428,67 @@ impl ChromeTransport {
     }
 }
 
+/// How long one CDP call may take before it reports a timeout. A hung page
+/// must not hold the calling thread forever (S9.4 review F2).
+pub const CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Why a CDP call did not answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitError {
+    /// The browser answered with a failure.
+    Failed(String),
+    /// The browser did not answer within the limit.
+    TimedOut,
+}
+
+/// Block on `work` for at most `limit`.
+fn within<T>(
+    runtime: &tokio::runtime::Runtime,
+    limit: std::time::Duration,
+    work: impl std::future::Future<Output = Result<T, String>>,
+) -> Result<T, WaitError> {
+    // The timeout future is built inside `block_on`: `tokio::time::sleep`
+    // needs a runtime context to exist at all.
+    match runtime.block_on(async move { tokio::time::timeout(limit, work).await }) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(WaitError::Failed(message)),
+        Err(_) => Err(WaitError::TimedOut),
+    }
+}
+
 impl CdpTransport for ChromeTransport {
     fn navigate(&self, url: &str) -> Result<(), BrowserError> {
-        self.runtime
-            .block_on(self.page.goto(url))
-            .map(|_| ())
-            .map_err(|error| BrowserError::Navigation(error.to_string()))
+        let page = &self.page;
+        within(&self.runtime, CALL_TIMEOUT, async move {
+            page.goto(url)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| BrowserError::Navigation(wait_message(error)))
     }
 
     fn evaluate(&self, script: &str) -> Result<String, BrowserError> {
-        let result = self
-            .runtime
-            .block_on(self.page.evaluate_expression(script))
-            .map_err(|error| BrowserError::Page(error.to_string()))?;
+        let page = &self.page;
+        let result = within(&self.runtime, CALL_TIMEOUT, async move {
+            page.evaluate_expression(script)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| BrowserError::Page(wait_message(error)))?;
         result
             .into_value::<String>()
             .map_err(|error| BrowserError::Page(error.to_string()))
     }
 
     fn screenshot_png(&self) -> Result<Vec<u8>, BrowserError> {
-        self.runtime
-            .block_on(
-                self.page
-                    .screenshot(chromiumoxide::page::ScreenshotParams::default()),
-            )
-            .map_err(|error| BrowserError::Page(error.to_string()))
+        let page = &self.page;
+        within(&self.runtime, CALL_TIMEOUT, async move {
+            page.screenshot(chromiumoxide::page::ScreenshotParams::default())
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| BrowserError::Page(wait_message(error)))
     }
 
     fn set_files(&self, handle: &str, paths: &[PathBuf]) -> Result<(), BrowserError> {
@@ -397,24 +500,32 @@ impl CdpTransport for ChromeTransport {
             return Err(BrowserError::Page("bad field handle".to_string()));
         }
         let selector = format!("[data-boba-field=\"{handle}\"]");
-        let element = self
-            .runtime
-            .block_on(self.page.find_element(selector))
-            .map_err(|error| BrowserError::Page(error.to_string()))?;
-        let params = SetFileInputFilesParams::builder()
-            .files(
-                paths
-                    .iter()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .collect::<Vec<_>>(),
-            )
-            .backend_node_id(element.backend_node_id)
-            .build()
-            .map_err(BrowserError::Page)?;
-        self.runtime
-            .block_on(self.page.execute(params))
-            .map(|_| ())
-            .map_err(|error| BrowserError::Page(error.to_string()))
+        let page = &self.page;
+        within(&self.runtime, CALL_TIMEOUT, async move {
+            page.find_element(selector)
+                .await
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| BrowserError::Page(wait_message(error)))
+        .and_then(|element| {
+            let params = SetFileInputFilesParams::builder()
+                .files(
+                    paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().to_string())
+                        .collect::<Vec<_>>(),
+                )
+                .backend_node_id(element.backend_node_id)
+                .build()
+                .map_err(BrowserError::Page)?;
+            within(&self.runtime, CALL_TIMEOUT, async move {
+                page.execute(params)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            })
+            .map_err(|error| BrowserError::Page(wait_message(error)))
+        })
     }
 
     fn close(&self) -> Result<(), BrowserError> {
@@ -422,10 +533,22 @@ impl CdpTransport for ChromeTransport {
             .browser
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        self.runtime
-            .block_on(browser.close())
-            .map(|_| ())
-            .map_err(|error| BrowserError::Page(error.to_string()))
+        within(&self.runtime, CALL_TIMEOUT, async move {
+            browser
+                .close()
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .map_err(|error| BrowserError::Page(wait_message(error)))
+    }
+}
+
+/// The message a failed or timed-out CDP call reports.
+fn wait_message(error: WaitError) -> String {
+    match error {
+        WaitError::Failed(message) => message,
+        WaitError::TimedOut => "the browser did not answer in time".to_string(),
     }
 }
 
@@ -449,15 +572,23 @@ mod tests {
         files: Mutex<Vec<Uploaded>>,
         png: Mutex<Vec<u8>>,
         closed: Mutex<bool>,
+        /// Set when the browser behind this transport is gone (window closed).
+        dead: std::sync::Arc<Mutex<bool>>,
     }
 
     impl CdpTransport for FakeTransport {
         fn navigate(&self, url: &str) -> Result<(), BrowserError> {
+            if *self.dead.lock().unwrap() {
+                return Err(BrowserError::NotRunning);
+            }
             self.navigated.lock().unwrap().push(url.to_string());
             Ok(())
         }
 
         fn evaluate(&self, script: &str) -> Result<String, BrowserError> {
+            if *self.dead.lock().unwrap() {
+                return Err(BrowserError::Page("the browser window is gone".into()));
+            }
             self.scripts.lock().unwrap().push(script.to_string());
             Ok(self.page.lock().unwrap().clone())
         }
@@ -624,6 +755,84 @@ mod tests {
             !debug.contains("private"),
             "a CV's bytes never reach a log: {debug}"
         );
+    }
+
+    #[test]
+    fn a_hung_cdp_call_times_out() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let error = within(&runtime, std::time::Duration::from_millis(10), async {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            Ok::<(), String>(())
+        })
+        .expect_err("a hung call must not hold the thread");
+        assert_eq!(error, WaitError::TimedOut);
+        assert_eq!(
+            wait_message(error),
+            "the browser did not answer in time".to_string()
+        );
+
+        let failed = within(&runtime, std::time::Duration::from_secs(1), async {
+            Err::<(), String>("page closed".to_string())
+        })
+        .expect_err("a failed call reports the browser's message");
+        assert_eq!(failed, WaitError::Failed("page closed".to_string()));
+    }
+
+    #[test]
+    fn only_open_launches_a_browser() {
+        let launches = std::sync::Arc::new(Mutex::new(0u32));
+        let counter = launches.clone();
+        let driver = SessionDriver::new(move || {
+            *counter.lock().unwrap() += 1;
+            Ok(PageDriver::new(FakeTransport::default(), scratch("noopen")))
+        });
+
+        assert_eq!(driver.snapshot().unwrap_err(), BrowserError::NotRunning);
+        assert_eq!(
+            *launches.lock().unwrap(),
+            0,
+            "a snapshot or confirm never opens a window (F3)"
+        );
+    }
+
+    #[test]
+    fn a_dead_session_is_dropped_and_the_next_open_relaunches() {
+        let launches = std::sync::Arc::new(Mutex::new(0u32));
+        let dead = std::sync::Arc::new(Mutex::new(false));
+        let counter = launches.clone();
+        let health = dead.clone();
+        let driver = SessionDriver::new(move || {
+            *counter.lock().unwrap() += 1;
+            let mut transport = FakeTransport::default();
+            *transport.page.lock().unwrap() = page("Apply");
+            transport.dead = health.clone();
+            Ok(PageDriver::new(transport, scratch("dead")))
+        });
+
+        driver
+            .open(AtsProvider::Lever, "https://jobs.lever.co/nimbus/abc")
+            .unwrap();
+        assert_eq!(*launches.lock().unwrap(), 1);
+
+        // The user closes the window: the next call fails...
+        *dead.lock().unwrap() = true;
+        assert!(driver.snapshot().is_err());
+        assert_eq!(
+            *launches.lock().unwrap(),
+            1,
+            "a failed read never relaunches"
+        );
+
+        // ...and once a browser can start again, `open` starts one (F1).
+        *dead.lock().unwrap() = false;
+        driver
+            .open(AtsProvider::Lever, "https://jobs.lever.co/nimbus/abc")
+            .unwrap();
+        assert_eq!(*launches.lock().unwrap(), 2, "the dead session was dropped");
+        assert!(driver.snapshot().is_ok());
     }
 
     #[test]

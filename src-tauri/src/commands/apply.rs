@@ -322,31 +322,45 @@ pub fn apply_ats_opt_in(app: tauri::AppHandle, enabled: bool) -> AppResult<bool>
 }
 
 /// Open the ATS form in the user's own Chrome and fill it (AC1/AC2).
+///
+/// Off the UI thread: launching Chrome and reading the page block, and the
+/// window the user needs to take over must stay responsive (S9.4 review F2).
 #[tauri::command]
 #[specta::specta]
-pub fn apply_ats_start(app: tauri::AppHandle, application_id: String) -> AppResult<AtsSessionView> {
+pub async fn apply_ats_start(
+    app: tauri::AppHandle,
+    application_id: String,
+) -> AppResult<AtsSessionView> {
     let application_id = required_id(application_id)?;
-    let (application, offer) = context(&app, &application_id)?;
-    ats_service(&app)?
-        .start(&application, &offer)
-        .map_err(to_app_ats)
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, offer) = context(&app, &application_id)?;
+        ats_service(&app)?
+            .start(&application, &offer)
+            .map_err(to_app_ats)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
 }
 
 /// Read the page after the user submitted: evidence, Applied or Needs check
-/// (AC3, FR-88).
+/// (AC3, FR-88). Off the UI thread, like `apply_ats_start` (S9.4 review F2).
 #[tauri::command]
 #[specta::specta]
-pub fn apply_ats_confirm(
+pub async fn apply_ats_confirm(
     app: tauri::AppHandle,
     application_id: String,
     attempt_id: String,
 ) -> AppResult<AtsOutcome> {
     let application_id = required_id(application_id)?;
     let attempt_id = required_id(attempt_id)?;
-    let (application, _offer) = context(&app, &application_id)?;
-    ats_service(&app)?
-        .confirm(&attempt_id, &application)
-        .map_err(to_app_ats)
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, _offer) = context(&app, &application_id)?;
+        ats_service(&app)?
+            .confirm(&attempt_id, &application)
+            .map_err(to_app_ats)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
 }
 
 /// The folder one application's kit is written to, created on demand.
