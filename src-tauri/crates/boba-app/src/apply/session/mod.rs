@@ -34,7 +34,7 @@ use crate::apply::ats_form::{
     plan_field, same_host,
 };
 use crate::apply::manual::{ManualError, ManualService, PdfExport};
-use crate::ports::browser::{BrowserError, Confirmation, PageField, Screenshot, Upload};
+use crate::ports::browser::{BrowserError, Upload};
 use crate::ports::clock::ClockPort;
 use crate::ports::kill_switch::KillSwitchPort;
 use crate::ports::repo::apply::{ApplyRepo, ApplyRepoError};
@@ -45,6 +45,10 @@ use crate::ports::repo::system::{NewIntent, SystemRepo, SystemRepoError};
 
 /// The audit action an attempt on a Session Board writes (AD-12).
 pub const AUDIT_ACTION: &str = "apply.session_submitted";
+
+/// The audit action a challenge seen while filling writes (AD-10). It is the
+/// same action the session search run uses (S11.1b), so the log reads one way.
+pub const CHALLENGE_ACTION: &str = "session.challenge_paused";
 
 /// The `setting` key a Source's challenge pause lives in (S11.1a/AD-10).
 ///
@@ -95,6 +99,11 @@ impl SessionBoard {
 
     /// Whether `url` is an `https` page on this board (`www.` and subdomains
     /// included, a lookalike host excluded).
+    ///
+    /// The authority is whitelisted character by character, the way
+    /// `apply::channel::host_of` is (S4.5): a backslash is a path separator to
+    /// a browser, and a userinfo (`@`) can make the browser visit a host this
+    /// check did not name, so neither is ever part of an accepted URL.
     pub fn allows(self, url: &str) -> bool {
         let Some((scheme, rest)) = url.split_once("://") else {
             return false;
@@ -103,13 +112,14 @@ impl SessionBoard {
             return false;
         }
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-        let Some(host) = authority
-            .rsplit('@')
-            .next()
-            .unwrap_or_default()
-            .split(':')
-            .next()
-        else {
+        if authority.is_empty()
+            || !authority
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+        {
+            return false;
+        }
+        let Some(host) = authority.split(':').next() else {
             return false;
         };
         let host = host.trim().to_ascii_lowercase();
@@ -119,44 +129,7 @@ impl SessionBoard {
     }
 }
 
-/// What a Session Board page asks for that Boba never answers itself (AD-10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionChallenge {
-    Captcha,
-    LoginWall,
-    UnusualActivity,
-    RateLimited,
-}
-
-impl SessionChallenge {
-    /// The stable wire name the UI and the pause record share.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SessionChallenge::Captcha => "captcha",
-            SessionChallenge::LoginWall => "login_wall",
-            SessionChallenge::UnusualActivity => "unusual_activity",
-            SessionChallenge::RateLimited => "rate_limited",
-        }
-    }
-}
-
-/// One read of the page the session browser is on.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionPage {
-    pub url: String,
-    pub title: String,
-    /// The visible text, for the confirmation evidence.
-    pub text: String,
-    pub fields: Vec<PageField>,
-    /// Set when the page is a wall: the fill stops and the user takes over.
-    pub challenge: Option<SessionChallenge>,
-    /// The board put its apply form in a cross-origin frame Boba cannot type
-    /// into (Indeed's smart-apply). The user fills that one by hand.
-    pub embedded_frame: bool,
-    /// Set when the page says the submission went through (FR-88).
-    pub confirmation: Option<Confirmation>,
-}
+pub use crate::ports::session::{SessionChallenge, SessionFormPort, SessionPage};
 
 /// Why a Session Board could not be filled or read.
 #[derive(Debug, thiserror::Error)]
@@ -255,37 +228,6 @@ pub struct SessionHandoff {
     pub label: Option<String>,
 }
 
-/// The `SessionFormPort` — drive the user's session profile on one board.
-///
-/// Adapter: `boba-browser` (`session_forms`). One headed browser per Source,
-/// launched on that Source's dedicated profile (S11.1a), over an ephemeral
-/// loopback CDP port (AD-10). The port is synchronous like [`crate::ports::browser::BrowserPort`]:
-/// the driver owns its runtime, and the use case runs off the UI thread.
-pub trait SessionFormPort: Send + Sync {
-    /// Open `url` in `source_id`'s session and press the board's apply button,
-    /// then read the step it opened. Never submits and never signs in.
-    fn open(&self, source_id: &str, url: &str) -> Result<SessionPage, BrowserError>;
-
-    /// Read the page the session is on now (after the user advanced a step).
-    fn snapshot(&self) -> Result<SessionPage, BrowserError>;
-
-    /// Type `value` into the field `handle` the last read reported. The value
-    /// travels to the adapter and nowhere else (S9.4 AC1).
-    fn fill_text(&self, handle: &str, value: &str) -> Result<(), BrowserError>;
-
-    /// Choose a checkbox or radio `handle` (a click).
-    fn choose(&self, handle: &str) -> Result<(), BrowserError>;
-
-    /// Hand `file` to the file input `handle` (the verified CV or letter).
-    fn attach(&self, handle: &str, file: &Upload) -> Result<(), BrowserError>;
-
-    /// Capture the page and hash it, for the submission evidence (FR-88).
-    fn screenshot(&self) -> Result<Screenshot, BrowserError>;
-
-    /// Close the browser window this session opened.
-    fn close(&self) -> Result<(), BrowserError>;
-}
-
 /// The filled form handed to the user, and the window it lives in (AC1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct SessionApplyView {
@@ -327,6 +269,8 @@ struct FilledStep {
     attached: Vec<String>,
     unanswered: Vec<UnansweredField>,
     handoff: Option<SessionHandoff>,
+    /// The challenge that made Boba stop, when the page was one (AD-10).
+    paused: Option<SessionChallenge>,
 }
 
 impl FilledStep {
@@ -337,6 +281,7 @@ impl FilledStep {
             attached: vec![],
             unanswered: vec![],
             handoff: Some(handoff),
+            paused: None,
         }
     }
 }
@@ -407,14 +352,20 @@ impl SessionApplyService {
         let identity = self.identity(application)?;
 
         let page = self.browser.open(&offer.source_id, url)?;
-        let step = self.fill_page(&identity, &answers, &documents, page)?;
+        // H1 (review): the board's own apply button may lead anywhere. Boba
+        // types nothing into a page the board did not name — not even the CV's
+        // contact block, and never a verified PDF.
+        if !board.allows(&page.url) {
+            let _ = self.browser.close();
+            return Err(SessionApplyError::OffBoard(page.url.clone()));
+        }
 
-        // AD-12: the attempt is on record before the user's submit can happen.
-        // Page text is not part of it — only ids, the URL (no query, S11.1b
-        // R-b) and the document kinds.
+        // M2 (review): AD-12 wants the attempt on record **before** the
+        // browser types anything. Page text is not part of it — only ids, the
+        // URL (no query, S11.1b R-b) and the document kinds.
         let stamp = self.clock.now_rfc3339().replace([':', '+', '.'], "-");
         let attempt_id = format!("session_{}_{stamp}", application.id);
-        self.system.audit_append_intent(&NewIntent {
+        let intent = self.system.audit_append_intent(&NewIntent {
             action: AUDIT_ACTION.to_string(),
             correlation_id: attempt_id.clone(),
             // The user presses submit in their own browser.
@@ -425,12 +376,24 @@ impl SessionApplyService {
                 "source_id": offer.source_id,
                 "board": board.as_str(),
                 "url": page_url(url),
-                "documents": step.attached,
+                "documents": documents.keys().collect::<Vec<_>>(),
             })
             .to_string(),
             payload_blake3: None,
             created_at: self.clock.now_rfc3339(),
-        })?;
+        });
+        let intent = match intent {
+            Ok(intent) => intent,
+            Err(error) => {
+                // Nothing was typed yet: close the window rather than leave
+                // one open for an attempt the log never heard of.
+                let _ = self.browser.close();
+                return Err(error.into());
+            }
+        };
+        let _ = intent;
+
+        let step = self.fill_page_step(&identity, &answers, &documents, &offer.source_id, page)?;
 
         Ok(SessionApplyView {
             application_id: application.id.clone(),
@@ -462,9 +425,20 @@ impl SessionApplyService {
         let answers = self.reusable_answers(&application.id)?;
         let identity = self.identity(application)?;
 
+        // M4 (review): the package can change between steps; a draft that is
+        // no longer Ready and verified must stop the fill.
+        let pending = self.manual().pending(application)?;
+        if !pending.is_empty() {
+            return Err(SessionApplyError::NotReady(pending));
+        }
         let page = self.browser.snapshot()?;
+        // H1 (review): the user may have navigated in the window. Nothing is
+        // typed into a page the board did not name.
+        if !board.allows(&page.url) {
+            return Err(SessionApplyError::OffBoard(page.url.clone()));
+        }
         let url = page.url.clone();
-        let step = self.fill_page(&identity, &answers, &documents, page)?;
+        let step = self.fill_page_step(&identity, &answers, &documents, &source_id, page)?;
         Ok(SessionApplyView {
             application_id: application.id.clone(),
             attempt_id: attempt_id.to_string(),
@@ -616,6 +590,63 @@ impl SessionApplyService {
         Ok(intent)
     }
 
+    /// Pause the Source after a challenge (AD-10, M3 of the S11.2 review).
+    ///
+    /// The record is the one `boba_sources`' search run reads — same key, same
+    /// JSON shape, same action — so a challenge met while filling stops the
+    /// next search and the next fill alike. User-initiated or not, a wall is
+    /// never retried around.
+    fn pause_source(
+        &self,
+        source_id: &str,
+        challenge: SessionChallenge,
+    ) -> Result<(), SessionApplyError> {
+        let now = self.clock.now_rfc3339();
+        let intent = self.system.audit_append_intent(&NewIntent {
+            action: CHALLENGE_ACTION.to_string(),
+            correlation_id: format!(
+                "challenge_{source_id}_{}",
+                now.replace([':', '+', '.'], "-")
+            ),
+            actor: "user".to_string(),
+            target_kind: "source".to_string(),
+            target_id: Some(source_id.to_string()),
+            detail_json: serde_json::json!({
+                "kind": challenge.as_str(),
+                "while": "apply",
+            })
+            .to_string(),
+            payload_blake3: None,
+            created_at: now.clone(),
+        })?;
+        self.system.setting_put(
+            &format!("{PAUSE_KEY_PREFIX}{source_id}"),
+            &serde_json::json!({ "kind": challenge.as_str(), "since": now }).to_string(),
+            &now,
+        )?;
+        self.system
+            .audit_append_outcome(&intent, AuditOutcome::Ok, "{}", &now)?;
+        Ok(())
+    }
+
+    /// Fill the visible step; a wall or an unreachable form hands back (AC1),
+    /// and a challenge also closes the Source's gate for the next attempt
+    /// (AD-10, M3 of the S11.2 review).
+    fn fill_page_step(
+        &self,
+        identity: &Identity,
+        answers: &[BankAnswer],
+        documents: &BTreeMap<String, PdfExport>,
+        source_id: &str,
+        page: SessionPage,
+    ) -> Result<FilledStep, SessionApplyError> {
+        let step = self.fill_page(identity, answers, documents, page)?;
+        if let Some(kind) = step.paused {
+            self.pause_source(source_id, kind)?;
+        }
+        Ok(step)
+    }
+
     /// Fill the visible step; a wall or an unreachable form hands back (AC1).
     fn fill_page(
         &self,
@@ -625,10 +656,12 @@ impl SessionApplyService {
         page: SessionPage,
     ) -> Result<FilledStep, SessionApplyError> {
         if let Some(challenge) = page.challenge {
-            return Ok(FilledStep::handed_back(SessionHandoff {
+            let mut step = FilledStep::handed_back(SessionHandoff {
                 kind: challenge.into(),
                 label: None,
-            }));
+            });
+            step.paused = Some(challenge);
+            return Ok(step);
         }
         if page.embedded_frame {
             // Indeed's smart-apply form lives in a cross-origin frame: Boba
@@ -688,6 +721,7 @@ impl SessionApplyService {
             attached,
             unanswered,
             handoff,
+            paused: None,
         })
     }
 

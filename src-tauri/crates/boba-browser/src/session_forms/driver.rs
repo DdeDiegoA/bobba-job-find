@@ -170,8 +170,13 @@ pub struct SessionFormDriver {
 
 impl SessionFormDriver {
     pub fn new(app_data: impl Into<PathBuf>) -> Self {
+        let app_data = app_data.into();
+        // AD-13 (S11.2 review L2): a crash between writing an attachment and
+        // removing it would leave a plaintext PDF behind. The folder is scratch
+        // space, so a launch empties it rather than trusting the last run.
+        let _ = std::fs::remove_dir_all(app_data.join(UPLOAD_DIR));
         Self {
-            app_data: app_data.into(),
+            app_data,
             session: Mutex::new(None),
         }
     }
@@ -500,6 +505,22 @@ mod tests {
         let (driver, root) = driver(vec![]);
         driver.close().unwrap();
         assert_eq!(driver.transport.closes.load(Ordering::SeqCst), 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_launch_empties_the_scratch_upload_folder() {
+        let root = scratch("sweep");
+        let uploads = root.join(UPLOAD_DIR);
+        std::fs::create_dir_all(&uploads).unwrap();
+        std::fs::write(uploads.join("leftover-cv.pdf"), b"%PDF-1.7").unwrap();
+
+        let _adapter = SessionFormDriver::new(&root);
+
+        assert!(
+            !uploads.exists(),
+            "a plaintext attachment never outlives the run that wrote it"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

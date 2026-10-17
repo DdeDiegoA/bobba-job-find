@@ -214,6 +214,14 @@ impl ManualService {
         })
     }
 
+    /// The package kinds that are not Ready and verified yet (AD-14).
+    ///
+    /// The same gate `view` reports, for a caller that only needs the answer —
+    /// the Session Board apply re-checks it on every step (S11.2).
+    pub fn pending(&self, application: &Application) -> Result<Vec<String>, ManualError> {
+        Ok(self.gate(application)?.pending)
+    }
+
     /// The verified PDFs of the package, bytes and safe file names (AD-14).
     pub fn export_pdfs(&self, application: &Application) -> Result<Vec<PdfExport>, ManualError> {
         let mut exports = Vec::new();

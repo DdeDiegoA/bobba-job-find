@@ -860,6 +860,14 @@ fn the_board_decides_which_hosts_are_allowed() {
     assert!(!SessionBoard::LinkedIn.allows("http://www.linkedin.com/jobs/view/1"));
     assert!(SessionBoard::Indeed.allows("https://smartapply.indeed.com/apply"));
     assert!(!SessionBoard::Indeed.allows("https://www.indeed.com.evil.test/x"));
+    // A userinfo or a backslash makes a browser visit a host this check did
+    // not name, so neither is ever accepted.
+    assert!(!SessionBoard::LinkedIn.allows("https://evil.test\\@www.linkedin.com/jobs/view/1"));
+    assert!(!SessionBoard::LinkedIn.allows("https://www.linkedin.com@evil.test/jobs/view/1"));
+    assert!(
+        SessionBoard::LinkedIn.allows("https://www.linkedin.com:443/jobs"),
+        "an explicit port is still the board"
+    );
     assert_eq!(
         SessionBoard::of_source("linkedin"),
         Some(SessionBoard::LinkedIn)
@@ -869,4 +877,120 @@ fn the_board_decides_which_hosts_are_allowed() {
         Some(SessionBoard::Indeed)
     );
     assert_eq!(SessionBoard::of_source("greenhouse"), None);
+}
+
+// ---- S11.2 review findings -------------------------------------------------
+
+// H1: the board's apply button can lead off-board; Boba never types there.
+#[test]
+fn a_window_that_left_the_board_is_never_filled() {
+    let h = ready_harness(vec![
+        field("boba-1", "Email address", PageFieldKind::Email, true),
+        field("boba-2", "Resume", PageFieldKind::File, true),
+    ]);
+    let mut elsewhere = page(vec![
+        field("boba-1", "Email address", PageFieldKind::Email, true),
+        field("boba-2", "Resume", PageFieldKind::File, true),
+    ]);
+    elsewhere.url = "https://evil.test/apply".into();
+    h.browser.set(elsewhere);
+
+    let error = h.service.start(&application(), &offer()).unwrap_err();
+    assert_eq!(error.message_key(), "errors.apply.session_off_board");
+    assert!(
+        h.browser.fills.lock().unwrap().is_empty(),
+        "no value is typed"
+    );
+    assert!(
+        h.browser.attached.lock().unwrap().is_empty(),
+        "no PDF is attached"
+    );
+    assert_eq!(*h.browser.closes.lock().unwrap(), 1, "the window is closed");
+    assert!(
+        h.system.audit_unresolved_intents().unwrap().is_empty(),
+        "nothing was attempted, so nothing is on record"
+    );
+}
+
+// H1: the same rule holds for a step the user navigated away from.
+#[test]
+fn a_later_step_off_the_board_is_refused() {
+    let h = ready_harness(vec![field(
+        "boba-1",
+        "Email address",
+        PageFieldKind::Email,
+        true,
+    )]);
+    let application = application();
+    let attempt = started(&h, &application);
+    let mut elsewhere = page(vec![field("boba-9", "Email", PageFieldKind::Email, true)]);
+    elsewhere.url = "https://smartapply.evil.test/form".into();
+    h.browser.set(elsewhere);
+
+    let error = h.service.fill(&attempt, &application).unwrap_err();
+    assert_eq!(error.message_key(), "errors.apply.session_off_board");
+    assert!(
+        !h.browser
+            .fills
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(handle, _)| handle == "boba-9"),
+        "the off-board step is never typed into"
+    );
+}
+
+// M3: a challenge met while filling pauses the Source, exactly as the search
+// run does (same key, same record).
+#[test]
+fn a_challenge_pauses_the_source_and_stops_the_next_attempt() {
+    let h = ready_harness(vec![]);
+    let mut wall = page(vec![]);
+    wall.challenge = Some(SessionChallenge::Captcha);
+    h.browser.set(wall);
+
+    let view = h.service.start(&application(), &offer()).unwrap();
+    assert_eq!(
+        view.handoff.expect("hands back").kind,
+        SessionHandoffKind::Captcha
+    );
+
+    let paused = h
+        .system
+        .setting_get("session.pause.linkedin")
+        .unwrap()
+        .expect("the Source is paused");
+    assert!(
+        paused.contains("captcha"),
+        "the pause names the challenge: {paused}"
+    );
+    assert_eq!(
+        h.system.audit_verify_chain().unwrap().rows,
+        3,
+        "the attempt pair plus the challenge pair"
+    );
+
+    let error = h.service.start(&application(), &offer()).unwrap_err();
+    assert_eq!(error.message_key(), "errors.apply.session_paused");
+}
+
+// M4: a package that stopped being Ready between steps stops the next fill.
+#[test]
+fn a_step_is_not_filled_when_the_package_lost_its_verification() {
+    let h = ready_harness(vec![field("boba-1", "Email", PageFieldKind::Email, true)]);
+    let application = application();
+    let attempt = started(&h, &application);
+    h.apply.seed_package(
+        &application.id,
+        PackageItem {
+            document_id: "doc_draft".into(),
+            kind: "cover_letter".into(),
+            lang: "en".into(),
+            version: 1,
+            verified_at: None,
+        },
+    );
+
+    let error = h.service.fill(&attempt, &application).unwrap_err();
+    assert_eq!(error.message_key(), "errors.apply.not_ready");
 }

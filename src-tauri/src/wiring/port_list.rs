@@ -138,14 +138,6 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
             None
         }
     };
-    // the Boba profile, launched only when an apply session starts.
-    match app.path().app_data_dir() {
-        Ok(data) => mount_port::<dyn BrowserPort>(
-            app,
-            Arc::new(boba_browser::driver::ChromeDriver::new(data)),
-        ),
-        Err(error) => tracing::error!(?error, "browser port left unmounted"),
-    }
     // The Session Board apply browser (S11.2, AD-10): the user's own Chrome
     // on that Source's session profile, headed, only when an apply starts.
     match app.path().app_data_dir() {

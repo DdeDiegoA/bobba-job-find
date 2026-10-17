@@ -406,7 +406,9 @@ fn session_service(app: &tauri::AppHandle) -> AppResult<SessionApplyService> {
         wiring::port::<dyn SessionFormPort>(app)?,
         std::sync::Arc::new(SystemClock),
     )
-    .with_kill_switch(wiring::port::<dyn KillSwitchPort>(app).ok()))
+    // S9.8 mounted the switch: a locked store fails the command rather than
+    // silently skipping a safety check.
+    .with_kill_switch(Some(wiring::port::<dyn KillSwitchPort>(app)?)))
 }
 
 /// Map a Session Board apply failure onto the typed IPC error (AD-3).
