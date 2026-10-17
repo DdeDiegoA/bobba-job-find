@@ -58,15 +58,15 @@ impl FastembedEncoder {
             .lock()
             .map_err(|_| EmbeddingError::Encode("encoder lock poisoned".into()))?;
         if guard.is_none() {
-            // Model files already on disk are checked *before* ONNX parses
-            // them; a fresh download is checked right after, before it is
-            // ever used (S6.9 brief: the download carries a pinned checksum).
-            if self.installed() {
-                verify_install(&self.destination())?;
+            // The checksum runs on bytes, before ONNX parses any of them
+            // (reviewer-1 F2): fetch the files with the same client fastembed
+            // uses, verify, and only then let `try_new` read the cache.
+            if !self.installed() {
+                download_model_files(&self.destination())?;
             }
+            verify_install(&self.destination())?;
             let model = TextEmbedding::try_new(self.options())
                 .map_err(|error| EmbeddingError::Download(error.to_string()))?;
-            verify_install(&self.destination())?;
             *guard = Some(model);
         }
         let model = guard.as_mut().expect("the model was just loaded");
@@ -165,6 +165,23 @@ const VERIFIED_MARKER: &str = "boba-verified";
 /// A cache that already carries the verified marker for this revision is
 /// trusted as-is; anything else is hashed file by file. A mismatch removes the
 /// model repo directory — a corrupt cache can never be used — and reports why.
+/// Fetch every file the model needs into the cache — raw bytes only, nothing
+/// parsed (reviewer-1 F2). `try_new` afterwards finds them cached and reads
+/// exactly the bytes [`verify_install`] hashed.
+fn download_model_files(cache_root: &Path) -> Result<(), EmbeddingError> {
+    let api = hf_hub::api::sync::ApiBuilder::new()
+        .with_cache_dir(cache_root.to_path_buf())
+        .with_progress(false)
+        .build()
+        .map_err(|error| EmbeddingError::Download(error.to_string()))?;
+    let repo = api.model(f3::MODEL_ID.to_string());
+    for (path, _) in MODEL_FILES {
+        repo.get(path)
+            .map_err(|error| EmbeddingError::Download(format!("{path}: {error}")))?;
+    }
+    Ok(())
+}
+
 fn verify_install(cache_root: &Path) -> Result<(), EmbeddingError> {
     let repo = cache_root.join(repo_dir());
     let marker = repo.join(VERIFIED_MARKER);

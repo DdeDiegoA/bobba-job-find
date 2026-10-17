@@ -57,5 +57,17 @@
       },
       "report": "Source: {report}"
     }
+  },
+  "embeddings": {
+    "title": "On-device semantic match",
+    "hint": "Boba can compare each Offer's meaning with your Profile using a small language model that runs on this device. The download is about {size} MB, once, and nothing about your search leaves your computer. Without it, the fit score skips this factor and spreads its weight over the others.",
+    "loading": "Checking whether the model is on this device…",
+    "unavailable": "This build of Boba has no on-device model, so the semantic match is unavailable. Everything else works as usual.",
+    "on": "Semantic match is on. It runs on this device and offline.",
+    "off": "Turn off",
+    "enable": "Download the model",
+    "downloading": "Downloading and checking the model… this can take a few minutes.",
+    "destination": "The model is stored in {path}.",
+    "error": "Boba could not change the semantic-match setting."
   }
 }

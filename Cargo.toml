@@ -95,6 +95,11 @@ simhash = "0.3"
 # the dependency set does not drift when the default feature resets.
 fastembed = { version = "7.1", default-features = false, features = ["hf-hub-native-tls", "ort-download-binaries-native-tls"] }
 
+# The model cache the F3 encoder downloads into (S6.9): the same client
+# fastembed uses, so the bytes land in one layout and can be hashed before the
+# ONNX runtime parses them. Features come from fastembed's own selection.
+hf-hub = { version = "0.5", default-features = false }
+
 # --- Agent runtime / process ---
 cron = "0.17"
 # process-wrap: std frontend + process-group (Unix) / JobObject (Windows), as

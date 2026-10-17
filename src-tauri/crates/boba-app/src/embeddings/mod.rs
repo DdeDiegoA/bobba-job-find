@@ -9,12 +9,13 @@
 //! axis renormalises (AC2). A build without the `embeddings` feature has no
 //! adapter at all: `available` is `false` and scoring is unchanged (AC4).
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use boba_domain::posting::Offer;
 use boba_domain::scoring::f3::{self, APPROXIMATE_BYTES, MODEL_ID, Side};
 use boba_domain::scoring::factors::{Prefs, ProfileSnapshot, SemanticScore};
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use thiserror::Error;
 
 use crate::ports::clock::ClockPort;
@@ -34,8 +35,9 @@ pub const DOWNLOADED_AT_KEY: &str = "scoring.embeddings.downloaded_at";
 /// The `setting` row with the model the user opted in to.
 pub const MODEL_KEY: &str = "scoring.embeddings.model";
 
-/// What the Settings screen shows about F3 (AC1, AC4).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the Settings screen shows about F3 (AC1, AC4). Crosses IPC (AD-3), so
+/// the path is the string the user sees, not a `PathBuf`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct EmbeddingStatus {
     /// This build carries an encoder (`boba-embed` + the `embeddings` feature).
     pub available: bool,
@@ -45,19 +47,20 @@ pub struct EmbeddingStatus {
     pub installed: bool,
     pub model_id: String,
     /// Where the model lives, once the opt-in downloaded it.
-    pub destination: Option<PathBuf>,
-    /// What the download costs, for the opt-in copy.
-    pub approximate_bytes: u64,
+    pub destination: Option<String>,
+    /// What the download costs, for the opt-in copy. `u32`: IPC carries no
+    /// 64-bit integers (specta), and half a gigabyte fits with room to spare.
+    pub approximate_bytes: u32,
 }
 
 /// One line the network-activity view lists (AC1): the model download, its
 /// destination on disk and when it finished.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct NetworkEntry {
     pub model_id: String,
-    pub destination: PathBuf,
+    pub destination: String,
     pub downloaded_at: String,
-    pub approximate_bytes: u64,
+    pub approximate_bytes: u32,
 }
 
 /// Why the embeddings use case could not answer.
@@ -72,6 +75,19 @@ pub enum EmbeddingsError {
     /// The `setting` rows could not be read or written.
     #[error(transparent)]
     System(#[from] SystemRepoError),
+}
+
+impl EmbeddingsError {
+    /// The i18n key the UI shows (AD-3: keys cross IPC, never raw text).
+    pub fn message_key(&self) -> &'static str {
+        match self {
+            Self::Unavailable => "errors.embeddings.unavailable",
+            Self::Port(EmbeddingError::NotInstalled(_)) => "errors.embeddings.not_installed",
+            Self::Port(EmbeddingError::Download(_)) => "errors.embeddings.download",
+            Self::Port(EmbeddingError::Encode(_)) => "errors.embeddings.encode",
+            Self::System(_) => "errors.embeddings.store",
+        }
+    }
 }
 
 /// The opt-in, the download and the F3 input (AC1, AC2, AC4).
@@ -105,8 +121,8 @@ impl EmbeddingsService {
             opted_in: self.opted_in()?,
             installed: self.port.as_ref().is_some_and(|port| port.installed()),
             model_id: MODEL_ID.to_string(),
-            destination: self.system.setting_get(DESTINATION_KEY)?.map(PathBuf::from),
-            approximate_bytes: APPROXIMATE_BYTES,
+            destination: self.system.setting_get(DESTINATION_KEY)?,
+            approximate_bytes: APPROXIMATE_BYTES as u32,
         })
     }
 
@@ -159,9 +175,9 @@ impl EmbeddingsService {
             .unwrap_or_else(|| MODEL_ID.to_string());
         Ok(vec![NetworkEntry {
             model_id,
-            destination: PathBuf::from(destination),
+            destination,
             downloaded_at: downloaded_at.unwrap_or_default(),
-            approximate_bytes: APPROXIMATE_BYTES,
+            approximate_bytes: APPROXIMATE_BYTES as u32,
         }])
     }
 
@@ -230,6 +246,10 @@ mod tests {
         fn destination() -> PathBuf {
             PathBuf::from("/tmp/boba-models")
         }
+    }
+
+    fn destination_string() -> String {
+        FakeEncoder::destination().to_string_lossy().to_string()
     }
 
     impl EmbeddingPort for FakeEncoder {
@@ -343,15 +363,15 @@ mod tests {
         assert!(status.available);
         assert!(status.opted_in);
         assert!(status.installed);
-        assert_eq!(status.destination, Some(FakeEncoder::destination()));
+        assert_eq!(status.destination, Some(destination_string()));
         assert_eq!(fake.installs.load(Ordering::SeqCst), 1);
 
         let activity = service.network_activity().unwrap();
         assert_eq!(activity.len(), 1);
-        assert_eq!(activity[0].destination, FakeEncoder::destination());
+        assert_eq!(activity[0].destination, destination_string());
         assert_eq!(activity[0].model_id, f3::MODEL_ID);
         assert_eq!(activity[0].downloaded_at, NOW);
-        assert_eq!(activity[0].approximate_bytes, APPROXIMATE_BYTES);
+        assert_eq!(activity[0].approximate_bytes, APPROXIMATE_BYTES as u32);
     }
 
     #[test]
@@ -531,10 +551,10 @@ mod tests {
 
         let status = service.status().unwrap();
         assert!(status.opted_in);
-        assert_eq!(status.destination, Some(FakeEncoder::destination()));
+        assert_eq!(status.destination, Some(destination_string()));
 
         let activity = service.network_activity().unwrap();
         assert_eq!(activity.len(), 1);
-        assert_eq!(activity[0].destination, FakeEncoder::destination());
+        assert_eq!(activity[0].destination, destination_string());
     }
 }

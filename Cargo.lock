@@ -744,6 +744,7 @@ dependencies = [
  "boba-app",
  "boba-domain",
  "fastembed",
+ "hf-hub",
  "sha2 0.10.9",
  "tempfile",
  "tracing",

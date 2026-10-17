@@ -18,6 +18,7 @@ const ADAPTERS: &[&str] = &[
     "boba-docs",
     "boba-mail",
     "boba-browser",
+    "boba-embed",
 ];
 
 /// Extract dependency keys from the `[dependencies]`-family tables of a manifest.

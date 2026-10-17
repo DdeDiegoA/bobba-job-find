@@ -808,3 +808,132 @@ fn the_run_notifies_top_matches_once_and_stays_quiet_without_them() {
 
     super::notify_top_matches(None, 2);
 }
+
+/// An encoder that answers a fixed similarity, so the run's F3 wiring can be
+/// read without a model on disk.
+#[derive(Default)]
+struct FixedEncoder {
+    installed: std::sync::atomic::AtomicBool,
+}
+
+impl crate::ports::embedding::EmbeddingPort for FixedEncoder {
+    fn model_id(&self) -> &str {
+        boba_domain::scoring::f3::MODEL_ID
+    }
+
+    fn destination(&self) -> std::path::PathBuf {
+        std::path::PathBuf::from("/tmp/boba-models")
+    }
+
+    fn installed(&self) -> bool {
+        self.installed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn install(
+        &self,
+    ) -> Result<boba_domain::scoring::f3::ModelInstall, crate::ports::embedding::EmbeddingError>
+    {
+        self.installed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(boba_domain::scoring::f3::ModelInstall {
+            model_id: boba_domain::scoring::f3::MODEL_ID.to_string(),
+            destination: self.destination(),
+            dimension: boba_domain::scoring::f3::MODEL_DIMENSION,
+        })
+    }
+
+    fn similarity(
+        &self,
+        _profile_text: &str,
+        _offer_text: &str,
+    ) -> Result<boba_domain::scoring::factors::SemanticScore, crate::ports::embedding::EmbeddingError>
+    {
+        boba_domain::scoring::factors::SemanticScore::new(0.82)
+            .ok_or_else(|| crate::ports::embedding::EmbeddingError::Encode("bad".into()))
+    }
+}
+
+/// Preferences that declare a role, so the Profile side of F3 has something to
+/// encode even when the Profile itself is empty.
+fn role_prefs() -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "values": {
+            "roles": ["Backend Engineer"],
+            "locations": [],
+            "working_languages": [],
+            "work_modes": {"remote": true, "hybrid": true, "onsite": true},
+            "salary_floor": null
+        },
+        "scores_stale": false
+    })
+}
+
+/// S6.9 AC1: with an opted-in encoder, the card the run stores carries F3.
+#[test]
+fn an_opted_in_encoder_feeds_f3_into_the_stored_card() {
+    let harness = Harness::with_prefs(
+        ScriptedSources::new([(
+            source("remotive"),
+            Ok(vec![raw(
+                "a1",
+                "https://jobs.example.com/1",
+                "Backend Engineer",
+            )]),
+        )]),
+        role_prefs(),
+    );
+    let encoder = Arc::new(FixedEncoder::default());
+    let embeddings = Arc::new(crate::embeddings::EmbeddingsService::new(
+        Some(Arc::clone(&encoder) as Arc<dyn crate::ports::embedding::EmbeddingPort>),
+        Arc::clone(&harness.system) as Arc<dyn SystemRepo>,
+        Arc::clone(&harness.clock) as Arc<dyn ClockPort>,
+    ));
+    embeddings.opt_in().expect("the opt-in downloads");
+
+    harness
+        .service()
+        .with_embeddings(Some(embeddings))
+        .run(Harness::options())
+        .expect("the run finishes");
+
+    let id = harness.ingestion.offers(10, 0).expect("read")[0].id.clone();
+    let card = harness.scoring.cards_for(&id).expect("read").remove(0);
+    let semantic = card.card.factor(Factor::Semantic).expect("F3 on the card");
+    assert_eq!(semantic.score, Some(82.0));
+}
+
+/// S6.9 AC2/AC4: without an encoder (or before the opt-in) the card stores the
+/// same F3 gap it always stored, and the axis renormalises.
+#[test]
+fn without_an_opted_in_encoder_f3_stays_out_of_the_card() {
+    let harness = Harness::with_prefs(
+        ScriptedSources::new([(
+            source("remotive"),
+            Ok(vec![raw(
+                "a1",
+                "https://jobs.example.com/1",
+                "Backend Engineer",
+            )]),
+        )]),
+        role_prefs(),
+    );
+    let encoder = Arc::new(FixedEncoder::default());
+    let embeddings = Arc::new(crate::embeddings::EmbeddingsService::new(
+        Some(Arc::clone(&encoder) as Arc<dyn crate::ports::embedding::EmbeddingPort>),
+        Arc::clone(&harness.system) as Arc<dyn SystemRepo>,
+        Arc::clone(&harness.clock) as Arc<dyn ClockPort>,
+    ));
+
+    harness
+        .service()
+        .with_embeddings(Some(embeddings))
+        .run(Harness::options())
+        .expect("the run finishes");
+
+    let id = harness.ingestion.offers(10, 0).expect("read")[0].id.clone();
+    let card = harness.scoring.cards_for(&id).expect("read").remove(0);
+    let semantic = card.card.factor(Factor::Semantic).expect("F3 on the card");
+    assert_eq!(semantic.score, None);
+    assert_eq!(semantic.effective_weight, 0.0);
+}

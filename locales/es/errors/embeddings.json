@@ -1,0 +1,7 @@
+{
+  "errors.embeddings.unavailable": "Esta versión de Boba no incluye el modelo local, así que la coincidencia semántica (F3) no está disponible. El resto del ranking sigue funcionando.",
+  "errors.embeddings.not_installed": "El modelo local no está en este dispositivo. Activa la coincidencia semántica en Ajustes → Puntuación para descargarlo.",
+  "errors.embeddings.download": "No se pudo descargar el modelo. Revisa tu conexión e inténtalo de nuevo.",
+  "errors.embeddings.encode": "El modelo local no pudo puntuar esta oferta. F3 se omite para ella; el resto de factores siguen contando.",
+  "errors.embeddings.store": "Boba no pudo guardar el ajuste de coincidencia semántica. Inténtalo de nuevo."
+}
