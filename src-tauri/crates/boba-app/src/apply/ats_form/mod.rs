@@ -580,18 +580,18 @@ fn ats_channel(offer: &Offer) -> Option<(AtsProvider, String)> {
 }
 
 /// The URL an attempt was started on, as the intent recorded it.
-fn intent_url(intent: &boba_domain::audit::AuditRow) -> Option<String> {
+pub(crate) fn intent_url(intent: &boba_domain::audit::AuditRow) -> Option<String> {
     let detail: serde_json::Value = serde_json::from_str(&intent.detail_json).ok()?;
     detail.get("url")?.as_str().map(str::to_string)
 }
 
 /// Whether two URLs name the same host (port and case ignored, `www.` too).
-fn same_host(a: &str, b: &str) -> bool {
+pub(crate) fn same_host(a: &str, b: &str) -> bool {
     host_of(a).is_some_and(|left| host_of(b).is_some_and(|right| left == right))
 }
 
 /// The host of an `http(s)` URL, lower-cased with a leading `www.` removed.
-fn host_of(url: &str) -> Option<String> {
+pub(crate) fn host_of(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://")?;
     if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
         return None;
@@ -605,7 +605,7 @@ fn host_of(url: &str) -> Option<String> {
 
 /// The identity fields a form asks for, read from the CV's contact block.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Identity {
+pub(crate) struct Identity {
     first: Option<String>,
     last: Option<String>,
     full: Option<String>,
@@ -616,7 +616,7 @@ struct Identity {
 }
 
 impl Identity {
-    fn of(contact: &Contact) -> Self {
+    pub(crate) fn of(contact: &Contact) -> Self {
         let mut parts = contact.full_name.split_whitespace();
         let first = parts.next().map(str::to_string);
         let last = parts.collect::<Vec<_>>().join(" ");
@@ -646,27 +646,27 @@ impl Identity {
 /// One value to type into the page. A sensitive value (a pay or eligibility
 /// answer, S7.8) prints as redacted, so no log can carry it (AC1).
 #[derive(Clone, PartialEq, Eq)]
-struct FillValue {
+pub(crate) struct FillValue {
     text: String,
     sensitive: bool,
 }
 
 impl FillValue {
-    fn plain(text: String) -> Self {
+    pub(crate) fn plain(text: String) -> Self {
         Self {
             text,
             sensitive: false,
         }
     }
 
-    fn sensitive(text: String) -> Self {
+    pub(crate) fn sensitive(text: String) -> Self {
         Self {
             text,
             sensitive: true,
         }
     }
 
-    fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         &self.text
     }
 }
@@ -683,7 +683,7 @@ impl std::fmt::Debug for FillValue {
 
 /// What to do with one field on the page.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum FieldPlan<'a> {
+pub(crate) enum FieldPlan<'a> {
     Fill(FillValue),
     Attach(&'a str),
     Leave,
@@ -694,7 +694,7 @@ enum FieldPlan<'a> {
 }
 
 /// The plan for one field (AC1/AC2).
-fn plan_field<'a>(
+pub(crate) fn plan_field<'a>(
     field: &PageField,
     identity: &Identity,
     answers: &'a [BankAnswer],
@@ -770,7 +770,7 @@ fn unknown_required(field: &PageField) -> FieldPlan<'static> {
     }
 }
 
-fn filled_field(field: &PageField) -> FilledField {
+pub(crate) fn filled_field(field: &PageField) -> FilledField {
     FilledField {
         handle: field.handle.clone(),
         label: field.label.clone(),
@@ -794,7 +794,7 @@ fn clean_label(label: &str) -> String {
 }
 
 /// The identity value for a form's caption, if the CV carries one.
-fn identity_value(label: &str, identity: &Identity) -> Option<String> {
+pub(crate) fn identity_value(label: &str, identity: &Identity) -> Option<String> {
     let label = clean_label(label);
     if label.is_empty() {
         return None;
@@ -848,7 +848,7 @@ fn identity_value(label: &str, identity: &Identity) -> Option<String> {
 }
 
 /// The approved answer whose question matches this caption (S7.8).
-fn answer_for<'a>(label: &str, answers: &'a [BankAnswer]) -> Option<&'a BankAnswer> {
+pub(crate) fn answer_for<'a>(label: &str, answers: &'a [BankAnswer]) -> Option<&'a BankAnswer> {
     let key = boba_domain::application::question_key(&clean_label(label));
     answers
         .iter()
@@ -856,7 +856,7 @@ fn answer_for<'a>(label: &str, answers: &'a [BankAnswer]) -> Option<&'a BankAnsw
 }
 
 /// Whether a select offers the answer's text as one of its choices.
-fn option_matches(options: &[String], value: &str) -> bool {
+pub(crate) fn option_matches(options: &[String], value: &str) -> bool {
     let value = value.trim();
     options
         .iter()
@@ -864,7 +864,7 @@ fn option_matches(options: &[String], value: &str) -> bool {
 }
 
 /// Which Package document a file input asks for, if the caption names one.
-fn document_kind_for(label: &str) -> Option<&'static str> {
+pub(crate) fn document_kind_for(label: &str) -> Option<&'static str> {
     let label = clean_label(label);
     if label.contains("cover") || label.contains("carta") {
         return Some("cover_letter");

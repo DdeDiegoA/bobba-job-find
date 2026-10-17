@@ -7,6 +7,7 @@ import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import AnswerApprovePanel from "./approve-panel";
 import AtsAssist from "./ats-assist";
 import EmailApplyPanel from "./email-apply";
+import SessionAssist from "./session-assist";
 import { useApplyView, useExportPdfs, useMarkApplied } from "./use-apply-bar";
 
 /**
@@ -116,6 +117,12 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
 
       {/* S9.4: the ATS Form channel can be filled in the user's own Chrome. */}
       {hasAtsForm ? <AtsAssist applicationId={applicationId} /> : null}
+
+      {/* S11.2: a Session Board Offer is filled in the user's own signed-in
+          session; the user presses submit there. */}
+      {bar.session_board ? (
+        <SessionAssist applicationId={applicationId} board={bar.session_board} />
+      ) : null}
 
       <div className="flex flex-col gap-2">
         <h3 className="font-display text-base text-fg">{t("kit.title")}</h3>

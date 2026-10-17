@@ -187,38 +187,7 @@ pub fn weak_ack_key(source_id: &str) -> String {
     format!("session.weak_ack.{source_id}")
 }
 
-/// The `setting` key holding a Session Board Source's page loads for the local
-/// day `now` falls in (S11.1b: the daily cap is a local-day total).
-pub fn loads_key(source_id: &str, now: &str) -> String {
-    format!("session.loads.{source_id}.{}", local_day(now))
-}
-
-/// `YYYY-MM-DD` for `now` in the user's local day; UTC when `now` is unreadable.
-fn local_day(now: &str) -> String {
-    use time::format_description::well_known::Rfc3339;
-    let offset = time::Duration::minutes(i64::from(local_offset_minutes()));
-    match time::OffsetDateTime::parse(now, &Rfc3339) {
-        Ok(now) => {
-            let local = now + offset;
-            format!(
-                "{:04}-{:02}-{:02}",
-                local.year(),
-                u8::from(local.month()),
-                local.day()
-            )
-        }
-        Err(_) => "0000-00-00".to_string(),
-    }
-}
-
-/// The user's UTC offset in minutes, from the OS.
-fn local_offset_minutes() -> i32 {
-    i32::from(
-        time::UtcOffset::current_local_offset()
-            .unwrap_or(time::UtcOffset::UTC)
-            .whole_minutes(),
-    )
-}
+pub use boba_domain::session::loads_key;
 
 #[cfg(test)]
 mod tests {

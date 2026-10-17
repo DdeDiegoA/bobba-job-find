@@ -92,6 +92,10 @@ pub struct ManualView {
     pub pending: Vec<String>,
     /// Whether every draft in the package passed the attachable check (AD-14).
     pub ready: bool,
+    /// The Session Board this Offer's Source is (`linkedin`, `indeed`), when
+    /// Boba can fill its form in the user's own session (S11.2). `None` for
+    /// every other Source, so the apply bar knows whether to offer it.
+    pub session_board: Option<String>,
 }
 
 /// One PDF the command writes to disk for the user to attach by hand.
@@ -202,7 +206,20 @@ impl ManualService {
             answers,
             ready: gate.pending.is_empty(),
             pending: gate.pending,
+            // The board is a fact about the Source, not about this package:
+            // the bar offers the session fill before the documents are ready,
+            // and the fill itself re-checks Ready (S11.2).
+            session_board: crate::apply::session::SessionBoard::of_source(&offer.source_id)
+                .map(|board| board.as_str().to_string()),
         })
+    }
+
+    /// The package kinds that are not Ready and verified yet (AD-14).
+    ///
+    /// The same gate `view` reports, for a caller that only needs the answer —
+    /// the Session Board apply re-checks it on every step (S11.2).
+    pub fn pending(&self, application: &Application) -> Result<Vec<String>, ManualError> {
+        Ok(self.gate(application)?.pending)
     }
 
     /// The verified PDFs of the package, bytes and safe file names (AD-14).

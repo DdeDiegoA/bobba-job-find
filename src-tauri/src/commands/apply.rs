@@ -25,6 +25,9 @@ use boba_app::apply::outbox::{
 use boba_app::apply::rules::{
     self, AutoRulesService, DecisionView, RuleInput, RuleView, RulesError, RulesSnapshot,
 };
+use boba_app::apply::session::{
+    SessionApplyError, SessionApplyService, SessionApplyView, SessionFormPort, SessionOutcome,
+};
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::clock::ClockPort;
@@ -384,6 +387,106 @@ pub async fn apply_ats_confirm(
         ats_service(&app)?
             .confirm(&attempt_id, &application)
             .map_err(to_app_ats)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
+}
+
+// ---- Session Board apply, Review mode (S11.2, FR-91, AD-10) ------------------
+
+/// The Session Board apply service (S11.2): the session browser, the board
+/// opt-in, and the Kill Switch when S9.8's adapter is mounted.
+fn session_service(app: &tauri::AppHandle) -> AppResult<SessionApplyService> {
+    Ok(SessionApplyService::new(
+        wiring::port::<dyn ApplyRepo>(app)?,
+        wiring::port::<dyn DocumentsRepo>(app)?,
+        wiring::port::<dyn ProfileRepo>(app)?,
+        wiring::port::<dyn SourcesRepo>(app)?,
+        wiring::port::<dyn SystemRepo>(app)?,
+        wiring::port::<dyn SessionFormPort>(app)?,
+        std::sync::Arc::new(SystemClock),
+    )
+    // S9.8 mounted the switch: a locked store fails the command rather than
+    // silently skipping a safety check.
+    .with_kill_switch(Some(wiring::port::<dyn KillSwitchPort>(app)?)))
+}
+
+/// Map a Session Board apply failure onto the typed IPC error (AD-3).
+fn to_app_session(error: SessionApplyError) -> AppError {
+    let code = match &error {
+        SessionApplyError::NotSessionBoard(_)
+        | SessionApplyError::OptInRequired(_)
+        | SessionApplyError::OffBoard(_)
+        | SessionApplyError::NotReady(_) => ErrorCode::InvalidInput,
+        // A challenge or the Switch is a state, not bad input: the user
+        // resumes the Source or turns the Switch off and retries.
+        SessionApplyError::Paused(_) | SessionApplyError::KillSwitch => ErrorCode::Conflict,
+        SessionApplyError::UnknownAttempt(_) => ErrorCode::NotFound,
+        SessionApplyError::Tracker(TrackerError::Repo(ApplyRepoError::Conflict { .. })) => {
+            ErrorCode::Conflict
+        }
+        SessionApplyError::Browser(_) => ErrorCode::Unavailable,
+        _ => ErrorCode::Internal,
+    };
+    AppError::new(code, error.message_key())
+}
+
+/// Open the board's apply page in the user's session and fill the step on
+/// screen (AC1). Off the UI thread: launching Chrome and reading the page
+/// block, and the window the user takes over in must stay responsive.
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_session_start(
+    app: tauri::AppHandle,
+    application_id: String,
+) -> AppResult<SessionApplyView> {
+    let application_id = required_id(application_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, offer) = context(&app, &application_id)?;
+        session_service(&app)?
+            .start(&application, &offer)
+            .map_err(to_app_session)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
+}
+
+/// Fill the step the user advanced to, under the same attempt (AC1).
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_session_fill(
+    app: tauri::AppHandle,
+    application_id: String,
+    attempt_id: String,
+) -> AppResult<SessionApplyView> {
+    let application_id = required_id(application_id)?;
+    let attempt_id = required_id(attempt_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, _offer) = context(&app, &application_id)?;
+        session_service(&app)?
+            .fill(&attempt_id, &application)
+            .map_err(to_app_session)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
+}
+
+/// Read the page after the user submitted: evidence, Applied or Needs check
+/// (FR-88), exactly as the ATS channel records it.
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_session_confirm(
+    app: tauri::AppHandle,
+    application_id: String,
+    attempt_id: String,
+) -> AppResult<SessionOutcome> {
+    let application_id = required_id(application_id)?;
+    let attempt_id = required_id(attempt_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, _offer) = context(&app, &application_id)?;
+        session_service(&app)?
+            .confirm(&attempt_id, &application)
+            .map_err(to_app_session)
     })
     .await
     .map_err(|_| CommandError::Store.app_error())?

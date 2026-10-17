@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use boba_app::apply::engine::ApplyEngine;
+use boba_app::apply::session::SessionFormPort;
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::cli::CliInstallsPort;
@@ -137,6 +138,15 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
             None
         }
     };
+    // The Session Board apply browser (S11.2, AD-10): the user's own Chrome
+    // on that Source's session profile, headed, only when an apply starts.
+    match app.path().app_data_dir() {
+        Ok(data) => mount_port::<dyn SessionFormPort>(
+            app,
+            Arc::new(boba_browser::session_forms::SessionFormDriver::new(data)),
+        ),
+        Err(error) => tracing::error!(?error, "session form port left unmounted"),
+    }
     // The Session Board profiles (S11.1a, AD-10): one Chrome profile per
     // source, deleted by "Sign out / clear session".
     match app.path().app_data_dir() {

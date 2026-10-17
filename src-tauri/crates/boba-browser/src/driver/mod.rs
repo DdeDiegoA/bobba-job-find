@@ -220,7 +220,7 @@ fn valid_handle(handle: &str) -> bool {
 
 /// A file name that stays one name: no separator, no traversal, no surprise.
 /// The adapter writes what it is given, so it sanitizes rather than trusting.
-fn safe_file_name(file_name: &str) -> String {
+pub(crate) fn safe_file_name(file_name: &str) -> String {
     let name: String = file_name
         .chars()
         .map(|ch| {

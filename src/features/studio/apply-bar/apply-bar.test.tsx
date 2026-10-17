@@ -59,6 +59,7 @@ function view(overrides: Partial<ManualView> = {}): ManualView {
     ],
     pending: [],
     ready: true,
+    session_board: null,
     ...overrides,
   };
 }
