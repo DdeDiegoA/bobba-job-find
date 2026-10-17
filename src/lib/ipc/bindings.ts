@@ -266,6 +266,43 @@ export const commands = {
     typedError<SendReceipt, AppError_Serialize>(
       __TAURI_INVOKE("apply_email_send", { applicationId, request }),
     ),
+  /**
+   *  The application's answer bank: the drafts to look at and the approved rows
+   *  (S7.8 surface, S9.4).
+   */
+  applyAnswers: (applicationId: string) =>
+    typedError<AnswerBankView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_answers", { applicationId }),
+    ),
+  /**  Approve one drafted answer, edited or as it stands (S7.8 AC3). */
+  applyAnswerApprove: (applicationId: string, answerId: string, answer: string | null) =>
+    typedError<AnswerBankView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_answer_approve", { applicationId, answerId, answer }),
+    ),
+  /**  Whether the user has accepted the browser warning (AC1). */
+  applyAtsOptedIn: () =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("apply_ats_opted_in")),
+  /**  Turn browser assist on or off; the core records the consent (AC1, AD-12). */
+  applyAtsOptIn: (enabled: boolean) =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("apply_ats_opt_in", { enabled })),
+  /**
+   *  Open the ATS form in the user's own Chrome and fill it (AC1/AC2).
+   *
+   *  Off the UI thread: launching Chrome and reading the page block, and the
+   *  window the user needs to take over must stay responsive (S9.4 review F2).
+   */
+  applyAtsStart: (applicationId: string) =>
+    typedError<AtsSessionView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_ats_start", { applicationId }),
+    ),
+  /**
+   *  Read the page after the user submitted: evidence, Applied or Needs check
+   *  (AC3, FR-88). Off the UI thread, like `apply_ats_start` (S9.4 review F2).
+   */
+  applyAtsConfirm: (applicationId: string, attemptId: string) =>
+    typedError<AtsOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("apply_ats_confirm", { applicationId, attemptId }),
+    ),
 };
 
 /** Events */
@@ -275,6 +312,26 @@ export const events = {
 };
 
 /* Types */
+/**  An application's answer bank, oldest first. */
+export type AnswerBankView = {
+  application_id: string;
+  answers: AnswerView[];
+};
+
+/**  One screening answer as the approve panel shows it. */
+export type AnswerView = {
+  id: string;
+  question: string;
+  answer: string | null;
+  class: string;
+  needs_review: boolean;
+  /**
+   *  `false` while the row is still a draft (S7.8: only approval makes it
+   *  reusable).
+   */
+  approved: boolean;
+};
+
 /**
  *  A typed command error: `{code, message_key, details}`.
  *
@@ -353,6 +410,30 @@ export type ApplicationDetail = {
   timeline: StatusEventView[];
   created_at: string;
   updated_at: string;
+};
+
+/**  What a submission turned out to be (AC3). */
+export type AtsOutcome =
+  /**  The page confirmed it: evidence stored, the card is Applied. */
+  | { kind: "applied"; evidence: SubmissionEvidence }
+  /**
+   *  No confirmation was found: the attempt is recorded and the card stays,
+   *  marked Needs check from that outcome (FR-88).
+   */
+  | { kind: "needs_check"; screenshot_blake3: string };
+
+/**  The filled form handed to the user, and the window it lives in (AC1/AC2). */
+export type AtsSessionView = {
+  application_id: string;
+  /**  The attempt's correlation id, which `confirm` takes back (AC3). */
+  attempt_id: string;
+  url: string;
+  provider: string;
+  filled: FilledField[];
+  /**  Document kinds attached from the Package (`cv`, `cover_letter`). */
+  attached: string[];
+  unanswered: UnansweredField[];
+  handoff: Handoff | null;
 };
 
 /**  One reviewed attachment, as the view shows it. */
@@ -777,6 +858,13 @@ export type FactorView = {
   confidence: string;
 };
 
+/**  One field the core filled, as the user checks it before submitting (AC1). */
+export type FilledField = {
+  handle: string;
+  label: string;
+  kind: string;
+};
+
 /**
  *  One thing the fresh-context reviewer wants changed. `message` says what is
  *  wrong, `suggestion` what to do instead; both are the reviewer's words and are
@@ -835,6 +923,15 @@ export type GateView = {
   /**  The structured field the Gate read, when it read one instead of words. */
   field: string | null;
 };
+
+/**  One handoff, with the field that caused it when a field did. */
+export type Handoff = {
+  kind: HandoffKind;
+  label: string | null;
+};
+
+/**  Why automation stopped and the user took over (AC2). */
+export type HandoffKind = "captcha" | "login_wall" | "unknown_required" | "missing_document";
 
 /**  One screening answer the user approved, ready to copy (S7.8). */
 export type KitAnswerView = {
@@ -1328,6 +1425,12 @@ export type StudioView_Serialize = {
   cover: StudioDocument_Serialize | null;
 };
 
+/**  The evidence a confirmed submission keeps (AC3, FR-88). */
+export type SubmissionEvidence = {
+  confirmation_text: string;
+  screenshot_blake3: string;
+};
+
 /**  Terminal event for a long task, emitted as `task.finished`. */
 export type TaskFinished = {
   /**  Id of the task that ended. */
@@ -1427,6 +1530,13 @@ export type TransitionInput = {
   /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
   source: string;
   reason: string | null;
+};
+
+/**  One field the fill left alone, so the user can see what it skipped. */
+export type UnansweredField = {
+  label: string;
+  kind: string;
+  required: boolean;
 };
 
 /**  Whether the store is open or the unlock screen must act (AC2). */

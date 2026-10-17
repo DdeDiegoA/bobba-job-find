@@ -12,9 +12,13 @@
 use std::path::PathBuf;
 
 use boba_app::applications::TrackerError;
+use boba_app::apply::ats_form::{
+    AnswerBankView, AtsFormError, AtsFormService, AtsOutcome, AtsSessionView,
+};
 use boba_app::apply::engine::{ApplyEngine, EmailApplyView, EngineError, SendReceipt, SendRequest};
 use boba_app::apply::manual::{ManualError, ManualService, ManualView};
 use boba_app::error::{AppError, AppResult, ErrorCode};
+use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::mail::{MailError, MailPort};
 use boba_app::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use boba_app::ports::repo::documents::DocumentsRepo;
@@ -178,6 +182,19 @@ fn engine(app: &tauri::AppHandle) -> AppResult<ApplyEngine> {
     ))
 }
 
+/// The ATS Form assist service (S9.4): the browser port writes nothing to the
+/// store itself, and the audit owner records every attempt (AD-12).
+fn ats_service(app: &tauri::AppHandle) -> AppResult<AtsFormService> {
+    Ok(AtsFormService::new(
+        wiring::port::<dyn ApplyRepo>(app)?,
+        wiring::port::<dyn DocumentsRepo>(app)?,
+        wiring::port::<dyn ProfileRepo>(app)?,
+        wiring::port::<dyn BrowserPort>(app)?,
+        wiring::port::<dyn SystemRepo>(app)?,
+        std::sync::Arc::new(SystemClock),
+    ))
+}
+
 /// Map an Email Apply failure onto the typed IPC error (AD-3).
 fn email_error(error: EngineError) -> AppError {
     let code = match &error {
@@ -200,6 +217,30 @@ fn email_error(error: EngineError) -> AppError {
             ErrorCode::Internal
         }
         EngineError::Tracker(_) => ErrorCode::Internal,
+    };
+    AppError::new(code, error.message_key())
+}
+
+/// Map an ATS assist failure onto the typed IPC error (AD-3).
+fn to_app_ats(error: AtsFormError) -> AppError {
+    let code = match &error {
+        AtsFormError::NotAtsForm
+        | AtsFormError::OptInRequired
+        | AtsFormError::NotReady(_)
+        | AtsFormError::Answers(boba_app::answers::AnswersError::Edit(_)) => {
+            ErrorCode::InvalidInput
+        }
+        AtsFormError::UnknownAttempt(_) => ErrorCode::NotFound,
+        AtsFormError::Answers(boba_app::answers::AnswersError::UnknownApplication(_)) => {
+            ErrorCode::NotFound
+        }
+        AtsFormError::Answers(boba_app::answers::AnswersError::UnknownAnswer(_)) => {
+            ErrorCode::NotFound
+        }
+        AtsFormError::Tracker(TrackerError::Repo(ApplyRepoError::Conflict { .. })) => {
+            ErrorCode::Conflict
+        }
+        _ => ErrorCode::Internal,
     };
     AppError::new(code, error.message_key())
 }
@@ -239,6 +280,89 @@ pub async fn apply_email_send(
         .map_err(email_error)
 }
 
+/// The application's answer bank: the drafts to look at and the approved rows
+/// (S7.8 surface, S9.4).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_answers(app: tauri::AppHandle, application_id: String) -> AppResult<AnswerBankView> {
+    let application_id = required_id(application_id)?;
+    ats_service(&app)?
+        .answers(&application_id)
+        .map_err(to_app_ats)
+}
+
+/// Approve one drafted answer, edited or as it stands (S7.8 AC3).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_answer_approve(
+    app: tauri::AppHandle,
+    application_id: String,
+    answer_id: String,
+    answer: Option<String>,
+) -> AppResult<AnswerBankView> {
+    let application_id = required_id(application_id)?;
+    let answer_id = required_id(answer_id)?;
+    ats_service(&app)?
+        .approve(&application_id, &answer_id, answer.as_deref())
+        .map_err(to_app_ats)
+}
+
+/// Whether the user has accepted the browser warning (AC1).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_ats_opted_in(app: tauri::AppHandle) -> AppResult<bool> {
+    ats_service(&app)?.opted_in().map_err(to_app_ats)
+}
+
+/// Turn browser assist on or off; the core records the consent (AC1, AD-12).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_ats_opt_in(app: tauri::AppHandle, enabled: bool) -> AppResult<bool> {
+    ats_service(&app)?.set_opt_in(enabled).map_err(to_app_ats)
+}
+
+/// Open the ATS form in the user's own Chrome and fill it (AC1/AC2).
+///
+/// Off the UI thread: launching Chrome and reading the page block, and the
+/// window the user needs to take over must stay responsive (S9.4 review F2).
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_ats_start(
+    app: tauri::AppHandle,
+    application_id: String,
+) -> AppResult<AtsSessionView> {
+    let application_id = required_id(application_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, offer) = context(&app, &application_id)?;
+        ats_service(&app)?
+            .start(&application, &offer)
+            .map_err(to_app_ats)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
+}
+
+/// Read the page after the user submitted: evidence, Applied or Needs check
+/// (AC3, FR-88). Off the UI thread, like `apply_ats_start` (S9.4 review F2).
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_ats_confirm(
+    app: tauri::AppHandle,
+    application_id: String,
+    attempt_id: String,
+) -> AppResult<AtsOutcome> {
+    let application_id = required_id(application_id)?;
+    let attempt_id = required_id(attempt_id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (application, _offer) = context(&app, &application_id)?;
+        ats_service(&app)?
+            .confirm(&attempt_id, &application)
+            .map_err(to_app_ats)
+    })
+    .await
+    .map_err(|_| CommandError::Store.app_error())?
+}
+
 /// The folder one application's kit is written to, created on demand.
 fn kit_dir(app: &tauri::AppHandle, application_id: &str) -> AppResult<PathBuf> {
     let base = app
@@ -255,6 +379,24 @@ fn kit_dir(app: &tauri::AppHandle, application_id: &str) -> AppResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ats_errors_map_to_codes_and_i18n_keys() {
+        let mapped = to_app_ats(AtsFormError::OptInRequired);
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.apply.ats_opt_in");
+
+        let mapped = to_app_ats(AtsFormError::NotAtsForm);
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.apply.ats_not_a_form");
+
+        let mapped = to_app_ats(AtsFormError::UnknownAttempt("ats_x".into()));
+        assert_eq!(mapped.code, ErrorCode::NotFound);
+        assert_eq!(mapped.message_key, "errors.apply.ats_unknown_attempt");
+
+        let mapped = to_app_ats(AtsFormError::NotReady(vec!["cv".into()]));
+        assert_eq!(mapped.message_key, "errors.apply.not_ready");
+    }
 
     #[test]
     fn errors_map_to_codes_and_i18n_keys() {

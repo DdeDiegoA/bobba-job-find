@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { ChannelView, KitAnswerView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
+import AnswerApprovePanel from "./approve-panel";
+import AtsAssist from "./ats-assist";
 import EmailApplyPanel from "./email-apply";
 import { useApplyView, useExportPdfs, useMarkApplied } from "./use-apply-bar";
 
@@ -43,6 +45,7 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
   const applied = bar.status === "applied";
   const failure = mark.error ?? exported.error;
   const kinds = bar.pending.map((kind) => kindLabel(kind, t));
+  const hasAtsForm = bar.channels.some((channel) => channel.kind === "ats_form");
 
   const copy = async (answer: KitAnswerView, index: number) => {
     const clipboard = navigator.clipboard;
@@ -111,6 +114,9 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
         </p>
       ) : null}
 
+      {/* S9.4: the ATS Form channel can be filled in the user's own Chrome. */}
+      {hasAtsForm ? <AtsAssist applicationId={applicationId} /> : null}
+
       <div className="flex flex-col gap-2">
         <h3 className="font-display text-base text-fg">{t("kit.title")}</h3>
         <h3 className="text-xs font-medium uppercase text-fg-muted">{t("kit.documents")}</h3>
@@ -174,6 +180,9 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
           </ul>
         )}
       </div>
+
+      {/* S7.8 surfaced by S9.4: approve the drafts the next form will reuse. */}
+      <AnswerApprovePanel applicationId={applicationId} />
     </section>
   );
 }

@@ -42,6 +42,8 @@ boba-agent = { path = "crates/boba-agent" }
 boba-mcp-proto = { path = "crates/boba-mcp-proto" }
 # Email connections (S8.1): the Graph/OAuth adapter is mounted as a port here.
 boba-mail = { path = "crates/boba-mail" }
+# Browser automation (S9.4, AD-10): the ATS Form port drives the user's Chrome.
+boba-browser = { path = "crates/boba-browser" }
 # Manual intake (S4.7): the shared outbound HTTP client is mounted here.
 boba-sources = { path = "crates/boba-sources" }
 # Resolving a pasted URL and a redirect's `Location` (S4.7).

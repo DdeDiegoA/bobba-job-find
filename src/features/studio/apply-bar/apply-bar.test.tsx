@@ -26,6 +26,15 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyEmailReview: vi.fn(),
     applyEmailSend: vi.fn(),
     emailAccounts: vi.fn(),
+    // S9.4: the bar hosts the ATS assist and the answer approve panel.
+    applyAtsOptedIn: vi.fn(() => Promise.resolve({ status: "ok", data: false })),
+    applyAtsOptIn: vi.fn(),
+    applyAtsStart: vi.fn(),
+    applyAtsConfirm: vi.fn(),
+    applyAnswers: vi.fn(() =>
+      Promise.resolve({ status: "ok", data: { application_id: "app_1", answers: [] } }),
+    ),
+    applyAnswerApprove: vi.fn(),
   },
 }));
 

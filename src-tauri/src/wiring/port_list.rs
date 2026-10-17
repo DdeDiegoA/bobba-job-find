@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use boba_app::apply::engine::ApplyEngine;
 use boba_app::ports::agent::AgentPort;
+use boba_app::ports::browser::BrowserPort;
 use boba_app::ports::cli::CliInstallsPort;
 use boba_app::ports::mail::MailPort;
 use boba_app::ports::render::RenderPort;
@@ -32,7 +33,7 @@ use boba_mail::graph::GraphMail;
 use boba_store::db::Store;
 use boba_store::keys::SecretStore;
 use boba_store::repos::audit::SqliteSystemRepo;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 use super::{agent, keychain_service, mount_port};
 
@@ -101,6 +102,15 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // startup pass turns it `uncertain` — which the user's confirmation can
     // clear — and closes its audit intent as AD-12 prescribes.
     recover_interrupted_sends(app);
+    // The ATS Form browser (S9.4, AD-10): the user's own Chrome over CDP, on
+    // the Boba profile, launched only when an apply session starts.
+    match app.path().app_data_dir() {
+        Ok(data) => mount_port::<dyn BrowserPort>(
+            app,
+            Arc::new(boba_browser::driver::ChromeDriver::new(data)),
+        ),
+        Err(error) => tracing::error!(?error, "browser port left unmounted"),
+    }
     // slices append ONE line above this comment; never reorder/remove
 }
 

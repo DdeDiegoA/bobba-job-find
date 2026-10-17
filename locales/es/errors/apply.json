@@ -15,5 +15,11 @@
   "errors.apply.send_unreachable": "No se pudo alcanzar tu proveedor de correo, así que el correo no se envió. Revisa tu conexión e inténtalo de nuevo.",
   "errors.apply.send_rejected": "Tu proveedor de correo rechazó el mensaje. Revisa la dirección y tu cuenta, y vuelve a intentarlo.",
   "errors.apply.reauthorize": "Tu conexión de correo necesita autorizarse otra vez. Reconéctala e inténtalo de nuevo.",
-  "errors.apply.unknown_account": "Elige un buzón conectado para enviar."
+  "errors.apply.unknown_account": "Elige un buzón conectado para enviar.",
+  "errors.apply.ats_not_a_form": "Esta oferta no tiene un formulario que Boba pueda completar.",
+  "errors.apply.ats_opt_in": "Activa primero el llenado de formularios: Boba solo abre tu navegador después de que aceptes el aviso.",
+  "errors.apply.ats_unknown_attempt": "Ese envío ya no está pendiente de comprobación.",
+  "errors.apply.ats_unknown_answer": "Esa respuesta ya no está en el banco.",
+  "errors.apply.ats_answer_edit": "Esa respuesta editada no se puede guardar. Mantenla breve y con texto.",
+  "errors.apply.ats_browser": "Boba no pudo controlar el navegador. Comprueba que Chrome o Chromium esté instalado e inténtalo otra vez."
 }

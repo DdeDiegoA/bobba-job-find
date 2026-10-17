@@ -15,5 +15,11 @@
   "errors.apply.send_unreachable": "Your mail provider could not be reached, so the email was not sent. Check your connection and try again.",
   "errors.apply.send_rejected": "Your mail provider refused the message. Check the address and your account, then try again.",
   "errors.apply.reauthorize": "Your mail connection needs to be authorised again. Reconnect it and try again.",
-  "errors.apply.unknown_account": "Choose a connected mailbox to send from."
+  "errors.apply.unknown_account": "Choose a connected mailbox to send from.",
+  "errors.apply.ats_not_a_form": "This Offer has no form Boba can fill.",
+  "errors.apply.ats_opt_in": "Turn on form filling first — Boba only opens your browser after you accept the warning.",
+  "errors.apply.ats_unknown_attempt": "That submission is no longer waiting for a check.",
+  "errors.apply.ats_unknown_answer": "That answer is no longer in the bank.",
+  "errors.apply.ats_answer_edit": "That edited answer cannot be saved. Keep it short and non-empty.",
+  "errors.apply.ats_browser": "Boba could not drive the browser. Check that Chrome or Chromium is installed and try again."
 }

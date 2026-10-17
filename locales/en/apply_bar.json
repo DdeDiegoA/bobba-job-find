@@ -47,5 +47,30 @@
     "cv": "CV",
     "cover_letter": "cover letter"
   },
-  "failed": "That apply step did not go through."
+  "failed": "That apply step did not go through.",
+  "ats": {
+    "title": "Fill this form with Boba",
+    "opt_in_warning": "Boba opens your own Chrome in a separate window on a Boba profile and fills the form while you watch. It never presses submit, never solves a CAPTCHA and never signs in for you.",
+    "opt_in": "Turn on form filling",
+    "opt_out": "Turn off form filling",
+    "start": "Open and fill the form",
+    "filled": "Filled {count} fields and attached {documents}. Check the window, then press submit yourself.",
+    "handoff_captcha": "The page has a CAPTCHA. Boba stopped — finish the form in the window.",
+    "handoff_login_wall": "The page wants you to sign in. Boba stopped — sign in and finish in the window.",
+    "handoff_unknown": "Boba had no confident answer for “{label}”. Finish that field yourself.",
+    "handoff_missing_document": "Boba has no verified document to attach for “{label}”. Add it in the Studio, or attach it yourself.",
+    "confirm": "I submitted it",
+    "applied": "Confirmed: {text}",
+    "needs_check": "Boba could not find a confirmation. The card is marked Needs check — open it to verify.",
+    "failed": "That browser step did not go through."
+  },
+  "answers": {
+    "title": "Screening answers to approve",
+    "empty": "No answers waiting for you.",
+    "draft": "Draft",
+    "approved": "Approved",
+    "edit_hint": "Confirm it as it stands, or edit it and save.",
+    "save": "Approve answer",
+    "failed": "That answer could not be saved."
+  }
 }
