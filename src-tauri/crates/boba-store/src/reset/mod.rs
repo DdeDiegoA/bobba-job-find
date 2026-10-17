@@ -84,7 +84,9 @@ pub fn reset(
         conn.execute_batch("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;")
             .map_err(store_sql)?;
         let erased = crate::backup::drop_all_objects(conn)
-            .and_then(|()| crate::backup::replay_migrations(conn))
+            .and_then(|()| {
+                crate::backup::replay_migrations(conn, crate::migrate::embedded_files().len())
+            })
             .and_then(|()| {
                 conn.execute_batch(&format!(
                     "PRAGMA user_version = {};",

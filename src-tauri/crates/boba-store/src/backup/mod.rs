@@ -374,13 +374,14 @@ pub fn restore(store: &Store, src: &Path, passphrase: &str) -> Result<RestoreRep
     let source = src.to_path_buf();
     let snapshot_for_write = snapshot.clone();
     let passphrase = passphrase.to_string();
+    let backup_schema = meta.schema_version;
 
     store.execute(move |conn| {
         // The point of no return: the current database can always be brought
         // back from this file (same key, same directory as migration snapshots).
         conn.execute_batch(&format!("VACUUM INTO {}", quote_sql(&snapshot_for_write)))
             .map_err(|error| crate::db::StoreError::Sqlite(error.to_string()))?;
-        replace_contents(conn, &source, &passphrase)
+        replace_contents(conn, &source, &passphrase, backup_schema)
             .map_err(|error| crate::db::StoreError::Sqlite(format!("restore: {error}")))
     })?;
     let schema_to = latest_schema();
@@ -392,16 +393,23 @@ pub fn restore(store: &Store, src: &Path, passphrase: &str) -> Result<RestoreRep
 }
 
 /// Swap the contents of the open database for the backup's, in one transaction.
+///
+/// The backup is copied into **its own** schema first (migrations 1..=its
+/// `schema_version`), and only then are the newer migrations applied — so a
+/// data migration (a backfill such as 0018's `posting_lifecycle` seed) sees the
+/// rows it is meant to backfill.
 fn replace_contents(
     conn: &mut Connection,
     src: &Path,
     passphrase: &str,
+    backup_schema: u32,
 ) -> Result<(), BackupError> {
     // ATTACH cannot run inside a transaction, and the FK pragma is a no-op
-    // inside one, so both happen first.
+    // inside one, so both happen first. The backup is attached **read-only**
+    // (`mode=ro`): a restore never writes to the file it is restoring from.
     conn.prepare("ATTACH DATABASE ?1 AS bak KEY ?2")
         .map_err(sql)?
-        .execute(rusqlite::params![src.to_string_lossy(), passphrase])
+        .execute(rusqlite::params![readonly_uri(src), passphrase])
         .map_err(sql)?;
     conn.execute_batch("PRAGMA foreign_keys=OFF;")
         .map_err(sql)?;
@@ -409,8 +417,9 @@ fn replace_contents(
     let result = (|| -> Result<(), BackupError> {
         conn.execute_batch("BEGIN IMMEDIATE;").map_err(sql)?;
         drop_all_objects(conn)?;
-        replay_migrations(conn)?;
+        replay_migrations(conn, backup_schema as usize)?;
         copy_tables(conn)?;
+        replay_migrations_from(conn, backup_schema as usize)?;
         conn.execute_batch(&format!("PRAGMA user_version = {};", latest_schema()))
             .map_err(sql)?;
         conn.execute_batch("COMMIT;").map_err(sql)?;
@@ -421,6 +430,21 @@ fn replace_contents(
     }
     let _ = conn.execute_batch("PRAGMA foreign_keys=ON; DETACH DATABASE bak;");
     result
+}
+
+/// A `file:` URI that makes SQLite open `path` read-only.
+fn readonly_uri(path: &Path) -> String {
+    let encoded: String = path
+        .to_string_lossy()
+        .chars()
+        .map(|ch| match ch {
+            '%' => "%25".to_string(),
+            '?' => "%3F".to_string(),
+            '#' => "%23".to_string(),
+            other => other.to_string(),
+        })
+        .collect();
+    format!("file:{encoded}?mode=ro")
 }
 
 /// Drop every object the live database owns, so the migrations can rebuild the
@@ -446,9 +470,19 @@ pub(crate) fn drop_all_objects(conn: &Connection) -> Result<(), BackupError> {
     Ok(())
 }
 
-/// Rebuild the schema exactly as the shipped migrations do. Shared with `reset`.
-pub(crate) fn replay_migrations(conn: &Connection) -> Result<(), BackupError> {
-    for (_, migration) in crate::migrate::embedded_files() {
+/// Rebuild the schema exactly as the shipped migrations do, up to `upto`
+/// migrations (the backup's own schema). Shared with `reset`.
+pub(crate) fn replay_migrations(conn: &Connection, upto: usize) -> Result<(), BackupError> {
+    for (_, migration) in crate::migrate::embedded_files().iter().take(upto) {
+        conn.execute_batch(migration).map_err(sql)?;
+    }
+    Ok(())
+}
+
+/// Apply the migrations a backup predates, on top of its restored rows, so a
+/// data migration (a backfill) sees the real data.
+fn replay_migrations_from(conn: &Connection, from: usize) -> Result<(), BackupError> {
+    for (_, migration) in crate::migrate::embedded_files().iter().skip(from) {
         conn.execute_batch(migration).map_err(sql)?;
     }
     Ok(())
@@ -942,40 +976,49 @@ mod tests {
         );
     }
 
+    /// A database left at `schema` migrations, with `sql` rows in it, saved as
+    /// a passphrase-keyed backup `stable` in `dir`.
+    fn backup_at_schema(dir: &Path, name: &str, schema: usize, sql: &str) -> PathBuf {
+        let key = DbKey::generate().expect("key");
+        let source = dir.join(format!("{name}-source.db"));
+        let out = dir.join(format!("{name}.boba"));
+        let conn = Connection::open(&source).expect("open");
+        conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", key.hex().as_str()))
+            .expect("key");
+        for (_, migration) in crate::migrate::embedded_files().iter().take(schema) {
+            conn.execute_batch(migration).expect("partial migration");
+        }
+        conn.execute_batch(&format!("PRAGMA user_version = {schema}; {sql}"))
+            .expect("old rows");
+        conn.execute_batch(&format!(
+            "CREATE TABLE {META_TABLE} (
+                 format TEXT NOT NULL, app_version TEXT NOT NULL,
+                 schema_version INTEGER NOT NULL, created_at TEXT NOT NULL
+             ) STRICT;
+             INSERT INTO {META_TABLE} VALUES ('{FORMAT}', '0.0.1', {schema}, '2026-01-01T00:00:00Z');
+             PRAGMA rekey = 'old pass';"
+        ))
+        .expect("rekey");
+        drop(conn);
+        std::fs::rename(&source, &out).expect("into place");
+        out
+    }
+
     /// AC3: an older backup is migrated forward through the shipped migrations,
     /// keeping its rows and picking up the columns added since.
     #[test]
     fn an_older_backup_is_migrated_forward() {
         let dir = temp();
         let store = store(dir.path());
-        let old = dir.path().join("old.boba");
-
-        let key = DbKey::generate().expect("key");
-        let conn = Connection::open(dir.path().join("old-source.db")).expect("open");
-        conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", key.hex().as_str()))
-            .expect("key");
-        for (_, migration) in crate::migrate::embedded_files().iter().take(6) {
-            conn.execute_batch(migration).expect("partial migration");
-        }
-        conn.execute_batch(
-            "PRAGMA user_version = 6;
-             INSERT INTO setting (key, value, updated_at)
+        let old = backup_at_schema(
+            dir.path(),
+            "old",
+            6,
+            "INSERT INTO setting (key, value, updated_at)
                  VALUES ('old.row', 'from-6', '2026-01-01T00:00:00Z');
              INSERT INTO agent_run (id, task_kind, input_trust, cli, model, status, started_at)
                  VALUES ('01OLD', 'extract_postings', 'untrusted', 'claude', NULL, 'done', '2026-01-01T00:00:00Z');",
-        )
-        .expect("old rows");
-        conn.execute_batch(&format!(
-            "CREATE TABLE {META_TABLE} (
-                 format TEXT NOT NULL, app_version TEXT NOT NULL,
-                 schema_version INTEGER NOT NULL, created_at TEXT NOT NULL
-             ) STRICT;
-             INSERT INTO {META_TABLE} VALUES ('{FORMAT}', '0.0.1', 6, '2026-01-01T00:00:00Z');
-             PRAGMA rekey = 'old pass';"
-        ))
-        .expect("rekey");
-        drop(conn);
-        std::fs::rename(dir.path().join("old-source.db"), &old).expect("into place");
+        );
 
         let report = restore(&store, &old, "old pass").expect("restore");
         assert_eq!(report.meta.schema_version, 6);
@@ -1021,6 +1064,69 @@ mod tests {
             .expect("later table");
         assert_eq!(triage, 1, "the latest schema is in place");
     }
+
+    /// AC3 (review R-1): a data migration added after the backup must see the
+    /// restored rows. 0018 seeds `posting_lifecycle` from `posting`.
+    #[test]
+    fn a_backfill_migration_sees_the_restored_rows() {
+        let dir = temp();
+        let store = store(dir.path());
+        let old = backup_at_schema(
+            dir.path(),
+            "schema17",
+            17,
+            "INSERT INTO source
+                 (id, name, access_class, legal_tier, apply_capability,
+                  min_interval_ms, added_at, updated_at)
+             VALUES ('src', 'Test feed', 'rss', 'safe', 'none', 1000,
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO posting
+                 (id, source_id, external_id, title, company, work_mode,
+                  first_seen, last_seen, lang, apply_url)
+             VALUES ('01POST', 'src', 'ext', 'Backend engineer', 'Boba Co', 'remote',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'en',
+                     'https://example.com/jobs/1');",
+        );
+
+        restore(&store, &old, "old pass").expect("restore");
+
+        let lifecycle: i64 = store
+            .read(|conn| {
+                conn.query_row(
+                    "SELECT count(*) FROM posting_lifecycle WHERE posting_id = '01POST'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|e| crate::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("read");
+        assert_eq!(lifecycle, 1, "0018's backfill ran on the restored posting");
+    }
+
+    /// AC3 (review R-2): the backup is attached read-only, so restoring from a
+    /// file the user cannot write still works and leaves it byte-identical.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_backup_is_restored_without_writing_to_it() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = temp();
+        let store = store(dir.path());
+        let dest = dir.path().join("recovery.boba");
+        create(
+            &store,
+            &dest,
+            "correct horse battery",
+            "2026-10-17T09:00:00Z",
+        )
+        .expect("backup");
+        let before = std::fs::read(&dest).expect("read");
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o400)).expect("chmod");
+
+        restore(&store, &dest, "correct horse battery").expect("restore from a read-only file");
+        assert_eq!(std::fs::read(&dest).expect("read again"), before);
+    }
+
     #[test]
     fn a_refused_restore_leaves_the_current_data_untouched() {
         let dir = temp();
