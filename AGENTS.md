@@ -1,109 +1,179 @@
-# AGENTS.md — shared project context
+# AGENTS.md
 
-> Internal memory. ALL agents read this at startup. **Only the orquestador writes it** (workers only read). The orquestador updates it after worker reports.
+Boba Job Find is a local-first, free and open-source desktop app (Tauri v2 +
+Rust core + React UI). It runs a daily job search, ranks offers
+deterministically, tailors CVs and cover letters, and applies within the limits
+the user sets. No cloud, no accounts, no telemetry. It productizes
+https://github.com/MadsLorentzen/ai-job-search.
 
-Communication: talk to Diego and write all documents in **English**.
+All AI agents and contributors read this file first. Write code, docs and
+commits in **English**.
 
-## What this project is
-**Boba Job Find** — an open-source, local-first, cross-platform desktop app (Windows/macOS/Linux) that productizes https://github.com/MadsLorentzen/ai-job-search (manual: `/Users/diegoarenas/Downloads/ai-job-search-manual.md`). It onboards the user's job-board + email connections and personal profile, runs a daily search job, ranks every offer (fit vs requirements + offer quality), tailors CV/cover letter per application, and applies (human-in-the-loop or full auto, user-configurable).
+## Status
 
-## Locked product decisions (from user grilling, 2026-10-04)
+**v1 feature-complete (2026-10-17).** All 22 build waves are merged, plus the
+final QA pass (S10.6), the accessibility fixes (CH14) and the docs and linters
+(FD1–FD3, CH13). The release is not tagged yet: see "Release checklist" below.
 
-| Topic | Decision |
+## Start here
+
+| Need | Read |
 |---|---|
-| Audience / model | Personal use first, **free & open source**. No accounts, no billing. |
-| AI engine | **Agent CLI**: detect every agent CLI installed (Claude Code, Codex, OpenCode, Gemini CLI, Aider…), user picks CLI + model; ship a **specialized ai-job-search agent** (prompts/skills/tools) that runs on the chosen CLI. |
-| Apply automation | **Both modes**, configurable per source/score threshold: human-in-the-loop (review → send) and full auto-apply. |
-| Markets (MVP) | Global remote (EN), LATAM (ES), US/Canada, Europe + **user-defined custom sources** (RSS/URL/ATS board/custom adapter) where feasible. |
-| Non-API boards (LinkedIn, Indeed…) | **Both, per-source opt-in**: official/aggregator APIs + RSS + public ATS JSON by default; user-session browser automation behind explicit opt-in with ToS-risk warning. |
-| Data | **Local-only, encrypted**: SQLite (encrypted) + OS keychain for secrets; manual export/backup. No cloud. |
-| CV output | ATS-friendly PDF, DOCX export, multiple templates/themes, **bilingual ES/EN** auto-matched to offer language. |
-| Scheduler | In-app + **system tray** background run while logged in; native notifications with top matches. |
-| UI language | **EN + ES from day 1** (i18n built in). |
-| Brand | Name **Boba Job Find** (UX may propose refinements); no assets exist — UX proposes logo, palette, fonts. |
-| Aesthetic | **Playful-warm (boba)**: soft rounded shapes, warm tea/tapioca palette, friendly mascot, calm against job-search stress. |
-| Tone | **Encouraging coach**: warm, motivating, honest about fit. |
-| Theme | Light + dark, follow OS. |
-| Shell | **Tauri v2** (architect validates). User strengths: TypeScript/React, Python, Rust. |
-| Deliverable | Repo docs under `docs/` + a published visual overview page linking it all. |
-| Signing | Free OSS path first: macOS = one persistent self-signed cert (no ad-hoc, see ADR-009) + documented Gatekeeper bypass; Windows = SignPath Foundation; Apple Developer later. |
-| OAuth redirect | Loopback-only + PKCE S256 + single-use state; deep-link fallback removed (ADR/§17.1). |
-| OAuth | Bundled public desktop clients (PKCE, loopback) + BYO client-ID fallback. |
-| Gmail | MVP `gmail.send` only; reply parsing via MS Graph / IMAP / BYO client; CASA deferred. |
-| Embeddings | Optional opt-in local model download; deterministic scoring by default. |
-| Session-board auto-apply | **In MVP**, per-source opt-in with ToS/ban warning, caps, kill switch, audit log; executed by core, never by LLM tools. |
-| DB/Security | SQLCipher + keychain + boba-mcp shim approved; audit fixes all approved. |
-| macOS key safety | Every macOS build signed with ONE persistent self-signed cert (pinned DR) so Keychain survives updates. |
-| Prompt injection | Hard gate: untrusted-content tasks only on CLIs with verified tool lockdown; no override. |
-| Passphrase fallback | Unlock once per login, zeroized memory + idle timeout; locked → run skipped + notification. |
+| Architecture map, hexagon rules, seams, security invariants | `docs/contributing/ai-agents.md` |
+| Formatting, naming, commits | `docs/contributing/conventions.md` |
+| Decisions | `docs/architecture/ARCHITECTURE-SPINE.md` (AD-1..22), `docs/architecture/adr/` (ADR-001..017) |
+| Requirements | `docs/product/` (PRD, epics, backlog, slices) |
+| Security model + accepted residuals | `docs/security/security-model.md`, `docs/security/residuals.md` |
+| Design system and voice | `docs/design/DESIGN.md`, `docs/design/voice-and-tone.md` |
+| Users | `README.md`, `docs/user-guide/`, `docs/install/` |
+| Release | `docs/install/RELEASING.md`, `docs/qa/platforms.md`, `docs/qa/accessibility.md` |
+| Per-slice review history | `docs/reviews/` |
 
-## Stack (architect-approved)
+## Locked product decisions
 
-| Layer | Tech |
-|---|---|
-| Shell | Tauri v2, hexagonal modular monolith in Rust core |
-| UI | TypeScript + React, Tailwind v4 + shadcn, self-hosted fonts |
-| Engine | User-selected agent CLI ↔ app only via `boba-mcp` stdio shim (LLM proposes, core disposes) |
-| Scoring | Deterministic offline Fit + Quality (offer-scoring.md), optional embeddings |
-| Docs | Typst (PDF) + docx-rs (DOCX); no LaTeX |
-| Storage | SQLCipher via rusqlite + keyring-core |
-| Browser automation | chromiumoxide driving user's own Chrome (opt-in) |
-| Python sidecar | None |
-| Source of truth | `docs/architecture/ARCHITECTURE-SPINE.md` (AD-1..AD-22), `tech-stack.md`, `adr/` |
+- Personal use first; free and MIT-licensed; no accounts and no billing.
+- AI engine = the user's own agent CLI (Claude Code, Codex, OpenCode, Gemini CLI…), driving a specialized ai-job-search agent through `boba-mcp`.
+- Applying: human-in-the-loop review and full auto, configurable per source and score threshold.
+- Sources: official/aggregator APIs, RSS and public ATS JSON by default. Session-board browser automation only with a per-source opt-in that carries a ToS/ban warning.
+- Data: local-only and encrypted (SQLCipher + OS keychain). Manual export and backup.
+- CV output: ATS-friendly PDF (Typst) and DOCX, bilingual ES/EN. UI in EN + ES. Light and dark themes follow the OS.
+- Aesthetic: playful-warm boba; tone: encouraging coach.
 
-## Active personas (roster)
+## Build and test (the CI gate)
 
-- `orquestador` — routes phases + approves plans
-- `analyst` / `architect` / `pm` / `reader` — tab **producto**
-- `dev` — tab **desarrollo**
-- `reviewer` — tab **qa**
-- `ux` — tab **diseño**
+```sh
+pnpm install --frozen-lockfile --ignore-scripts   # run this BEFORE gen-bindings
+pnpm tauri dev                                     # app (dev builds use a separate keychain service + data dir)
+pnpm lint && pnpm typecheck && pnpm test           # web half of the gate (Biome, tsc, vitest)
+node scripts/check-i18n.mjs                        # en/es locale parity
+node scripts/ci/check-conventions.mjs              # repo conventions
+node scripts/ci/check-workflow-policy.mjs          # GitHub workflow policy
+node scripts/gen-bindings.mjs --check              # bindings up to date (run without --check after adding a command/event)
+CARGO_INCREMENTAL=0 cargo fmt --all --check
+CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets --locked -- -D warnings
+CARGO_INCREMENTAL=0 cargo test --workspace --locked
+cargo deny check
+```
 
-## Current phase
-**BUILD PHASE — MVP (started 2026-10-05) — RESUMED 2026-10-15: Diego's goal = run all remaining waves sequentially to v1, then cleanup + project docs + AI-agent docs (rules, linters).** Human gate passed. Backlog: `docs/product/backlog.md` (76 slices, 21 waves, ≤4 parallel devs; source `docs/product/slices.yaml`). Root `./stories.yaml` = current wave only (`python3 scripts/gen_backlog.py --wave N`). Sprint status: `_bmad-output/implementation-artifacts/sprint-status.yaml`.
+- A fresh worktree without `pnpm install` may write an empty bindings file; install first.
+- Optional pre-commit gate: `git config core.hooksPath .githooks`.
+- If `boba-mcp` tests fail with "Permission denied", delete `target/debug/boba-mcp` and rebuild.
+- Each `target/` is 6–12 GB. Keep `CARGO_INCREMENTAL=0` and clean worktrees you no longer use.
 
-Build rules (Diego, 2026-10-05):
-- Devs: from 2026-10-16 (Diego) new devs run on **claude-deepseek** (Claude Code CLI against DeepSeek's Anthropic-compatible API, model deepseek-flash[1m]; spawned via a pane with the ANTHROPIC_* env). Earlier: `opencode` DeepSeek V4.1 Flash. Branch `hermad/<story>` in a worktree per slice.
-- STANDING APPROVAL (Diego 2026-10-16): Diego pre-approves the orquestador's recommended option on every gate (security gates included). Run uninterrupted to v1; apply the recommended choice, log it in the wave log + journal as 'Diego standing OK (recommended)', and report at milestones. Still escalate only if no option is clearly safe/recommended.
-- Concurrency (Diego 2026-10-16; 2026-10-17 back to 3 after Diego freed disk): MAX 3 slices building in parallel (each worktree target is ~6-12G; pause one if free disk < 3G). Queue the rest; start the next when one merges. Reviewers gate inside the slice worktree, never in extra copies.
-- Review pairing (Diego 2026-10-15): one dedicated reviewer per dev (reviewer-N ↔ dev-N), reviewers run on Claude **Haiku** (`hermad spawn reviewer --name reviewer-N --kind claude --model haiku`). Fast, terse reviews. Avoid context rot: respawn devs+reviewers fresh each wave; short briefs.
-- Extra devs: the orquestador may ONLY add helper devs to support opencode when an opencode dev is consuming too much (stuck, looping, burning context/time). Those helpers run on Claude **Sonnet or Haiku** (`hermad spawn dev --name dev-<n> --kind claude --model sonnet|haiku`), never Opus. No other new agents for build work.
-- Human gate = SECURITY ONLY (Diego, 2026-10-05): orquestador merges every reviewer-approved slice without asking, EXCEPT security-sensitive ones, where it asks Diego first: S1.2b (unlock/passphrase), S1.7 (audit-log integrity), S2.3a/S2.3b (MCP sandbox, tool lockdown, untrusted content), S8.1/S8.2/S8.5 (OAuth/tokens), S10.5 (code signing), S11.1a/S11.1b/S11.2/S11.3 (session cookies/browser automation), and any new security exception (advisory ignores, crypto/key changes, permission/CSP loosening). Auto-apply (S9.6–9.8) and restore/reset (S10.2) are NOT gated.
-- STOP POINT lifted (Diego, 2026-10-15): run W5→W22 back-to-back; stop only for security gates, conflicts, failures. Clean up dev agents + worktrees after each wave.
-- Cadence: waves run back-to-back; report to Diego at walking skeleton (W2–W4) and at each completed epic. Stop only for gates, conflicts, failures.
-- IPC registration (AD-3, ruled 2026-10-05): add commands/events ONLY as one line in `src-tauri/src/ipc/command_list.rs` (union-merge); `ipc/mod.rs` is owned by S1.3 and never edited later; `registry.rs` retired.
-- `Cargo.lock` / lockfiles: never hand-merged — rebase onto main and regenerate; workspace deps append-only.
-- Port types (AD-14, ruled 2026-10-05): every type that crosses a port lives in `boba-domain` (document model moves to `boba_domain::documents` in S7.2).
-- Review gate (Diego, 2026-10-05): the reviewer runs the FULL CI gate (incl. `cargo deny check`) on every slice before approving; any new advisory ignore is a security gate.
-- Worktree discipline: devs edit/build/commit ONLY in `.hermad/worktrees/<story>`; never in the main checkout (S7.1 incident 2026-10-05).
-- Ownership conventions in backlog.md (module stubs, pinned deps, union-merge command registry, generated bindings, per-slice migrations/locale namespaces) are binding.
+## Architecture rules (short form)
 
-Wave log: W1 S1.1 ✅ merged (25ee138). W2: S1.2a ✅ c0b301e (Diego OK); S1.3 ✅ f3006a6; S1.8 ✅ 260706e. **Wave 2 complete.** W3: S1.3p ✅ b17e96b; S1.4 ✅ 6842927; S2.1 ✅ 639213d; S7.1 ✅ a83d2d1. **Wave 3 complete.** W4: S1.7 ✅ ba75df8 (Diego OK, residual accepted, ADR-011); S2.2 ✅ eafa3e6; S1.5 ✅ ae716cd; S4.1 ✅ 4abfd61. **All Wave 4 merged.** Full-gate verify of main: 12/13 pass; cargo deny red (6 typst-transitive advisories) → CH2 chore (dev-1, Diego: upgrade quick-xml, documented ignores for the rest). CH2 ✅ 9999bd8 (Diego OK: documented ignores, quick-xml upgrade blocked upstream). **WAVE 4 COMPLETE — STOPPED 2026-10-05 per Diego. Resume = generate Wave 5 (starts with S4.1c Send+Sync chore, S4.1h HttpClient hardening, S3.4…).** CH1 ✅ 32db67c (dev profile debuginfo trimmed). W5: S4.1c ✅ d743b20; ADR-012 ✅; CH4 ✅ 8c9cd1b (Diego OK); CH3 ✅ 919593b (Diego: unsafe-libyaml + scoped zip@4.6.1 ignores, 0BSD); S2.3a ✅ 5c93535 (Diego OK w/ residuals→S2.3b); S3.1 ✅ 6dc6eab; S3.4 ✅ fe69eeb; CH5 ✅ 37737b9 (Diego OK; untrusted runs fail-closed until S2.3b). **Wave 5 complete 2026-10-16.** W6: S3.7 ✅ fdbfcb4; S4.2 ✅ 3720ed5; S8.1 ✅ af4f3e4 (Diego standing OK); S2.3b ✅ 2f43555 (Diego standing OK; ruling (c)). **Wave 6 complete 2026-10-16.** W7: S6.1 ✅ 1ca19cd; S9.1 ✅ 7927c01; S2.4 ✅ 1061294 (per-run lockdown gate); S8.2 ✅ (Diego standing OK). Integration gate on main 1061294 green. **Wave 7 complete.** W8: S4.7 ✅ ba0d014; S7.2 ✅ 5f71d69; S1.2b ✅ edf3263 (Diego standing OK). **Wave 8 complete.** W9: S7.3 ✅ 10a78f4; S7.4 ✅ c83d71d; S7.5 ✅ 8823813. **Wave 9 complete.** W10: S7.6 ✅ 033ccf5; CH9 ✅ a35f656 (zip 4.6.1 RUSTSEC-2026-0367/0368/0369 ignores, Diego standing OK, revisit S10.5); S7.8 ✅ 67b9300 (app_id bound to run); S4.3 ✅ d47845f; S6.2 ✅ 3c61336; S6.3 ✅ 9e32b93 (AC4 reconciled to §9). **Wave 10 complete.** W11: S1.6 ✅ b672a24 (2 granted lib.rs delegation lines); S6.4 ✅ 76d29e2; S4.4 ✅ 0048285; S7.7 ✅ 7922672 (studio end-to-end; inline edits inherit taint; export of unverified drafts allowed with warning, send gated server-side in S9.2/S9.3). **Wave 11 complete.** W12: S4.5 ✅ 4ccfff7 (https-only ATS apply URLs); S5.1 ✅ a74f535 (locked store => skipped + notify); S9.2 ✅ ce925fe (server-side Ready+verified gate; empty-package mark_applied intended); S4.6 ✅ c6621a4 (https-only apply_url all sources + detail render guard; HttpClient::post hardened, secret-free errors). **Wave 12 complete.** W13: S3.2 ✅ 232a7e2 (CLI probe; re-probe before untrusted extraction); S9.3 ✅ 1362be2 (email apply, server-side Ready+verified gate); S6.5 ✅ 9575f6f; S9.4 ✅ 6a86f17 (real chromiumoxide driver on user's Chrome, opt-in, no auto-submit in review; owns answer-approval surface). Integration gate GREEN on 1362be2 (1183 rust / 210 vitest). **Wave 13 complete.** W14: S11.1a ✅ f36c53a (SECURITY, Diego standing OK; residuals -> S11.1b/S10.2); S3.5 ✅ f262fef (zip>=9 in-memory, bomb caps; PDF residual accepted); S9.6 ✅ 35264e6 (local-day caps; call sites -> S9.7); S4.8 ✅ 7835d47 (run wiring -> S5.2). **Wave 14 complete.** W15: S9.7 ✅ b7877f8 (decide()+spacing+Ready gate; R-4 kill switch mount -> S9.8); S5.2 ✅ feeab4f (run registry, scoring, N+1, top-matches notify); S11.1b ✅ b5b6f02 (SECURITY Diego standing OK; 30s pacing floor; R-a atomic cap, R-b URL without query); S6.6 ✅ 7c51b7b. **Wave 15 complete.** W16: S9.8 ✅ ff627da (kill switch mounted, all auto-send paths; closes S9.7 R-4); S10.2 ✅ 7032976 (encrypted backup, validated restore, reset wipes DB+keychain+browser sessions); S8.3 ✅ 449f729 (read-only Graph/IMAP readers, sink, email_sync job); S11.2 ✅ a25b346 (SECURITY Diego standing OK; shared daily page cap; residuals -> S11.3). **Wave 16 complete.** W17: S3.8 ✅ a861a21 (first-launch redirect, forced recovery backup, first run); S3.3 ✅ ef4863a (Limited mode = S2.4 gate); S2.5 ✅ 03d9192 (core-enforced budgets; rank before agent pass); S3.6 ✅ 3921563 (gap interview, <Gated>). **Wave 17 complete.** W18: S5.3 ✅ a38bbe4 (security notices always notify); S6.7 ✅ e7ec05b; S6.8 ✅ 35156ea (fraud badge blocks Auto on all decide() paths); S5.4 ✅ 728f632 (autostart opt-in, tray run controls). Integration gate GREEN 5c901f8 (W13-17). CH10 (event bus: dotted names illegal in Tauri 2.12) in progress. **Wave 18 complete.** W19: CH10 ✅ 89339f6 (event bus fixed: valid event names, validity test); S8.4 ✅ c274504 (reply proposals via lockdown gate); S6.9 ✅ 9ed586c (opt-in embeddings, checksum before load); S9.5 ✅ 5d3ce27 (duplicate guard on every apply path, nudges); CH11 ✅ a972745 (ammonia 4.2.4; zbus-family unmaintained ignores, Diego standing OK); S8.5 ✅ 0ae26ec (SECURITY Diego standing OK; BYO-only gmail.readonly, 401/429 handling). **Wave 19 complete.** W20: S9.9 ✅ 9afac9c; S10.1 ✅ 985a0d8 (no secrets in export); CH12 ✅ edac32a (hardening/test-stability batch); S10.4 ✅ f3c1d32 (observed network log at all choke points); S10.3 ✅ 1abaab7 (retention sweep, audit chain untouched). **Wave 20 complete. PAUSED 2026-10-17 per Diego (context compaction). Resume = integration gate on main, then W21 (S10.5, S11.3 — both SECURITY), W22 (S10.6), then cleanup + project docs + AI-agent docs.** Resumed 2026-10-17; integration gate GREEN e61de38 (2108 rust / 429 vitest). W21: S10.5 ✅ 229b1b6 (SECURITY Diego standing OK; minisign verify before extract, self-signed macOS pinned DR, keys in .hermad/keys gitignored -> Diego moves to CI secrets; residuals R1-R6); S11.3 ✅ 956c972 (SECURITY Diego standing OK; core-only enforcement, 3/day max 10, 10-min spacing, 60-min hold, 7-day challenge pause, 30-day re-confirm; no automatic board submit yet). **Wave 21 complete.**
-- Composition root (ADR-012, 2026-10-15): src-tauri/src/wiring/port_list.rs is union-merge; slices append one app.manage line per port and NEVER edit lib.rs. CH4 builds it; S1.2b later calls wiring::mount_ports after unlock.
-- CH5 (ruled 2026-10-15): agent runtime + sandbox wiring in src-tauri/src/wiring/ after CH4 + S2.3a merge; owner dev-2; security-gated (Diego). Wave 5 closes only after CH5.
-- S2.3a Diego OK 2026-10-15 with residuals → S2.3b MUST add: Windows named-pipe owner-only SDDL; sweep stale ipc/*.sock. macOS: 0700 dir is the protection (accepted).
-- i18n convention (CH7, 2026-10-16): core-emitted error keys errors.<area>.* live in locales/{en,es}/errors/<area>.json (one file per area, same key names); slices create/append their own area file without asking (a new area also needs one line in ERROR_FRAGMENTS, boba-app/src/i18n/mod.rs); never put errors.* in common.json.
-- S8.1 (2026-10-16, Diego standing OK): Graph scopes add offline_access (refresh tokens for daily runs); bundled Graph client id comes from build-time BOBA_GRAPH_CLIENT_ID — registering it is a release task (S10.5); BYO client id works meanwhile.
-- Untrusted-content gate (S2.3b+S2.4, DONE 2026-10-16): per run — CLI version must have a pinned lockdown config AND the run's own init event must list only mcp__boba__* tools, else abort (Unsupported) before any tool call; missing init event => fail closed. Claude: --strict-mcp-config --tools "" --allowedTools mcp__boba__*, stream-json. Aider refused (no MCP). Codex/OpenCode configured; untrusted only when their init event is verifiable.
-- Migrations (ruled 2026-10-16): slices.yaml migration numbers are advisory; a slice takes the next FREE number on main at rebase time (S2.4 took 0011; S7.2 must renumber).
-- Test hygiene (2026-10-16): tests never touch real user data — mock keychain only; never call wiring::store_config/mount/mount_with_key under tauri::test::mock_app() (it resolves app_data_dir to the real ~/Library/Application Support); use temp dirs.
-- Deferred (ruled 2026-10-15): first-launch redirect to /onboarding (S3.1 AC1) belongs to S3.8; routes.tsx stays S1.5-owned. 
-- Dispatch: orquestador creates worktrees by hand (git worktree add) + hermad spawn, max 4 live devs; plan-devs is not used (it ignores live devs and reuses names). Chore CH1 (dev-profile debuginfo) dev-1.
+- Hexagon: `boba-domain` (pure types and rules) → `boba-app` (use cases + ports) →
+  adapters (`boba-store`, `boba-sources`, `boba-agent`, `boba-mail`,
+  `boba-docs`, `boba-browser`, `boba-embed`) → `src-tauri` shell → `src` UI.
+- `boba-domain` depends only on serde, thiserror, time and ulid.
+  Adapters never depend on adapters. `boba-app` never depends on an adapter or on Tauri.
+- Only `boba-store` opens the SQLCipher database. Everything else goes through core use cases.
+- Every type that crosses a port lives in `boba-domain`.
+- Enforced by `src-tauri/tests/dependency_rules.rs`.
+- The agent CLI talks to the app only through the `boba-mcp` stdio shim: the LLM proposes, the core disposes.
 
-| Area | Docs | Status |
-|---|---|---|
-| Research | `docs/research/` (upstream-analysis, integrations, competitors, offer-scoring) | ✅ |
-| Product | `docs/product/` (product-brief, PRD, prd-addendum, epics-and-stories: 13 epics / 80 stories, E1–E11 MVP) | ✅ |
-| Design | `docs/design/` (brand, DESIGN.md, EXPERIENCE.md, voice-and-tone, preview.html, assets/) | ✅ |
-| Architecture | `docs/architecture/` (ARCHITECTURE-SPINE AD-1..22, architecture.md, tech-stack, adr/001–010) | ✅ |
-| Audit | `docs/reviews/planning-audit.md` — round 2 closed, 20/20 resolved | ✅ |
-| Overview | `docs/OVERVIEW.html` → https://claude.ai/artifact/BQPStgykq6EZoRVyxJo97V | ✅ |
+## The composition seams (ADR-012)
 
-Approval-gated stories (need Diego before merge): 1.2, 2.3, 8.1, 8.2, 8.5, 9.6–9.8, 10.5, 11.x.
+Add registration lines only where the repo says so:
 
-## Team rules
+- Commands and events: one line in `src-tauri/src/ipc/command_list.rs`.
+- Ports: one line in `src-tauri/src/wiring/port_list.rs`.
+- Window, tray and single-instance lifecycle hooks: extend `lifecycle::install`.
+- Never edit `src-tauri/src/lib.rs` or `src-tauri/src/ipc/mod.rs` to register
+  anything. The composition root and the specta builder live there and are
+  shared by every feature.
 
-- Approval policy: auto, except auth/money/DB/security → escalate to Diego.
-- Single writer to the repo; parallel stories → `git worktree`/branch.
-- Peer-to-peer allowed (reviewer→dev, pm→devs); the orquestador coordinates the top.
-- Only the orquestador writes this file.
+## Hard rules
+
+- Tauri event names use `:` between segments (`task:progressed`) and never a
+  dot; Tauri 2.12 rejects dotted names (ADR-017). Emit errors are logged, never swallowed.
+- The UI calls generated bindings, never `invoke()` directly. Never hand-edit
+  `src/lib/ipc/bindings.ts`; regenerate it.
+- Core error keys live in `locales/{en,es}/errors/<area>.json`, never in
+  `common.json`. A new area needs one line in `ERROR_FRAGMENTS`
+  (`boba-app/src/i18n/mod.rs`) (ADR-016). Every UI string ships in en + es.
+- Migrations (`boba-store/migrations/NNNN_name.sql`) are append-only, with
+  unique, contiguous numbers. Take the next free number at rebase time, and never
+  edit a shipped migration (ADR-015).
+- Tests never touch the real keychain, the real app-data directory or the
+  network. Use temp dirs, injected clocks and recorded fixtures. Never call
+  `wiring::store_config` or `wiring::mount*` under `tauri::test::mock_app()`:
+  it resolves to the real `~/Library/Application Support`.
+- Lockfiles (`Cargo.lock`, `pnpm-lock.yaml`) are never hand-merged: rebase and regenerate.
+- Workspace dependencies are append-only. Any new `deny.toml` advisory ignore is
+  a security change and needs a written reason.
+- Accessibility: every screen stays keyboard-operable and screen-reader-labelled,
+  and passes `e2e/a11y`. Text colours meet 4.5:1; `--fg-subtle` is tuned for that.
+
+## Security invariants
+
+Never weaken these. A change touching one needs explicit security review:
+
+- Untrusted-content runs need a CLI with a verified tool lockdown. The run's own
+  init event must list only `mcp__boba__*` tools, else it aborts. It fails
+  closed and has no override (ADR-010, ADR-014).
+- The LLM proposes, the core disposes. Applies are executed by the core, never by LLM tools.
+- Server-side Ready + verified gate before any send. `decide()`, the caps, the
+  spacing, the Outbox hold, the duplicate guard, the fraud badge and the kill
+  switch apply on every auto path, including session boards.
+- SQLCipher + OS keychain; passphrase fallback zeroized; locked store means the run is skipped and the user is notified.
+- OAuth: loopback + PKCE S256 + single-use state; least scopes.
+- A single outbound network policy (https only, observed network log). No secrets in logs, exports or audit URLs.
+- The audit chain uses its canonical form (ADR-011); retention never touches it.
+- Updates are minisign-verified before extraction. macOS builds are signed with the one pinned self-signed identity (ADR-009).
+
+Details: `docs/contributing/ai-agents.md`, `docs/security/security-model.md`.
+Accepted residuals: `docs/security/residuals.md`.
+
+## Style
+
+English everywhere. Biome for TS/JSON/CSS, rustfmt and clippy (workspace
+`[lints]`) for Rust. Commit subjects: `type(scope): imperative summary`.
+
+## Release checklist (owner: Diego)
+
+1. Move `.hermad/keys/` (the updater minisign key + password, and the macOS
+   signing identity) to GitHub secrets plus an offline backup. **Never delete
+   `.hermad/keys/`** before that. The steps are in `docs/install/RELEASING.md`.
+2. Register the bundled public MS Graph and Google OAuth clients, and set
+   `BOBA_GRAPH_CLIENT_ID`, `BOBA_GMAIL_CLIENT_ID` and `BOBA_GMAIL_CLIENT_SECRET` as CI secrets.
+3. Protect `v*` tags, or require a reviewer on the release environment.
+4. Run the manual QA on real hardware: the keyboard, VoiceOver, NVDA and 200% zoom
+   passes (`docs/qa/accessibility.md`), and the tray, notifications, autostart and
+   keychain checks on macOS, Windows and GNOME/KDE (`docs/qa/platforms.md`).
+5. Make the first tag a `-beta` pre-release (`release.yml` can't be exercised
+   locally), then set the CHANGELOG version.
+6. Apply to the SignPath Foundation (Windows signing). Apple Developer comes later.
+
+## Agent team workflow (Hermad)
+
+This repo was built by a Herdr/Hermad agent team: the `orquestador` routes the
+work; `analyst`, `architect`, `pm` and `reader` live in the `producto` tab;
+`dev` in `desarrollo`; `reviewer` in `qa`; `ux` in `diseño`. Rules that still apply
+to agent work:
+
+- Only the orquestador writes this file. Workers read it.
+- One slice = one worktree at `.hermad/worktrees/<id>`, on branch `hermad/<id>`.
+  Edit, build and commit only there, never in the main checkout.
+- Each dev is paired with one reviewer, who runs the full CI gate inside the slice
+  worktree and writes `docs/reviews/<id>.md`. The orquestador merges only
+  reviewer-approved branches (`--no-ff`).
+- Security-sensitive changes (auth, tokens, crypto/keys, sandbox and lockdown,
+  browser sessions, signing, advisory ignores, permission or CSP loosening) need
+  the human gate.
+- At most 3 slices build in parallel. Pause one if free disk drops below 3 GB.
+- Agents talk peer-to-peer (`hermad send <peer> "..."`) and emit
+  `HERMAD:DONE|BUG|STORIES_READY story=<id> n=<seq>` on its own line.
+
+## Build history (condensed)
+
+The full wave log with merge SHAs is in `git log --merges` and in
+`.hermad/memory/AGENTS-build-era.md` (local). The per-slice reviews are in `docs/reviews/`.
+
+- **W1–W4** (2026-10-05): scaffold, encrypted store, IPC, shell and UI kit, audit chain, agent runtime, sources foundation.
+- **W5–W8**: composition root (ADR-012), MCP sandbox and tool lockdown (S2.3a/b, S2.4), OAuth core (S8.1/S8.2), unlock and passphrase (S1.2b).
+- **W9–W12**: document studio (S7.x), scoring (S6.1–S6.4), source adapters (S4.x), scheduler (S5.1), server-side Ready + verified send gate (S9.2).
+- **W13–W16**: CLI probe, email and ATS apply, session-board foundation (S11.1a/b, S11.2), auto-apply policy, Outbox and kill switch (S9.6–S9.8), backup and restore (S10.2), mail readers (S8.3).
+- **W17–W20**: onboarding, Limited mode, budgets, gap interview, notifications, fraud badge, autostart, valid event names (CH10), embeddings opt-in, duplicate guard, BYO Gmail read (S8.5), data export, network log, retention.
+- **W21–W22** (2026-10-17): release pipeline, signing and updater (S10.5); session-board Auto with core-only limits (S11.3); accessibility and platform QA (S10.6).
+- **Final phase** (2026-10-17): architecture and security docs (FD1); README, CHANGELOG, user guide, CONTRIBUTING and SECURITY (FD2/FD3); cleanup, linters, `check-conventions` and AI-agent docs (CH13); accessibility fixes A11Y-1..8 (CH14).
