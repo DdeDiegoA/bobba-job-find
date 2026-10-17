@@ -632,8 +632,10 @@ impl StatusProposalsService {
         })
     }
 
-    /// Approve several proposals at once (AC2). A proposal that needs a pick,
-    /// or one whose card already moved, is reported rather than fatal.
+    /// Approve several proposals at once (AC2). Every item is tried: one that
+    /// needs a pick, one whose card already moved, or one the store cannot read
+    /// is reported in the outcome, never fatal — the items that already moved
+    /// must stay visible to the user.
     pub fn approve_many(&self, ids: &[String]) -> Result<BatchOutcome, StatusProposalsError> {
         let mut outcome = BatchOutcome::default();
         for id in ids {
@@ -642,14 +644,10 @@ impl StatusProposalsService {
                 Err(StatusProposalsError::NeedsApplication(_)) => {
                     outcome.needs_pick.push(id.clone());
                 }
-                Err(
-                    error @ (StatusProposalsError::Repo(_)
-                    | StatusProposalsError::Apply(_)
-                    | StatusProposalsError::Postings(_)
-                    | StatusProposalsError::Settings(_)
-                    | StatusProposalsError::Tracker(_)
-                    | StatusProposalsError::Run(_)),
-                ) => return Err(error),
+                // A failure is this item's, whatever its kind: the items that
+                // already moved stay reported (the user must see them), and the
+                // next one is still tried. Aborting here would hide a card that
+                // has already changed.
                 Err(_) => outcome.failed.push(id.clone()),
             }
         }

@@ -722,3 +722,52 @@ fn a_dismissed_proposal_moves_nothing() {
     let error = harness.service.approve(&id, None).unwrap_err();
     assert!(matches!(error, StatusProposalsError::NotPending(_)));
 }
+
+#[test]
+fn a_batch_keeps_the_moves_that_succeeded_when_one_fails() {
+    let harness = harness(FakeClassifier::scripted(vec![matched(
+        ReplyClass::InterviewInvite,
+        0.97,
+        "Interview next week.",
+    )]));
+    seed_application(&harness, AppStatus::Applied);
+    harness.service.classify(None, None).unwrap();
+    let valid = harness.service.proposals().unwrap()[0].id.clone();
+
+    // F1: the second item's row cannot be read (a store error). The old code
+    // returned that error and dropped the move that had already landed.
+    harness
+        .repo
+        .seed_message(message("msg_2", "recruiting@acme.com", "Update", "Text."));
+    harness
+        .repo
+        .proposal_insert(&StatusProposal {
+            id: "sp_broken".to_string(),
+            message_id: "msg_2".to_string(),
+            application_id: Some("app_1".to_string()),
+            from_status: Some("applied".to_string()),
+            to_status: "rejected".to_string(),
+            class: ReplyClass::Rejection,
+            confidence: 0.97,
+            quoted_line: "Text.".to_string(),
+            untrusted_origin: false,
+            state: ProposalState::Pending,
+            created_at: NOW.to_string(),
+            decided_at: None,
+        })
+        .unwrap();
+    harness.repo.fail_get_for("sp_broken");
+
+    let outcome = harness
+        .service
+        .approve_many(&[valid.clone(), "sp_broken".to_string()])
+        .unwrap();
+
+    // A broken item never hides the moves that did land.
+    assert_eq!(outcome.approved, vec![valid]);
+    assert_eq!(outcome.failed, vec!["sp_broken".to_string()]);
+    assert_eq!(
+        harness.apply.stored_status("app_1"),
+        Some(AppStatus::Interview)
+    );
+}

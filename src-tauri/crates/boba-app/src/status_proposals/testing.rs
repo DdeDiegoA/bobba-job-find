@@ -14,6 +14,8 @@ use super::repo::{Classification, StatusProposalRepo, StatusProposalRepoError, S
 #[derive(Default, Clone)]
 pub struct FakeStatusProposalRepo {
     state: Arc<Mutex<State>>,
+    /// One proposal id whose read fails, the way a broken row would (F1).
+    fail_get: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Default)]
@@ -37,6 +39,11 @@ impl FakeStatusProposalRepo {
     /// Every proposal written, oldest first (any state).
     pub fn proposals(&self) -> Vec<StatusProposal> {
         self.state.lock().unwrap().proposals.clone()
+    }
+
+    /// Make reading one proposal fail, as a store error would.
+    pub fn fail_get_for(&self, id: &str) {
+        *self.fail_get.lock().unwrap() = Some(id.to_string());
     }
 
     /// Force one proposal into a state, to simulate a card moved elsewhere.
@@ -126,6 +133,9 @@ impl StatusProposalRepo for FakeStatusProposalRepo {
     }
 
     fn proposal_get(&self, id: &str) -> Result<Option<StatusProposal>, StatusProposalRepoError> {
+        if self.fail_get.lock().unwrap().as_deref() == Some(id) {
+            return Err(StatusProposalRepoError("row unreadable".to_string()));
+        }
         Ok(self
             .state
             .lock()
