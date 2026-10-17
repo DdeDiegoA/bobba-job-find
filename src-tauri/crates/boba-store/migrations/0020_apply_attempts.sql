@@ -11,8 +11,9 @@
 -- keeps the recipient and the subject as metadata, plus the payload's blake3,
 -- which is also what the audit `intent` row names. `message_id` is Boba's id
 -- for the message: Microsoft Graph's `sendMail` answers 202 with no body, so
--- Boba assigns one when the attempt is recorded and the audit `outcome` names
--- it.
+-- Boba assigns one (`<id>@boba.local`, derived from the attempt id) when the
+-- attempt is recorded. The attempt id is the audit `intent`/`outcome`
+-- correlation, and the audit `outcome` names the message id.
 CREATE TABLE apply_attempt (
     id             TEXT PRIMARY KEY NOT NULL,
     application_id TEXT NOT NULL REFERENCES application (id) ON DELETE CASCADE,

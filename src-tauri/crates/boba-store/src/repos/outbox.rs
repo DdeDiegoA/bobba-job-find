@@ -7,9 +7,8 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use boba_app::apply::engine::outbox::{
-    ApplyAttempt, AttemptState, NewAttempt, OutboxRepo, OutboxRepoError,
-};
+use boba_app::ports::repo::outbox::{OutboxRepo, OutboxRepoError};
+use boba_domain::apply::attempt::{ApplyAttempt, AttemptState, NewAttempt};
 
 use crate::db::{Store, StoreError};
 

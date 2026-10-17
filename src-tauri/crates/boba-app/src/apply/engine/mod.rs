@@ -19,11 +19,10 @@
 //! audit outcome and the attempt row name. When a provider starts returning its
 //! own id, it replaces this value in [`SendReceipt::message_id`].
 
-pub mod outbox;
-
 use std::sync::Arc;
 
 use boba_domain::application::{AppStatus, Application};
+use boba_domain::apply::attempt::{ApplyAttempt, AttemptState, NewAttempt};
 use boba_domain::audit::{AuditOutcome, AuditRow};
 use boba_domain::posting::Offer;
 use serde::{Deserialize, Serialize};
@@ -38,10 +37,13 @@ use crate::ports::clock::ClockPort;
 use crate::ports::mail::{MailError, MailPort, OutgoingMessage};
 use crate::ports::repo::apply::ApplyRepo;
 use crate::ports::repo::documents::DocumentsRepo;
+use crate::ports::repo::outbox::OutboxRepo;
 use crate::ports::repo::profile::ProfileRepo;
 use crate::ports::repo::system::{NewIntent, SystemRepo, SystemRepoError};
 
-pub use outbox::{ApplyAttempt, AttemptState, NewAttempt, OutboxRepo, OutboxRepoError};
+/// Re-exported so the engine's neighbours (wiring, the store adapter) reach the
+/// port and its models through one path.
+pub use crate::ports::repo::outbox::OutboxRepoError;
 
 /// The audit action every email application writes (AD-12).
 pub const APPLY_ACTION: &str = "apply.submitted";
@@ -345,34 +347,34 @@ impl ApplyEngine {
 
     /// Reconcile the sends a crash interrupted (AC2, called once at startup).
     ///
-    /// A `pending` attempt means the process stopped between writing the row
-    /// and recording the send's result: nothing proves the message left, and
-    /// nothing proves it did not. It becomes `uncertain`, which the review
-    /// screen can clear with the user's confirmation, and its open audit
-    /// `intent` gets the `unknown_after_crash` outcome AD-12 prescribes. Returns
-    /// how many attempts were reconciled.
+    /// Two halves, in this order on purpose:
+    ///
+    /// * every open apply `intent` gets the `unknown_after_crash` outcome AD-12
+    ///   prescribes — nothing is in flight when the app starts, so an intent
+    ///   with no outcome is a send whose result was lost;
+    /// * every `pending` attempt becomes `uncertain`: nothing proves the
+    ///   message left, nothing proves it did not, and the review screen can
+    ///   clear it with the user's confirmation.
+    ///
+    /// The outcomes go first: a crash between the halves then leaves rows the
+    /// next startup still finds (it re-derives open intents from the audit log
+    /// and pending rows from the table, never one from the other). Returns how
+    /// many attempts were reconciled.
     pub fn recover(&self) -> Result<usize, EngineError> {
         let now = self.clock.now_rfc3339();
-        let interrupts = self.outbox.attempts_reconcile(&now)?;
-        if interrupts.is_empty() {
-            return Ok(0);
-        }
-        let ids: Vec<&str> = interrupts
-            .iter()
-            .map(|attempt| attempt.id.as_str())
-            .collect();
         for intent in self.system.audit_unresolved_intents()? {
-            if intent.action != APPLY_ACTION || !ids.contains(&intent.correlation_id.as_str()) {
+            if intent.action != APPLY_ACTION {
                 continue;
             }
             let detail = serde_json::json!({
-                "message_id": intent.correlation_id,
+                "attempt_id": intent.correlation_id,
+                "message_id": format!("<{}@boba.local>", intent.correlation_id),
                 "reason": "interrupted",
             })
             .to_string();
             self.outcome(&intent, AuditOutcome::UnknownAfterCrash, &detail, &now)?;
         }
-        Ok(interrupts.len())
+        Ok(self.outbox.attempts_reconcile(&now)?.len())
     }
 
     /// Mark the application Applied through the Tracker's one writer (AD-16),
@@ -1439,6 +1441,84 @@ mod tests {
         block_on(engine.send(&application, &posting, &confirmed)).unwrap();
         assert_eq!(harness.mail.sent().len(), 1);
         assert_eq!(harness.outbox.attempts()[1].state, AttemptState::Sent);
+    }
+
+    #[test]
+    fn recovery_closes_an_open_intent_even_when_its_row_was_already_flipped() {
+        let harness = harness(FakeMail::default());
+        let application = application();
+
+        // The shape a crash between recovery's two halves leaves: the intent is
+        // still open, and the attempt row is no longer pending.
+        harness
+            .system
+            .audit_append_intent(&NewIntent {
+                action: APPLY_ACTION.to_string(),
+                correlation_id: "att_crash".to_string(),
+                actor: "user".to_string(),
+                target_kind: "application".to_string(),
+                target_id: Some(application.id.clone()),
+                detail_json: "{}".to_string(),
+                payload_blake3: Some("deadbeef".to_string()),
+                created_at: NOW.to_string(),
+            })
+            .unwrap();
+        harness.outbox.seed(ApplyAttempt {
+            id: "att_crash".into(),
+            application_id: application.id.clone(),
+            channel: "email".into(),
+            account_id: "eml_1".into(),
+            recipient: "jobs@nimbus.example".into(),
+            subject: "Application: Backend Engineer".into(),
+            payload_blake3: "deadbeef".into(),
+            message_id: Some("<att_crash@boba.local>".into()),
+            state: AttemptState::Uncertain,
+            error: Some("unreachable".into()),
+            created_at: NOW.into(),
+            updated_at: NOW.into(),
+            sent_at: None,
+        });
+
+        let engine = engine(&harness);
+        assert_eq!(engine.recover().unwrap(), 0, "no pending row to flip");
+
+        let outcome = harness
+            .system
+            .rows()
+            .into_iter()
+            .find(|row| row.phase == AuditPhase::Outcome)
+            .expect("the open intent is closed anyway");
+        assert_eq!(outcome.outcome, Some(AuditOutcome::UnknownAfterCrash));
+        assert!(outcome.detail_json.contains("att_crash"));
+
+        // Idempotent: a second startup has nothing left to close.
+        let before = harness.system.rows().len();
+        assert_eq!(engine.recover().unwrap(), 0);
+        assert_eq!(harness.system.rows().len(), before);
+    }
+
+    #[test]
+    fn recovery_leaves_intents_of_other_areas_alone() {
+        let harness = harness(FakeMail::default());
+        harness
+            .system
+            .audit_append_intent(&NewIntent {
+                action: "source.fetch".to_string(),
+                correlation_id: "run_1".to_string(),
+                actor: "core".to_string(),
+                target_kind: "source".to_string(),
+                target_id: None,
+                detail_json: "{}".to_string(),
+                payload_blake3: None,
+                created_at: NOW.to_string(),
+            })
+            .unwrap();
+
+        assert_eq!(engine(&harness).recover().unwrap(), 0);
+        assert!(
+            harness.system.rows().len() == 1,
+            "an intent this engine did not open is not its outcome to write"
+        );
     }
 
     #[test]

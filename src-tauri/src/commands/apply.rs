@@ -12,7 +12,6 @@
 use std::path::PathBuf;
 
 use boba_app::applications::TrackerError;
-use boba_app::apply::engine::outbox::OutboxRepo;
 use boba_app::apply::engine::{ApplyEngine, EmailApplyView, EngineError, SendReceipt, SendRequest};
 use boba_app::apply::manual::{ManualError, ManualService, ManualView};
 use boba_app::error::{AppError, AppResult, ErrorCode};
@@ -20,6 +19,7 @@ use boba_app::ports::mail::{MailError, MailPort};
 use boba_app::ports::repo::apply::{ApplyRepo, ApplyRepoError};
 use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::outbox::OutboxRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;

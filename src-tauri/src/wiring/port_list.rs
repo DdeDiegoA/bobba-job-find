@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use boba_app::apply::engine::ApplyEngine;
-use boba_app::apply::engine::outbox::OutboxRepo;
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::cli::CliInstallsPort;
 use boba_app::ports::mail::MailPort;
@@ -21,6 +20,7 @@ use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::outbox::OutboxRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
