@@ -66,10 +66,15 @@ export function useExplain() {
       applicationId,
       channel,
       localMinute,
+      utcOffsetMinutes,
     }: {
       applicationId: string;
       channel: string;
       localMinute: number | null;
-    }) => commands.applyRulesExplain(applicationId, channel, localMinute).then(unwrap),
+      utcOffsetMinutes: number | null;
+    }) =>
+      commands
+        .applyRulesExplain(applicationId, channel, localMinute, utcOffsetMinutes)
+        .then(unwrap),
   });
 }

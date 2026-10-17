@@ -286,12 +286,7 @@ export default function SettingsApplyingRules() {
 
           <section className="flex flex-col gap-3 rounded-2xl border border-border p-4">
             <h2 className="font-medium text-fg">{t("settings.title")}</h2>
-            <p className="text-sm text-fg-muted">
-              {t("settings.spacing", {
-                min: snapshot.spacing_min_minutes,
-                max: snapshot.spacing_max_minutes,
-              })}
-            </p>
+            <p className="text-sm text-fg-muted">{t("settings.spacing")}</p>
             <div className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 text-sm text-fg-muted">
                 {t("settings.global_cap")}
@@ -399,6 +394,8 @@ export default function SettingsApplyingRules() {
                         applicationId,
                         channel,
                         localMinute: new Date().getHours() * 60 + new Date().getMinutes(),
+                        // Minutes east of UTC, the clock the caps count on.
+                        utcOffsetMinutes: -new Date().getTimezoneOffset(),
                       },
                       {
                         onSuccess: setDecision,

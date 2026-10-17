@@ -41,6 +41,10 @@ pub struct PolicyCandidate {
     pub source_auto_opt_in: bool,
     /// Minute of the user's local day, for the active hours (FR-83).
     pub local_minute: u16,
+    /// The user's offset from UTC in minutes (east positive). The caps count
+    /// the local day, so the ledger window starts at their local midnight —
+    /// the same clock the active hours use (S9.6 review F1).
+    pub utc_offset_minutes: i32,
 }
 
 /// What already went out, as the caps read it.
@@ -430,6 +434,7 @@ mod tests {
             cli_tool_lockdown: true,
             source_auto_opt_in: true,
             local_minute: 10 * 60,
+            utc_offset_minutes: 0,
         }
     }
 

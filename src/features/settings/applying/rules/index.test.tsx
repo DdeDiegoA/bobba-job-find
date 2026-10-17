@@ -51,8 +51,6 @@ const snapshot = (over: Partial<RulesSnapshot> = {}): RulesSnapshot => ({
   auto_enabled: false,
   auto_confirmed: false,
   global_daily_cap: 10,
-  spacing_min_minutes: 5,
-  spacing_max_minutes: 20,
   rules: [rule()],
   ...over,
 });

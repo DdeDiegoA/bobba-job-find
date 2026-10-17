@@ -434,8 +434,9 @@ pub fn apply_rules_reset(app: tauri::AppHandle) -> AppResult<RulesSnapshot> {
 /// list the screen shows verbatim; the send paths call the same use case
 /// in-process, so the preview and enforcement cannot drift.
 ///
-/// `local_minute` is the user's minute of day, sent by the UI because the
-/// active-hours window is local (FR-83); `None` reads the OS offset here.
+/// `local_minute` is the user's minute of day and `utc_offset_minutes` their
+/// offset from UTC, sent by the UI because the active hours and the daily caps
+/// are local (FR-83, S9.6 review F1); `None` reads the OS offset here.
 #[tauri::command]
 #[specta::specta]
 pub fn apply_rules_explain(
@@ -443,6 +444,7 @@ pub fn apply_rules_explain(
     application_id: String,
     channel: String,
     local_minute: Option<u16>,
+    utc_offset_minutes: Option<i32>,
 ) -> AppResult<DecisionView> {
     let application_id = required_id(application_id)?;
     let channel = RuleChannel::parse(&channel)
@@ -462,6 +464,7 @@ pub fn apply_rules_explain(
         .get_optin(&offer.source_id)
         .map_err(|_| CommandError::Store.app_error())?
         .is_some();
+    let offset = utc_offset_minutes.unwrap_or_else(rules::local_offset_minutes);
 
     let candidate = PolicyCandidate {
         source_id: offer.source_id.clone(),
@@ -495,8 +498,10 @@ pub fn apply_rules_explain(
         agent_used: false,
         cli_tool_lockdown: true,
         source_auto_opt_in: opt_in,
-        local_minute: local_minute
-            .unwrap_or_else(|| rules::local_minute(&ClockPort::now_rfc3339(&SystemClock))),
+        utc_offset_minutes: offset,
+        local_minute: local_minute.unwrap_or_else(|| {
+            rules::local_minute_at(&ClockPort::now_rfc3339(&SystemClock), offset)
+        }),
     };
     // The sample only drives the 5–20 minute gap (AC4); a preview never sends,
     // so the sample is deterministic here and the reason names the longest wait.

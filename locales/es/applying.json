@@ -69,7 +69,7 @@
   },
   "settings": {
     "title": "Topes y tiempos",
-    "spacing": "Los envíos automáticos se separan {min}–{max} minutos.",
+    "spacing": "Los envíos automáticos se separan 5–20 minutos, dentro del horario activo.",
     "global_cap": "Tope diario global",
     "save_cap": "Guardar tope",
     "reset": "Restablecer Aplicar a los valores por defecto",

@@ -2,7 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::pace::{MAX_GAP_MINUTES, MIN_GAP_MINUTES};
 use super::rule::{
     AutoRule, DEFAULT_DAILY_CAP, DEFAULT_PER_COMPANY_CAP, DEFAULT_PER_COMPANY_DAYS, MAX_DAILY_CAP,
 };
@@ -19,9 +18,6 @@ pub struct AutoSettings {
     pub confirmed_at: Option<String>,
     /// The cap across every rule, per day (default 10).
     pub global_daily_cap: u8,
-    /// The 5–20 minute spacing kept between two automatic submissions (AC4).
-    pub spacing_min_minutes: u32,
-    pub spacing_max_minutes: u32,
 }
 
 impl Default for AutoSettings {
@@ -30,8 +26,6 @@ impl Default for AutoSettings {
             auto_enabled: false,
             confirmed_at: None,
             global_daily_cap: DEFAULT_GLOBAL_DAILY_CAP,
-            spacing_min_minutes: MIN_GAP_MINUTES,
-            spacing_max_minutes: MAX_GAP_MINUTES,
         }
     }
 }
@@ -41,14 +35,6 @@ impl AutoSettings {
     pub fn validate(&self) -> Result<(), SettingsViolation> {
         if !(1..=MAX_DAILY_CAP).contains(&self.global_daily_cap) {
             return Err(SettingsViolation::GlobalCapOutOfRange);
-        }
-        let minimum = MIN_GAP_MINUTES;
-        let maximum = MAX_GAP_MINUTES;
-        if self.spacing_min_minutes < minimum
-            || self.spacing_max_minutes > maximum
-            || self.spacing_min_minutes > self.spacing_max_minutes
-        {
-            return Err(SettingsViolation::SpacingOutOfRange);
         }
         Ok(())
     }
@@ -95,8 +81,6 @@ pub fn reset_to_defaults(rules: &mut [AutoRule]) -> AutoSettings {
 pub enum SettingsViolation {
     #[error("the global daily cap must be between 1 and {MAX_DAILY_CAP}")]
     GlobalCapOutOfRange,
-    #[error("the spacing window must stay between 5 and 20 minutes")]
-    SpacingOutOfRange,
 }
 
 /// Why turning Auto on was refused (AC3).
@@ -110,7 +94,6 @@ pub enum EnableRefused {
 
 #[cfg(test)]
 mod tests {
-    use super::super::pace::{MAX_GAP_MINUTES, MIN_GAP_MINUTES};
     use super::super::rule::AutoRule;
     use super::*;
 
@@ -124,13 +107,11 @@ mod tests {
         assert!(!settings.auto_enabled, "FR-83: Auto is off until enabled");
         assert_eq!(settings.confirmed_at, None);
         assert_eq!(settings.global_daily_cap, DEFAULT_GLOBAL_DAILY_CAP);
-        assert_eq!(settings.spacing_min_minutes, MIN_GAP_MINUTES);
-        assert_eq!(settings.spacing_max_minutes, MAX_GAP_MINUTES);
         assert!(settings.validate().is_ok());
     }
 
     #[test]
-    fn the_global_cap_and_spacing_stay_in_their_ranges() {
+    fn the_global_cap_stays_in_its_range() {
         let mut settings = AutoSettings {
             global_daily_cap: 0,
             ..AutoSettings::default()
@@ -146,25 +127,6 @@ mod tests {
         );
         settings.global_daily_cap = MAX_DAILY_CAP;
         assert!(settings.validate().is_ok());
-
-        settings.spacing_min_minutes = 1;
-        assert_eq!(
-            settings.validate(),
-            Err(SettingsViolation::SpacingOutOfRange)
-        );
-        settings.spacing_min_minutes = MIN_GAP_MINUTES;
-        settings.spacing_max_minutes = MAX_GAP_MINUTES + 1;
-        assert_eq!(
-            settings.validate(),
-            Err(SettingsViolation::SpacingOutOfRange)
-        );
-        settings.spacing_max_minutes = 12;
-        settings.spacing_min_minutes = 18;
-        assert_eq!(
-            settings.validate(),
-            Err(SettingsViolation::SpacingOutOfRange),
-            "min must not exceed max"
-        );
     }
 
     #[test]
@@ -205,8 +167,6 @@ mod tests {
             auto_enabled: true,
             confirmed_at: Some("2026-10-17T01:00:00Z".into()),
             global_daily_cap: 22,
-            spacing_min_minutes: 12,
-            spacing_max_minutes: 18,
         };
         let mut rules = vec![rule()];
         rules[0].daily_cap = 25;

@@ -41,10 +41,6 @@ pub const AUTO_ENABLED_KEY: &str = "apply.auto.enabled";
 pub const AUTO_CONFIRMED_AT_KEY: &str = "apply.auto.confirmed_at";
 /// The cap across every rule (FR-83).
 pub const GLOBAL_DAILY_CAP_KEY: &str = "apply.auto.global_daily_cap";
-/// The shortest spacing between two automatic submissions (AC4).
-pub const SPACING_MIN_KEY: &str = "apply.auto.spacing_min_minutes";
-/// The longest spacing between two automatic submissions (AC4).
-pub const SPACING_MAX_KEY: &str = "apply.auto.spacing_max_minutes";
 
 /// Everything Settings → Applying shows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -53,8 +49,6 @@ pub struct RulesSnapshot {
     /// Whether the consequences dialog was ever accepted (AC3).
     pub auto_confirmed: bool,
     pub global_daily_cap: u8,
-    pub spacing_min_minutes: u32,
-    pub spacing_max_minutes: u32,
     pub rules: Vec<RuleView>,
 }
 
@@ -301,7 +295,13 @@ impl AutoRulesService {
         let settings = self.load_settings()?;
         let rules = self.rules.rules()?;
         let now = self.now()?;
-        let counts = self.counts(&rules, &candidate.company_key, &now, spacing_sample)?;
+        let counts = self.counts(
+            &rules,
+            &candidate.company_key,
+            &now,
+            candidate.utc_offset_minutes,
+            spacing_sample,
+        )?;
         Ok(decision_view(&policy::decide(
             &settings, &rules, candidate, &counts,
         )))
@@ -400,16 +400,6 @@ impl AutoRulesService {
             .setting_get(GLOBAL_DAILY_CAP_KEY)?
             .and_then(|v| v.parse::<u8>().ok())
             .unwrap_or(defaults.global_daily_cap);
-        let spacing_min = self
-            .system
-            .setting_get(SPACING_MIN_KEY)?
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(defaults.spacing_min_minutes);
-        let spacing_max = self
-            .system
-            .setting_get(SPACING_MAX_KEY)?
-            .and_then(|v| v.parse::<u32>().ok())
-            .unwrap_or(defaults.spacing_max_minutes);
 
         let settings = AutoSettings {
             // An enabled switch without a confirmation is not enabled: the
@@ -417,8 +407,6 @@ impl AutoRulesService {
             auto_enabled: enabled && confirmed_at.is_some(),
             confirmed_at,
             global_daily_cap,
-            spacing_min_minutes: spacing_min,
-            spacing_max_minutes: spacing_max,
         };
         if settings.validate().is_err() {
             // A stored row this build cannot honour never leaves Auto running
@@ -442,16 +430,6 @@ impl AutoRulesService {
             &settings.global_daily_cap.to_string(),
             now,
         )?;
-        self.system.setting_put(
-            SPACING_MIN_KEY,
-            &settings.spacing_min_minutes.to_string(),
-            now,
-        )?;
-        self.system.setting_put(
-            SPACING_MAX_KEY,
-            &settings.spacing_max_minutes.to_string(),
-            now,
-        )?;
         Ok(())
     }
 
@@ -465,9 +443,14 @@ impl AutoRulesService {
         rules: &[AutoRule],
         company_key: &str,
         now: &OffsetDateTime,
+        utc_offset_minutes: i32,
         spacing_sample: u64,
     ) -> Result<PolicyCounts, RulesError> {
-        let day_start = now.replace_time(time::Time::MIDNIGHT);
+        // The daily caps reset at the user's local midnight, the same clock the
+        // active hours use (S9.6 review F1): shift into local time, take the
+        // day's start there, and shift back for the UTC ledger.
+        let offset = time::Duration::minutes(i64::from(utc_offset_minutes));
+        let day_start = (*now + offset).replace_time(time::Time::MIDNIGHT) - offset;
         let global_today = self.rules.ledger_global_since(&format_time(day_start))?;
         let mut per_rule_today = Vec::with_capacity(rules.len());
         let mut per_company = Vec::with_capacity(rules.len());
@@ -506,8 +489,6 @@ fn snapshot(settings: &AutoSettings, rules: &[AutoRule]) -> RulesSnapshot {
         auto_enabled: settings.auto_enabled,
         auto_confirmed: settings.confirmed_at.is_some(),
         global_daily_cap: settings.global_daily_cap,
-        spacing_min_minutes: settings.spacing_min_minutes,
-        spacing_max_minutes: settings.spacing_max_minutes,
         rules: rules.iter().map(RuleView::from).collect(),
     }
 }
@@ -545,18 +526,33 @@ impl From<&Reason> for ReasonView {
     }
 }
 
-/// The minute of the user's local day at `now` (FR-83's active hours).
+/// The user's offset from UTC in minutes, east positive (FR-83).
 ///
 /// The offset comes from the OS, not from a timezone database, so DST is honest
 /// without a dependency; a process the platform will not report it to falls back
-/// to UTC rather than guessing a window.
-pub fn local_minute(now: &str) -> u16 {
+/// to UTC rather than guessing a window. The UI knows the offset first-hand and
+/// sends it, so this is only the fallback.
+pub fn local_offset_minutes() -> i32 {
+    i32::from(
+        time::UtcOffset::current_local_offset()
+            .unwrap_or(time::UtcOffset::UTC)
+            .whole_minutes(),
+    )
+}
+
+/// The minute of the user's local day at `now`, at `offset_minutes` from UTC
+/// (FR-83's active hours).
+pub fn local_minute_at(now: &str, offset_minutes: i32) -> u16 {
     let Ok(now) = OffsetDateTime::parse(now, &Rfc3339) else {
         return 0;
     };
-    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
-    let local = now.to_offset(offset);
+    let local = now + time::Duration::minutes(i64::from(offset_minutes));
     local.hour() as u16 * 60 + local.minute() as u16
+}
+
+/// The minute of the user's local day at `now`, with the OS offset (FR-83).
+pub fn local_minute(now: &str) -> u16 {
+    local_minute_at(now, local_offset_minutes())
 }
 
 fn truth(value: bool) -> &'static str {
@@ -608,6 +604,33 @@ mod tests {
                 ledger: Mutex::new(Vec::new()),
             }
         }
+
+        /// A rule plus the ledger rows already recorded (their `created_at`
+        /// decides which local day they fall in).
+        fn with_ledger(rule: AutoRule, created_at: &[&str]) -> Self {
+            Self {
+                rules: Mutex::new(vec![rule]),
+                ledger: Mutex::new(
+                    created_at
+                        .iter()
+                        .enumerate()
+                        .map(|(index, at)| AutoAttemptEntry {
+                            id: format!("aut_{index}"),
+                            rule_id: rule_for_ledger(),
+                            application_id: format!("app_{index}"),
+                            source_id: "remotive".into(),
+                            channel: RuleChannel::Email,
+                            company_key: "other".into(),
+                            created_at: (*at).into(),
+                        })
+                        .collect(),
+                ),
+            }
+        }
+    }
+
+    fn rule_for_ledger() -> String {
+        "rule_1".to_string()
     }
 
     impl AutoRulesRepo for FakeAutoRules {
@@ -733,6 +756,7 @@ mod tests {
             cli_tool_lockdown: true,
             source_auto_opt_in: true,
             local_minute: 10 * 60,
+            utc_offset_minutes: 0,
         }
     }
 
@@ -744,8 +768,6 @@ mod tests {
         assert!(!snapshot.auto_enabled);
         assert!(!snapshot.auto_confirmed);
         assert_eq!(snapshot.global_daily_cap, 10);
-        assert_eq!(snapshot.spacing_min_minutes, 5);
-        assert_eq!(snapshot.spacing_max_minutes, 20);
         assert!(snapshot.rules.is_empty());
     }
 
@@ -958,6 +980,50 @@ mod tests {
     }
 
     #[test]
+    fn the_daily_caps_reset_at_the_users_local_midnight() {
+        // 09:00Z at UTC+10:00 is 19:00 local on the 17th, so the local day
+        // began at 14:00Z on the 16th — six hours after UTC midnight.
+        let mut user = candidate();
+        user.utc_offset_minutes = 10 * 60;
+
+        // 20:00Z on the 16th (06:00 local on the 17th) is inside the local day
+        // that is running now: it must count against the rule's daily cap.
+        let mut capped = rule();
+        capped.daily_cap = 1;
+        let svc = service(
+            FakeAutoRules::with_ledger(capped.clone(), &["2026-10-16T20:00:00Z"]),
+            FakeSystemRepo::default(),
+        );
+        svc.set_enabled(true, true).unwrap();
+        let decision = svc.decide(&user, 0).unwrap();
+        assert!(
+            decision
+                .reasons
+                .iter()
+                .any(|reason| reason.code == "rule_daily_cap_reached"),
+            "reasons: {:?}",
+            decision.reasons
+        );
+
+        // 10:00Z on the 16th (20:00 local on the 16th) belongs to yesterday
+        // local: it must not count, although a UTC day would have kept it.
+        let svc = service(
+            FakeAutoRules::with_ledger(capped, &["2026-10-16T10:00:00Z"]),
+            FakeSystemRepo::default(),
+        );
+        svc.set_enabled(true, true).unwrap();
+        let decision = svc.decide(&user, 0).unwrap();
+        assert!(
+            !decision
+                .reasons
+                .iter()
+                .any(|reason| reason.code == "rule_daily_cap_reached"),
+            "reasons: {:?}",
+            decision.reasons
+        );
+    }
+
+    #[test]
     fn the_local_minute_is_inside_the_day() {
         let minute = local_minute(NOW);
         assert!(minute < 24 * 60, "got {minute}");
@@ -966,6 +1032,14 @@ mod tests {
             0,
             "an unreadable clock is minute 0"
         );
+    }
+
+    #[test]
+    fn the_local_minute_follows_the_given_offset() {
+        // East of UTC: 09:00Z is 19:00 local at +10:00.
+        assert_eq!(local_minute_at(NOW, 10 * 60), 19 * 60);
+        // West of UTC: 02:00Z is 21:00 local the day before at -05:00.
+        assert_eq!(local_minute_at("2026-10-17T02:00:00Z", -5 * 60), 21 * 60);
     }
 
     #[test]

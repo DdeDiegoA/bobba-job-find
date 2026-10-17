@@ -69,7 +69,7 @@
   },
   "settings": {
     "title": "Caps and timing",
-    "spacing": "Automatic sends are {min}–{max} minutes apart.",
+    "spacing": "Automatic sends are 5–20 minutes apart, inside the active hours.",
     "global_cap": "Global daily cap",
     "save_cap": "Save cap",
     "reset": "Reset Apply to defaults",
