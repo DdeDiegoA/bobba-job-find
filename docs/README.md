@@ -14,6 +14,8 @@ Start with the section that matches what you are doing.
 | Doc | What's in it |
 |---|---|
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Setup, the CI gate, conventions |
+| [contributing/conventions.md](contributing/conventions.md) | Detailed conventions and the convention checker |
+| [contributing/ai-agents.md](contributing/ai-agents.md) | Working on Boba with AI coding agents: rules and linters |
 | [install/RELEASING.md](install/RELEASING.md) | Release process (maintainers) |
 | [qa/](qa/) | Manual QA notes |
 
