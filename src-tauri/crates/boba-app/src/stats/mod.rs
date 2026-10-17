@@ -20,8 +20,6 @@
 //! erases an earlier reply.
 
 pub mod audit;
-#[cfg(test)]
-pub mod testing;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -338,6 +336,9 @@ impl Group {
 
 /// Verdict bands in score order; `unscored` (an Offer with no card) last.
 const BAND_ORDER: [&str; 6] = ["strong", "good", "moderate", "weak", "poor", UNSCORED];
+
+#[cfg(test)]
+pub mod testing;
 
 #[cfg(test)]
 mod tests {

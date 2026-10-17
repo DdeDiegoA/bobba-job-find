@@ -1,6 +1,6 @@
 {
   "audit.title": "Registro de auditoría",
-  "audit.intro": "Cada envío, decisión de Auto, evento del Kill Switch, opt-in y cambio de Etapa, del más nuevo al más antiguo. El registro está encadenado por hash; aquí no se puede editar nada.",
+  "audit.intro": "Cada envío, decisión de Auto, evento del Kill Switch, opt-in y cambio de Etapa, del más nuevo al más antiguo. Los envíos y los eventos del Kill Switch están encadenados por hash; los cambios de Etapa, las decisiones y los opt-ins se leen de los propios registros de la app.",
   "audit.loading": "Leyendo el registro…",
   "audit.error": "No se pudo leer el registro de auditoría.",
   "audit.empty": "Todavía no ha pasado nada.",

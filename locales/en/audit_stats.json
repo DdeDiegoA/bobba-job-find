@@ -1,6 +1,6 @@
 {
   "audit.title": "Audit Log",
-  "audit.intro": "Every send, Auto decision, Kill Switch event, opt-in and Stage change, newest first. The log is hash-chained; nothing here can be edited.",
+  "audit.intro": "Every send, Auto decision, Kill Switch event, opt-in and Stage change, newest first. Sends and Kill Switch events are hash-chained; Stage changes, decisions and opt-ins are read from the app's own records.",
   "audit.loading": "Reading the log…",
   "audit.error": "Could not read the audit log.",
   "audit.empty": "Nothing has happened yet.",

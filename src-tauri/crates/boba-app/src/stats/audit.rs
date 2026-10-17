@@ -26,10 +26,10 @@ use crate::ports::repo::outbox_hold::OutboxHoldRepo;
 use crate::ports::repo::sources::SourcesRepo;
 use crate::ports::repo::system::SystemRepo;
 
-/// How many outbox rows the viewer folds in. A hold lives minutes to a day, so
-/// the newest page is the whole useful history of the decision log; the audit
-/// rows themselves are never capped.
-pub const OUTBOX_LIMIT: usize = 500;
+/// `outbox_list`'s "no cap": the adapter converts the limit to `i64::MAX`, so
+/// every stored item comes back (AC-1: no decision may silently fall off the
+/// viewer or the CSV).
+const ALL_OUTBOX_ITEMS: usize = usize::MAX;
 
 /// What one timeline row is (the UI picks its icon and label from this).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -161,7 +161,7 @@ impl AuditLogService {
     /// Auto decisions that produced (or held back) an Outbox item, with the rule
     /// and the reason the item left the automatic path (FR-83/FR-85).
     fn outbox_entries(&self) -> Result<Vec<AuditEntry>, StatsError> {
-        let items = self.outbox.outbox_list(OUTBOX_LIMIT)?;
+        let items = self.outbox.outbox_list(ALL_OUTBOX_ITEMS)?;
         if items.is_empty() {
             return Ok(Vec::new());
         }
@@ -298,8 +298,19 @@ pub fn to_csv(entries: &[AuditEntry]) -> String {
     out
 }
 
+/// One RFC 4180 field, with a leading `'` on a value a spreadsheet would run
+/// as a formula (`=`, `+`, `-`, `@`, tab, CR): CSV injection is a real hole
+/// when a Source name or an outbox note can start with `=HYPERLINK(...)`.
 fn csv_field(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
+    let guarded = if matches!(
+        value.chars().next(),
+        Some('=' | '+' | '-' | '@' | '\t' | '\r')
+    ) {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    };
+    format!("\"{}\"", guarded.replace('"', "\"\""))
 }
 
 #[cfg(test)]
@@ -791,6 +802,18 @@ mod tests {
             added_at: NOW.to_string(),
             updated_at: NOW.to_string(),
         }
+    }
+
+    // M-2: a spreadsheet must never run a cell from a Source name or a note.
+    #[test]
+    fn csv_neutralises_formula_prefixes() {
+        for value in ["=HYPERLINK(\"x\")", "+1+1", "-2", "@cmd", "\tx", "\rx"] {
+            let field = csv_field(value);
+            assert!(field.starts_with("\"'"), "{value} → {field}");
+        }
+        assert_eq!(csv_field("plain"), "\"plain\"");
+        // A quote inside a guarded field is still doubled.
+        assert_eq!(csv_field("=A\"B"), "\"'=A\"\"B\"");
     }
 
     fn rule(id: &str, name: &str) -> boba_domain::apply::policy::AutoRule {
