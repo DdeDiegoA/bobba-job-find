@@ -896,49 +896,74 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
         let graph = GraphMail::new(Arc::clone(&secrets), Arc::clone(&accounts))
             .map_err(|error| error.to_string())?;
 
+        // S8.4 follow-up (orquestador): one connection's failure must not abort
+        // the others. Each account runs its own pass; the errors are collected
+        // and reported together after every account was tried.
+        let mut failures: Vec<String> = Vec::new();
         for account in connected {
-            let after = read_cursor(system.as_ref(), &account.id)?;
-            let since = after.unwrap_or_else(|| scope.cutoff(now));
-            let messages = match account.provider {
-                MailProvider::MicrosoftGraph => tauri::async_runtime::block_on(graph.fetch_inbox(
-                    &account.id,
-                    since,
-                    now,
-                    SYNC_READ_LIMIT,
-                ))
-                .map_err(|error| error.to_string())?,
-                MailProvider::ImapSmtp => {
-                    let stored = secrets
-                        .get(&account.secret_ref)
-                        .map_err(|_| "the keychain could not be read".to_string())?
-                        .ok_or_else(|| "the connection needs to be authorised again".to_string())?;
-                    let secret =
-                        ImapSmtpSecret::from_json(&stored).map_err(|error| error.to_string())?;
-                    tauri::async_runtime::block_on(boba_mail::imap::fetch_inbox(
-                        &secret.imap,
-                        &secret.credential,
-                        since,
-                        now,
-                        SYNC_READ_LIMIT,
-                    ))
-                    .map_err(|error| error.to_string())?
-                }
-                // Gmail's bundled client has no read scope; the BYO read lands
-                // with S8.5.
-                MailProvider::Gmail => continue,
-            };
-            sync_pass(
-                &account.id,
-                messages,
+            if let Err(error) = sync_account(
+                &account,
+                &graph,
+                secrets.as_ref(),
                 &scope,
                 now,
-                after,
                 sink.as_ref(),
                 system.as_ref(),
-            )?;
+            ) {
+                failures.push(format!("{}: {error}", account.id));
+            }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
     }
+}
+
+/// One connection's pass (S8.3/S8.4): fetch, filter and store; its `Err` is
+/// that account's, never the run's.
+#[allow(clippy::too_many_arguments)]
+fn sync_account(
+    account: &EmailAccount,
+    graph: &GraphMail,
+    secrets: &dyn SecretPort,
+    scope: &MessageScope,
+    now: i64,
+    sink: &dyn MessageSink,
+    system: &dyn SystemRepo,
+) -> Result<(), String> {
+    let after = read_cursor(system, &account.id)?;
+    let since = after.unwrap_or_else(|| scope.cutoff(now));
+    let messages = match account.provider {
+        MailProvider::MicrosoftGraph => tauri::async_runtime::block_on(graph.fetch_inbox(
+            &account.id,
+            since,
+            now,
+            SYNC_READ_LIMIT,
+        ))
+        .map_err(|error| error.to_string())?,
+        MailProvider::ImapSmtp => {
+            let stored = secrets
+                .get(&account.secret_ref)
+                .map_err(|_| "the keychain could not be read".to_string())?
+                .ok_or_else(|| "the connection needs to be authorised again".to_string())?;
+            let secret = ImapSmtpSecret::from_json(&stored).map_err(|error| error.to_string())?;
+            tauri::async_runtime::block_on(boba_mail::imap::fetch_inbox(
+                &secret.imap,
+                &secret.credential,
+                since,
+                now,
+                SYNC_READ_LIMIT,
+            ))
+            .map_err(|error| error.to_string())?
+        }
+        // Gmail's bundled client has no read scope; the BYO read lands with
+        // S8.5.
+        MailProvider::Gmail => return Ok(()),
+    };
+    sync_pass(&account.id, messages, scope, now, after, sink, system)?;
+    Ok(())
 }
 
 /// Run one connection's pass and persist its cursor. Split out so the wiring

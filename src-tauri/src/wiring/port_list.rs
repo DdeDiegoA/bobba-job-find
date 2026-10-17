@@ -192,6 +192,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The scoped mail sync (S8.3): registers the scheduler's `email_sync`
     // handler, which reads the read+send connections into the sink above.
     crate::commands::email::mount(app);
+    // The status-proposal owner keeps the reply verdicts and the proposals
+    // (S8.4): `email_classification` is no other area's table.
+    mount_port::<dyn boba_app::status_proposals::repo::StatusProposalRepo>(app, store.clone());
     // slices append ONE line above this comment; never reorder/remove
 }
 

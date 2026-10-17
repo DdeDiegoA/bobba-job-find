@@ -690,6 +690,51 @@ export const commands = {
   /**  Set launch at login over IPC (FR-44). */
   autostartSet: (enabled: boolean) =>
     typedError<AutostartStatus, AppError_Serialize>(__TAURI_INVOKE("autostart_set", { enabled })),
+  /**  What the disclosure screen shows (AC3, AC4). */
+  statusProposalsDisclosure: () =>
+    typedError<DisclosureView, AppError_Serialize>(__TAURI_INVOKE("status_proposals_disclosure")),
+  /**
+   *  Save the reply-reading choice (AC3). `acknowledge` records that the user saw
+   *  the plain-language disclosure.
+   */
+  statusProposalsSaveSettings: (mode: string, autoConfirm: boolean, acknowledge: boolean) =>
+    typedError<DisclosureView, AppError_Serialize>(
+      __TAURI_INVOKE("status_proposals_save_settings", { mode, autoConfirm, acknowledge }),
+    ),
+  /**
+   *  Classify every message no classifier has read yet (AC1, AC4).
+   *
+   *  The engine is the stored choice; when none is stored the uncertain cases
+   *  wait for manual triage rather than failing the pass.
+   */
+  statusProposalsClassify: () =>
+    typedError<ClassifyOutcome, AppError_Serialize>(__TAURI_INVOKE("status_proposals_classify")),
+  /**  Today's needs-you queue (AC2). */
+  statusProposalsPending: () =>
+    typedError<StatusProposalView[], AppError_Serialize>(
+      __TAURI_INVOKE("status_proposals_pending"),
+    ),
+  /**
+   *  Approve one proposal, moving its card (AC2). `application_id` is the user's
+   *  pick for an ambiguous match.
+   */
+  statusProposalsApprove: (proposalId: string, applicationId: string | null) =>
+    typedError<ApproveOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("status_proposals_approve", { proposalId, applicationId }),
+    ),
+  /**  Approve a batch; the ambiguous ones are reported, not applied (AC2). */
+  statusProposalsApproveMany: (proposalIds: string[]) =>
+    typedError<BatchOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("status_proposals_approve_many", { proposalIds }),
+    ),
+  /**  Dismiss a proposal: nothing moves (AC2). */
+  statusProposalsDismiss: (proposalId: string) =>
+    typedError<null, AppError_Serialize>(
+      __TAURI_INVOKE("status_proposals_dismiss", { proposalId }),
+    ),
+  /**  Undo an automatically applied proposal (AC5). */
+  statusProposalsUndo: (proposalId: string) =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("status_proposals_undo", { proposalId })),
 };
 
 /** Events */
@@ -802,6 +847,14 @@ export type ApplicationDetail = {
   updated_at: string;
 };
 
+/**  What one approval did (AC2). */
+export type ApproveOutcome = {
+  proposal_id: string;
+  application_id: string;
+  from_status: string;
+  to_status: string;
+};
+
 /**  What a submission turned out to be (AC3). */
 export type AtsOutcome =
   /**  The page confirmed it: evidence stored, the card is Applied. */
@@ -905,6 +958,19 @@ export type BadgeView = {
   source: BadgeSource | null;
 };
 
+/**  What a batch approval did (AC2: approve singly or in a batch). */
+export type BatchOutcome = {
+  /**  The proposals that moved their card. */
+  approved: string[];
+  /**  The proposals that need the user to pick an Application first. */
+  needs_pick: string[];
+  /**
+   *  The proposals that could not be approved (stale, unknown, already
+   *  decided, or the card already sat where the proposal points).
+   */
+  failed: string[];
+};
+
 /**  One column (AC1). The four terminal columns collapse in the UI (FR-93). */
 export type BoardColumn = {
   stage: string;
@@ -934,6 +1000,15 @@ export type BudgetSnapshot = {
   max_offers_per_run: number;
   /**  Every task's default per-task limits. */
   limits: TaskLimitView[];
+};
+
+/**  One Application a proposal may move (AC2). Only what the picker shows. */
+export type CandidateView = {
+  application_id: string;
+  company: string;
+  title: string;
+  /**  The stored status (`applied`, `interview`, …). */
+  status: string;
 };
 
 /**  What the UI gates on for this session (AC4). */
@@ -983,6 +1058,36 @@ export type ClaimView = {
   backed: boolean;
   /**  Fact ids the Profile does not have, each once (FR-74). */
   unknown_facts: string[];
+};
+
+/**  Which classifier runs after the rules (AC3, AC4). */
+export type ClassificationMode =
+  /**  The rules first, then the user's agent CLI for uncertain cases. */
+  | "llm"
+  /**  The rules only; nothing leaves the machine (NFR-3). */
+  | "deterministic";
+
+/**  What one classification pass did (AC1..AC5). */
+export type ClassifyOutcome = {
+  /**  Messages that had not been read before this pass. */
+  messages: number;
+  /**  Messages the rules classified. */
+  classified: number;
+  /**  Status Proposals created. */
+  proposals: number;
+  /**  Proposals auto-confirm applied (AC5). */
+  auto_applied: number;
+  /**  The auto-applied proposals, so the screen can offer Undo (AC5). */
+  auto_applied_ids: string[];
+  /**  Messages no classifier could place; they wait for manual triage (AC4). */
+  uncertain: number;
+  /**
+   *  LLM proposals the core refused (a quote not in the message, an unknown
+   *  application): the run's output is a proposal, never an instruction.
+   */
+  dropped: number;
+  /**  Whether the agent CLI was asked at all. */
+  llm_asked: boolean;
 };
 
 /**
@@ -1103,6 +1208,24 @@ export type DiffLine = {
   before: string | null;
   after: string | null;
   change: DiffChange;
+};
+
+/**  What Settings → Privacy and Today show about reply reading (AC3). */
+export type DisclosureView = {
+  /**  The classifier the user chose. */
+  mode: ClassificationMode;
+  /**  Whether the plain-language disclosure has been accepted. */
+  acknowledged: boolean;
+  /**
+   *  Whether high-confidence Acknowledgement/Rejection is applied
+   *  automatically (AC5). Off by default.
+   */
+  auto_confirm: boolean;
+  /**
+   *  True while the mode is LLM and the disclosure has not been accepted: the
+   *  first classification must show it before any text leaves the machine.
+   */
+  needs_disclosure: boolean;
 };
 
 /**  What a Dismiss (single or bulk) did (FR-66). */
@@ -2382,6 +2505,39 @@ export type StatusEventView = {
   /**  `user`, `status_proposal`, `apply_outcome` or `import`. */
   source: string;
   reason: string | null;
+  created_at: string;
+};
+
+/**
+ *  One proposal as Today's needs-you queue shows it (AC2).
+ *
+ *  `quoted_line` is always rendered as plain text (AC6, ADR-010): it is the
+ *  message's words, never markup.
+ */
+export type StatusProposalView = {
+  id: string;
+  /**  `acknowledgement`, `rejection`, `interview_invite`, `assessment`, `offer`. */
+  class: string;
+  confidence: number | null;
+  /**  The message line the class was read from, verbatim. Plain text only. */
+  quoted_line: string;
+  /**  ADR-010: `true` when the class or the quote came from the LLM. */
+  untrusted_origin: boolean;
+  message_id: string;
+  message_subject: string;
+  message_from: string;
+  received_at: string;
+  /**  The Application the proposal moves, when the message named one. */
+  application: CandidateView | null;
+  /**
+   *  The Applications the user may pick from (the matches, or every open
+   *  Application when nothing matched). Empty when `application` is set.
+   */
+  candidates: CandidateView[];
+  /**  Whether approving it needs the user to pick an Application first. */
+  needs_pick: boolean;
+  /**  The status the proposal moves the card to. */
+  to_status: string;
   created_at: string;
 };
 
