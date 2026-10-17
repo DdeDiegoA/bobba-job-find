@@ -241,6 +241,15 @@ export const commands = {
     typedError<EngineChoice, AppError_Serialize>(
       __TAURI_INVOKE("agent_engine_choose", { cli, model }),
     ),
+  /**
+   *  The per-run budget Settings → AI engine shows, with every task's limits
+   *  (FR-20, AC2).
+   */
+  agentBudgetSnapshot: () =>
+    typedError<BudgetSnapshot, AppError_Serialize>(__TAURI_INVOKE("agent_budget_snapshot")),
+  /**  Store the per-run offer budget (FR-20): the next Search Run reads it. */
+  agentBudgetSave: (offersPerRun: number) =>
+    typedError<number, AppError_Serialize>(__TAURI_INVOKE("agent_budget_save", { offersPerRun })),
   /**  Run the round-trip test on the picked CLI and model (FR-3). */
   agentTestCall: (cli: string, model: string | null) =>
     typedError<TestCallResult, AppError_Serialize>(
@@ -829,6 +838,19 @@ export type BoardColumn = {
 /**  The whole Tracker in one read (AC1). */
 export type BoardView = {
   columns: BoardColumn[];
+};
+
+/**
+ *  What Settings → AI engine reads: the user's per-run budget and the limits
+ *  every task starts with (FR-20, AC2).
+ */
+export type BudgetSnapshot = {
+  /**  Offers one Search Run may hand to the agent (default 30). */
+  offers_per_run: number;
+  /**  The sanity cap the core clamps to. */
+  max_offers_per_run: number;
+  /**  Every task's default per-task limits. */
+  limits: TaskLimitView[];
 };
 
 /**  What the UI gates on for this session (AC4). */
@@ -2290,6 +2312,18 @@ export type TaskFinished = {
   message_key: string | null;
 };
 
+/**
+ *  One task kind's default limits, as Settings → AI engine shows them
+ *  (architecture §5.4).
+ */
+export type TaskLimitView = {
+  /**  `AgentTaskKind::id`. */
+  task: string;
+  max_turns: number | null;
+  max_tool_calls: number | null;
+  wall_clock_secs: number | null;
+};
+
 /**  How a long task ended. */
 export type TaskOutcome =
   /**  Ran to completion. */
@@ -2341,6 +2375,14 @@ export type TestCallResult = {
   failure_reason: string | null;
   /**  The i18n key the step shows for that failure (AD-3). */
   message_key: string | null;
+  /**
+   *  Tokens the CLI reported, summed over the run (§6.3). `None` when it
+   *  reported none: the UI says "not reported", never a zero.
+   */
+  tokens_in: number | null;
+  tokens_out: number | null;
+  /**  USD the CLI reported, when it reports a cost at all. */
+  cost_usd: number | null;
 };
 
 /**  What an ATS reads back out of the rendered PDF (S7.6, FR-77). */
