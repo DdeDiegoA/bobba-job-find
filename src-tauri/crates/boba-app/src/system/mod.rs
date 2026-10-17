@@ -4,8 +4,10 @@ pub mod audit;
 pub mod clock;
 pub mod settings;
 
+// Test-only, like `profile::testing` and `applications::testing`: a slice that
+// exercises an audit-writing use case needs the in-memory chain.
 #[cfg(test)]
-mod testing;
+pub mod testing;
 
 pub use audit::{AuditService, IntentRequest, StartupReport, SystemError, TamperWarning};
 pub use clock::{FixedClock, SystemClock};

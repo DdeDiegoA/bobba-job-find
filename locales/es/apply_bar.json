@@ -47,5 +47,30 @@
     "cv": "CV",
     "cover_letter": "carta de presentación"
   },
-  "failed": "Ese paso de la postulación no se completó."
+  "failed": "Ese paso de la postulación no se completó.",
+  "ats": {
+    "title": "Completa este formulario con Boba",
+    "opt_in_warning": "Boba abre tu propio Chrome en una ventana aparte, con un perfil Boba, y completa el formulario mientras miras. Nunca envía, nunca resuelve un CAPTCHA y nunca inicia sesión por ti.",
+    "opt_in": "Activar el llenado de formularios",
+    "opt_out": "Desactivar el llenado de formularios",
+    "start": "Abrir y completar el formulario",
+    "filled": "Completé {count} campos y adjunté {documents}. Revisa la ventana y pulsa enviar tú.",
+    "handoff_captcha": "La página tiene un CAPTCHA. Boba se detuvo: termina el formulario en la ventana.",
+    "handoff_login_wall": "La página pide iniciar sesión. Boba se detuvo: inicia sesión y termina en la ventana.",
+    "handoff_unknown": "Boba no tiene una respuesta segura para «{label}». Completa ese campo tú.",
+    "handoff_missing_document": "Boba no tiene un documento verificado para adjuntar en «{label}». Añádelo en el Studio o adjúntalo tú.",
+    "confirm": "Ya lo envié",
+    "applied": "Confirmado: {text}",
+    "needs_check": "Boba no encontró una confirmación. La tarjeta queda como Revisar: ábrela para verificar.",
+    "failed": "Ese paso del navegador no se completó."
+  },
+  "answers": {
+    "title": "Respuestas de selección por aprobar",
+    "empty": "No hay respuestas esperando.",
+    "draft": "Borrador",
+    "approved": "Aprobada",
+    "edit_hint": "Confírmala tal como está o edítala y guárdala.",
+    "save": "Aprobar respuesta",
+    "failed": "Esa respuesta no se pudo guardar."
+  }
 }

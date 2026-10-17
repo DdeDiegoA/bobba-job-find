@@ -51,6 +51,12 @@ macro_rules! boba_commands {
             crate::commands::agent::agent_models,
             crate::commands::apply::apply_email_review,
             crate::commands::apply::apply_email_send,
+            crate::commands::apply::apply_answers,
+            crate::commands::apply::apply_answer_approve,
+            crate::commands::apply::apply_ats_opted_in,
+            crate::commands::apply::apply_ats_opt_in,
+            crate::commands::apply::apply_ats_start,
+            crate::commands::apply::apply_ats_confirm,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

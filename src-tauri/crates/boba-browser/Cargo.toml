@@ -11,4 +11,12 @@ publish = false
 boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The user's own Chrome over CDP (AD-10, S9.4): headed, no bundled Chromium
+# (the `fetcher` feature stays off). The handler runs on its own runtime, so
+# `BrowserPort` can stay a synchronous, testable surface.
+chromiumoxide = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+blake3 = { workspace = true }
