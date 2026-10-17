@@ -1,1 +1,9 @@
-{}
+{
+  "menu.open": "Open",
+  "menu.runNow": "Run now",
+  "menu.pauseSchedule": "Pause schedule",
+  "menu.killSwitch": "Kill Switch",
+  "menu.quit": "Quit",
+  "close.title": "Boba is still running",
+  "close.body": "We hid the window, not Boba. It keeps working from the tray — quit from the tray menu when you're done."
+}
