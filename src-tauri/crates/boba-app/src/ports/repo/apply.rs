@@ -36,6 +36,11 @@ pub trait ApplyRepo: Send + Sync {
     /// One application's history, oldest first (AC3 timeline).
     fn status_events(&self, application_id: &str) -> Result<Vec<StatusEvent>, ApplyRepoError>;
 
+    /// Every Stage change across all Applications, oldest first (CH12). The
+    /// Audit Log's read side needs the whole history at once; asking per
+    /// Application made it one query per row the board has ever held.
+    fn all_status_events(&self) -> Result<Vec<StatusEvent>, ApplyRepoError>;
+
     /// The documents this application holds, oldest version first (AC3: the
     /// Package the application carries, read through the documents owner).
     fn package(&self, application_id: &str) -> Result<Vec<PackageItem>, ApplyRepoError>;

@@ -26,6 +26,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     passWithNoTests: true,
+    // 5s (Vitest's default) flakes under parallel load (CH12): a jsdom render
+    // plus a React Query tick can exceed it on a busy machine.
+    testTimeout: 15_000,
     // Never scan tooling/agent dirs or the Rust tree.
     exclude: ["**/node_modules/**", "**/dist/**", "**/src-tauri/**", "**/.hermad/**"],
   },

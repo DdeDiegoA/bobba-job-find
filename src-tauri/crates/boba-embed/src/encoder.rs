@@ -159,12 +159,6 @@ pub const MODEL_FILES: &[(&str, &str)] = &[
 /// after the download rather than on every launch.
 const VERIFIED_MARKER: &str = "boba-verified";
 
-/// Verify the downloaded model against [`MODEL_REVISION`] and [`MODEL_FILES`]
-/// (the pinned checksum the opt-in promise rests on).
-///
-/// A cache that already carries the verified marker for this revision is
-/// trusted as-is; anything else is hashed file by file. A mismatch removes the
-/// model repo directory — a corrupt cache can never be used — and reports why.
 /// Fetch every file the model needs into the cache — raw bytes only, nothing
 /// parsed (reviewer-1 F2). `try_new` afterwards finds them cached and reads
 /// exactly the bytes [`verify_install`] hashed.
@@ -197,6 +191,12 @@ fn download_model_files(cache_root: &Path) -> Result<(), EmbeddingError> {
     Ok(())
 }
 
+/// Verify the downloaded model against [`MODEL_REVISION`] and [`MODEL_FILES`]
+/// (the pinned checksum the opt-in promise rests on).
+///
+/// A cache that already carries the verified marker for this revision is
+/// trusted as-is; anything else is hashed file by file. A mismatch removes the
+/// model repo directory — a corrupt cache can never be used — and reports why.
 fn verify_install(cache_root: &Path) -> Result<(), EmbeddingError> {
     let repo = cache_root.join(repo_dir());
     let marker = repo.join(VERIFIED_MARKER);

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { save } from "@tauri-apps/plugin-dialog";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { type AuditEntry, type AuditLogView, commands } from "@/lib/ipc/bindings";
+import { type AuditEntry, type AuditLogPage, commands } from "@/lib/ipc/bindings";
 import "@/lib/i18n";
 import SettingsPrivacyAudit from "./index";
 
@@ -32,8 +32,16 @@ function entry(over: Partial<AuditEntry> = {}): AuditEntry {
   };
 }
 
-function view(over: Partial<AuditLogView> = {}): AuditLogView {
-  return { entries: [], chain_intact: true, chain_rows: 0, broken_at: null, ...over };
+function view(over: Partial<AuditLogPage> = {}): AuditLogPage {
+  return {
+    entries: [],
+    next_cursor: null,
+    total: 0,
+    chain_intact: true,
+    chain_rows: 0,
+    broken_at: null,
+    ...over,
+  };
 }
 
 function renderPage() {
@@ -125,19 +133,41 @@ describe("Settings → Privacy → Audit Log (FR-89, SM-7)", () => {
     expect(await screen.findByText(/Written to \/home\/me\/boba-audit-log.csv/)).toBeTruthy();
   });
 
-  it("pages the log instead of rendering one wall of rows", async () => {
-    const entries = Array.from({ length: 60 }, (_, index) =>
+  // CH12: the core paginates, so the viewer asks for one page and then hands
+  // back the cursor it got — it never holds the whole log.
+  it("asks the core for one page at a time instead of the whole log", async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) =>
       entry({
         id: `row_${index}`,
         at: `2026-10-17T09:${String(index).padStart(2, "0")}:00.000Z`,
       }),
     );
-    vi.mocked(commands.auditLog).mockImplementation(() => ok(view({ chain_rows: 60, entries })));
+    vi.mocked(commands.auditLog).mockImplementation((cursor: string | null) =>
+      ok(
+        cursor === "row_49"
+          ? view({
+              entries: [entry({ id: "row_50" })],
+              total: 51,
+              chain_rows: 51,
+            })
+          : view({
+              entries: firstPage,
+              next_cursor: "row_49",
+              total: 51,
+              chain_rows: 51,
+            }),
+      ),
+    );
     renderPage();
 
     expect(await screen.findByText("Page 1 of 2")).toBeTruthy();
+    expect(commands.auditLog).toHaveBeenCalledWith(null, 50);
+
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByText("Page 2 of 2")).toBeTruthy();
+    expect(commands.auditLog).toHaveBeenCalledWith("row_49", 50);
+    // The header plus the one row of page 2 — the 50 rows of page 1 are gone.
+    expect(screen.getAllByRole("row")).toHaveLength(2);
   });
 
   it("does not call the core when the dialog is cancelled", async () => {

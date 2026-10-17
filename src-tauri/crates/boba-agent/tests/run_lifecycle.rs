@@ -281,11 +281,17 @@ fn cancellation_kills_and_records_cancelled() {
         spec(&[("BOBA_FAKE_MODE", "spawn-child")]),
     );
     let cancel: CancelToken = handle.cancel.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(150));
-        cancel.cancel();
-    });
-    let (run_id, events) = drain(handle);
+    // Cancel the moment the run says it started — no sleep, no guess (CH12).
+    let run_id = handle.run_id.clone();
+    let events: Vec<AgentEvent> = handle
+        .events
+        .iter()
+        .inspect(|event| {
+            if matches!(event, AgentEvent::Started { .. }) {
+                cancel.cancel();
+            }
+        })
+        .collect();
 
     assert!(matches!(
         events.last(),
@@ -363,7 +369,8 @@ fn auth_error_classifies_and_pauses_ai() {
 // closed. `reap()` used to leave the stderr reader racing the classification,
 // so a stderr that closes late (a grandchild still holding it) made an
 // auth-expired run come back `Unsupported` instead of `AuthExpired`. The hold
-// is well under `supervisor::STDERR_JOIN_GRACE`, so the reader still finishes.
+// is well under the supervisor's reader join grace, so the reader still
+// finishes.
 #[cfg(unix)]
 #[test]
 fn auth_error_is_classified_when_stderr_closes_late() {

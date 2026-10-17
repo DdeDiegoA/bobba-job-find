@@ -261,10 +261,11 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         thread::Builder::new()
             .name(format!("boba-agent-run-{run_id}"))
             .spawn(move || {
-                // Held for the whole run: dropping the sandbox deletes the
-                // workspace (AC1). The endpoint lives in the run state.
-                let _held = sandbox;
-                drive(state, cancel_for_thread, max_polls);
+                // The sandbox is held for the whole run and dropped inside
+                // `drive`, before the terminal event (AC1): once a caller has
+                // seen the run end, the workspace is already gone (CH12 — this
+                // used to be a race a test had to poll for).
+                drive(state, cancel_for_thread, max_polls, sandbox);
             })
             .expect("spawn run thread");
 
@@ -481,8 +482,17 @@ enum Outcome {
 }
 
 /// Drive one run to completion: spawn, drain, close the row, emit terminal.
-fn drive<R: AgentRepo>(mut state: RunState<R>, cancel: CancelToken, max_polls: Option<u64>) {
+fn drive<R: AgentRepo>(
+    mut state: RunState<R>,
+    cancel: CancelToken,
+    max_polls: Option<u64>,
+    workspace: Option<RunSandbox>,
+) {
     let outcome = run_process(&mut state, &cancel, max_polls);
+
+    // Before the terminal event: the run is over for the caller the moment it
+    // sees `Finished`/`Failed`, and a workspace must never outlive it (AC1).
+    drop(workspace);
 
     let (status, reason) = match &outcome {
         Outcome::Finished { .. } => (RunStatus::Finished, None),
@@ -961,17 +971,12 @@ mod tests {
             .nth(1)
             .expect("BOBA_RUN_TOKEN was not in the child's environment");
         assert_eq!(token.trim().len(), 64, "token: {token:?}");
-        // The workspace is deleted as the run's thread unwinds, just after the
-        // last event: wait for it rather than racing it.
-        let mut left = workspace.exists();
-        for _ in 0..200 {
-            if !left {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-            left = workspace.exists();
-        }
-        assert!(!left, "the workspace outlived the run: {workspace:?}");
+        // The workspace is deleted before the terminal event: once the event
+        // stream has ended, it is already gone — no polling, no race (CH12).
+        assert!(
+            !workspace.exists(),
+            "the workspace outlived the run: {workspace:?}"
+        );
 
         std::fs::remove_dir_all(root).ok();
     }

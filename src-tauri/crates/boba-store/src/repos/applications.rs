@@ -125,6 +125,18 @@ pub fn list_status_events(
         .map_err(store)
 }
 
+/// Every application's history, oldest first (CH12: one query, not one per
+/// application).
+pub fn list_all_status_events(conn: &Connection) -> Result<Vec<StatusEvent>, ApplyRepoError> {
+    let mut stmt = conn
+        .prepare(&format!("{EVENT_SELECT} ORDER BY created_at, id"))
+        .map_err(store)?;
+    stmt.query_map([], event_row)
+        .map_err(store)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(store)
+}
+
 /// The documents this application holds, through the documents owner (AD-16).
 pub fn list_package(
     conn: &Connection,
@@ -351,6 +363,11 @@ impl ApplyRepo for Store {
             .map_err(|e| ApplyRepoError::Store(e.to_string()))?
     }
 
+    fn all_status_events(&self) -> Result<Vec<StatusEvent>, ApplyRepoError> {
+        self.read(|conn| Ok(list_all_status_events(conn)))
+            .map_err(|e| ApplyRepoError::Store(e.to_string()))?
+    }
+
     fn package(&self, application_id: &str) -> Result<Vec<PackageItem>, ApplyRepoError> {
         let application_id = application_id.to_string();
         self.read(move |conn| Ok(list_package(conn, &application_id)))
@@ -553,6 +570,24 @@ mod tests {
         let events = list_status_events(&conn, "app_01").unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[1], event);
+    }
+
+    // CH12: the Audit Log's read side gets the whole history in one query, in
+    // the order it renders.
+    #[test]
+    fn every_history_is_read_in_one_query_in_order() {
+        let conn = connection();
+        create_application(&conn, &application(AppStatus::Saved), &birth_event()).expect("create");
+        let event = move_event(
+            "evt_02",
+            AppStatus::Saved,
+            AppStatus::Applied,
+            "2026-10-17T10:00:00Z",
+        );
+        append_status_event(&conn, &event).expect("move");
+
+        let all = list_all_status_events(&conn).unwrap();
+        assert_eq!(all, vec![birth_event(), event]);
     }
 
     #[test]

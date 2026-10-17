@@ -6,7 +6,7 @@ import type { AuditEntry } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { eventLabel, kindLabel, outcomeLabel } from "./labels";
 import { entrySummary } from "./summary";
-import { useAuditLog, useAuditLogExport } from "./use-audit-log";
+import { PAGE_SIZE, useAuditLog, useAuditLogExport } from "./use-audit-log";
 
 /**
  * Settings → Privacy → Audit Log (S9.9, FR-89, SM-7). Every send, Auto
@@ -16,18 +16,31 @@ import { useAuditLog, useAuditLogExport } from "./use-audit-log";
 export default function SettingsPrivacyAudit() {
   const { t, i18n } = useTranslation("audit_stats");
   const { t: tError } = useTranslation();
-  const audit = useAuditLog();
+  // The core paginates (CH12): the viewer keeps the cursor each page started
+  // at, and never holds more than one page of rows.
+  const [cursors, setCursors] = useState<(string | null)[]>([null]);
+  const [page, setPage] = useState(0);
+  const audit = useAuditLog(cursors[page] ?? null);
   const exported = useAuditLogExport();
   const [notice, setNotice] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
 
   const data = audit.data;
   const failure = audit.error ?? exported.error ?? null;
   const entries = data?.entries ?? [];
-  const pageCount = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil((data?.total ?? 0) / PAGE_SIZE));
   // A refetch can shrink the log; never strand the viewer on an empty page.
   const current = Math.min(page, pageCount - 1);
-  const shown = entries.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+
+  const next = () => {
+    const cursor = data?.next_cursor;
+    if (!cursor) return;
+    setCursors((stack) => {
+      const grown = [...stack];
+      grown[page + 1] = cursor;
+      return grown;
+    });
+    setPage(page + 1);
+  };
 
   const onExport = async () => {
     setNotice(null);
@@ -110,7 +123,7 @@ export default function SettingsPrivacyAudit() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((entry) => (
+                {entries.map((entry) => (
                   <Row
                     key={entry.id}
                     entry={entry}
@@ -134,11 +147,7 @@ export default function SettingsPrivacyAudit() {
               <span className="text-sm text-fg-muted">
                 {t("audit.page.status", { page: current + 1, pages: pageCount })}
               </span>
-              <Button
-                variant="ghost"
-                onClick={() => setPage(Math.min(pageCount - 1, current + 1))}
-                disabled={current >= pageCount - 1}
-              >
+              <Button variant="ghost" onClick={next} disabled={!data?.next_cursor}>
                 {t("audit.page.next")}
               </Button>
             </nav>
@@ -148,9 +157,6 @@ export default function SettingsPrivacyAudit() {
     </section>
   );
 }
-
-/** One page of the log: old rows stay one click away, never a wall of text. */
-const PAGE_SIZE = 50;
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 

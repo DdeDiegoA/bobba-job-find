@@ -42,6 +42,25 @@ use super::factors::{
 /// (AC3, FR-58) and the app re-scores when it changes.
 pub const MODEL_VERSION: u32 = 1;
 
+/// The model version of a card F3's on-device encoder took part in (S6.9,
+/// CH12). The embeddings opt-in is the user's and can flip at any time, and
+/// turning it on or off changes what the card contains — so a card scored
+/// without F3 must never answer for a run that has it, and vice versa.
+pub const MODEL_VERSION_WITH_EMBEDDINGS: u32 = 2;
+
+/// The model version to key a card by, given whether F3 contributed to it.
+///
+/// Both the pure [`score`] and the scoring use case (which looks the card up
+/// in the store) call this, so the card's own `model_version` and the key it
+/// was stored under can never disagree.
+pub const fn model_version(embeddings: bool) -> u32 {
+    if embeddings {
+        MODEL_VERSION_WITH_EMBEDDINGS
+    } else {
+        MODEL_VERSION
+    }
+}
+
 /// The band a Rank falls in (FR-57, `offer-scoring.md` §6's thresholds).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -251,7 +270,13 @@ pub fn card(
 pub fn score(inputs: &ScoreInputs<'_>) -> Option<ScoreCard> {
     let mut factors = fit_factors(inputs);
     factors.extend(quality_factors(inputs));
-    card(MODEL_VERSION, factors, &inputs.prefs.weights)
+    // The key follows the card: a run that had F3's similarity is a different
+    // model from one that did not (CH12).
+    card(
+        model_version(inputs.semantic.is_some()),
+        factors,
+        &inputs.prefs.weights,
+    )
 }
 
 /// A fresh ULID for a stored card, prefixed by type (AD-17: `sc_…`), so a
@@ -269,7 +294,8 @@ pub struct CardVersions {
     pub profile_version: u32,
     /// The Preferences version (FR-14, S3.7's `PreferencesSnapshot::version`).
     pub prefs_version: u32,
-    /// [`MODEL_VERSION`] at the time of scoring.
+    /// [`MODEL_VERSION`] (or [`MODEL_VERSION_WITH_EMBEDDINGS`] when F3 took
+    /// part) at the time of scoring — see [`model_version`].
     pub model_version: u32,
 }
 
@@ -337,7 +363,7 @@ mod tests {
     use crate::posting::WorkMode;
     use crate::posting_features::PostingFeatures;
     use crate::scoring::factors::testing::*;
-    use crate::scoring::factors::{MarketData, Prefs, ProfileSnapshot};
+    use crate::scoring::factors::{MarketData, Prefs, ProfileSnapshot, SemanticScore};
     use crate::scoring::gates::Verdict as GateVerdict;
 
     #[test]
@@ -413,6 +439,22 @@ mod tests {
         fixture.posting.description_text = String::new();
         fixture.posting.locations = Vec::new();
         assert_eq!(score(&fixture.inputs()), None);
+    }
+
+    // CH12/S6.9: turning F3's encoder on changes the card, so it is a
+    // different model — a card scored with it is keyed apart from one without.
+    #[test]
+    fn an_embeddings_card_is_keyed_apart_from_a_deterministic_one() {
+        let mut fixture = Fixture::section_9();
+        let without = score(&fixture.inputs()).expect("a card");
+        assert_eq!(without.model_version, MODEL_VERSION);
+
+        fixture.semantic = Some(SemanticScore::new(0.8).expect("a cosine"));
+        let with = score(&fixture.inputs()).expect("a card");
+        assert_eq!(with.model_version, MODEL_VERSION_WITH_EMBEDDINGS);
+        assert_ne!(with.model_version, without.model_version);
+        assert_eq!(model_version(false), MODEL_VERSION);
+        assert_eq!(model_version(true), MODEL_VERSION_WITH_EMBEDDINGS);
     }
 
     #[test]
