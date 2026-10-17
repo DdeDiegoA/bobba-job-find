@@ -24,4 +24,10 @@ typst-pdf = { workspace = true }
 # PDF this process just rendered — never on a user-supplied file.
 pdf-extract = { workspace = true }
 
+# DOCX export (S7.7, FR-78). The `image` feature is off on purpose: a document
+# Boba writes carries no picture, and turning it on would pull a decoder for
+# every user-supplied image format into the build (ADR-010: nothing here reads
+# a file a user or an agent handed us).
+docx-rs = { workspace = true, default-features = false }
+
 [dev-dependencies]

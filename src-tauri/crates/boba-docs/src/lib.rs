@@ -46,12 +46,29 @@ impl RenderPort for TypstRenderer {
 
     fn render_docx(
         &self,
-        _document: &DocumentModel,
-        _template: &TemplateId,
-        _locale: Lang,
+        document: &DocumentModel,
+        template: &TemplateId,
+        locale: Lang,
     ) -> Result<Vec<u8>, RenderError> {
-        // S7.7 fills this from `boba-docs/src/docx`.
-        Err(RenderError::Unsupported("docx export"))
+        // The DOCX writer makes the PDF renderer's checks itself (S7.7), so both
+        // formats refuse the same documents.
+        docx::render(document, template, locale).map_err(|error| match error {
+            docx::DocxError::UnknownTemplate(id) => RenderError::UnknownTemplate(id),
+            docx::DocxError::WrongTemplate { template, kind } => {
+                RenderError::WrongTemplate { template, kind }
+            }
+            docx::DocxError::UnsupportedSchema { version, expected } => {
+                RenderError::UnsupportedSchema { version, expected }
+            }
+            docx::DocxError::LocaleMismatch {
+                document,
+                requested,
+            } => RenderError::LocaleMismatch {
+                document,
+                requested,
+            },
+            docx::DocxError::Write(message) => RenderError::Render(message),
+        })
     }
 }
 
@@ -241,14 +258,40 @@ mod tests {
         );
     }
 
+    // AC2 (S7.7, FR-78): the same document exports as a DOCX, and the refusals
+    // are the ones the PDF render makes — the port reports them the same way, so
+    // a caller maps one error type for both formats.
     #[test]
-    fn docx_is_reported_unsupported_until_s7_7() {
+    fn docx_is_exported_and_refuses_what_the_pdf_refuses() {
         let document = DocumentModel::Cv(cv(Lang::En));
+        let bytes = port()
+            .render_docx(&document, &TemplateId::new("cv-classic"), Lang::En)
+            .expect("export");
+        assert!(bytes.starts_with(b"PK"), "a DOCX is a zip package");
+
         assert_eq!(
             port()
-                .render_docx(&document, &TemplateId::new("cv-classic"), Lang::En)
-                .expect_err("docx lands in S7.7"),
-            RenderError::Unsupported("docx export")
+                .render_docx(&document, &TemplateId::new("cover-classic"), Lang::En)
+                .expect_err("a cover template cannot export a CV"),
+            RenderError::WrongTemplate {
+                template: "cover-classic".into(),
+                kind: DocumentKind::Cv
+            }
+        );
+        assert_eq!(
+            port()
+                .render_docx(&document, &TemplateId::new("cv-classic"), Lang::Es)
+                .expect_err("mismatched locale"),
+            RenderError::LocaleMismatch {
+                document: Lang::En,
+                requested: Lang::Es
+            }
+        );
+        assert_eq!(
+            port()
+                .render_docx(&document, &TemplateId::new("nope"), Lang::En)
+                .expect_err("unknown template"),
+            RenderError::UnknownTemplate("nope".into())
         );
     }
 }

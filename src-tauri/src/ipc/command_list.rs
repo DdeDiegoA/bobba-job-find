@@ -34,6 +34,12 @@ macro_rules! boba_commands {
             crate::commands::unlock::unlock_status,
             crate::commands::unlock::unlock_retry_keychain,
             crate::commands::unlock::unlock_with_passphrase,
+            crate::commands::studio::studio_view,
+            crate::commands::studio::studio_edit,
+            crate::commands::studio::studio_render,
+            crate::commands::studio::studio_export_docx,
+            crate::commands::studio::studio_generate,
+            crate::commands::studio::studio_regenerate,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

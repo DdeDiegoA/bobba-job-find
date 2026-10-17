@@ -141,6 +141,51 @@ export const commands = {
     typedError<UnlockStatus_Serialize, AppError_Serialize>(
       __TAURI_INVOKE("unlock_with_passphrase", { passphrase }),
     ),
+  /**  The studio: both drafts with their trace, coverage, findings and checks. */
+  studioView: (applicationId: string) =>
+    typedError<StudioView_Serialize, AppError_Serialize>(
+      __TAURI_INVOKE("studio_view", { applicationId }),
+    ),
+  /**
+   *  Save one inline edit as a new draft version and re-run the checks (AC1).
+   *  Off the UI thread: the re-check renders a PDF.
+   */
+  studioEdit: (input: EditInput) =>
+    typedError<StudioView_Serialize, AppError_Serialize>(__TAURI_INVOKE("studio_edit", { input })),
+  /**
+   *  Render both drafts: fit, render, verify, and store the verdict (AC1). Off
+   *  the UI thread: Typst compiles two documents.
+   */
+  studioRender: (applicationId: string) =>
+    typedError<StudioView_Serialize, AppError_Serialize>(
+      __TAURI_INVOKE("studio_render", { applicationId }),
+    ),
+  /**  Export the newest draft of one kind as a DOCX (AC2). */
+  studioExportDocx: (applicationId: string, kind: StudioKind) =>
+    typedError<ExportedFile, AppError_Serialize>(
+      __TAURI_INVOKE("studio_export_docx", { applicationId, kind }),
+    ),
+  /**
+   *  Generate (or regenerate) the application's drafts: tailor, review, revise
+   *  (AC1, architecture §5.5). Runs off the UI thread: it waits for the CLI.
+   */
+  studioGenerate: (applicationId: string) =>
+    typedError<StudioView_Serialize, AppError_Serialize>(
+      __TAURI_INVOKE("studio_generate", { applicationId }),
+    ),
+  /**
+   *  Regenerate one section: run the generation flow, then copy that section of
+   *  the fresh draft into the version the user was reading (AC1).
+   */
+  studioRegenerate: (
+    applicationId: string,
+    kind: StudioKind,
+    section: number | null,
+    into: string,
+  ) =>
+    typedError<StudioView_Serialize, AppError_Serialize>(
+      __TAURI_INVOKE("studio_regenerate", { applicationId, kind, section, into }),
+    ),
 };
 
 /** Events */
@@ -261,6 +306,29 @@ export type BoardView = {
   columns: BoardColumn[];
 };
 
+/**  The checks one version of a draft must pass before it may be sent (AD-14). */
+export type ChecksView = {
+  /**  FR-74: every claim stands on a fact the Profile has. */
+  fabrication_ready: boolean;
+  layout: LayoutView;
+  text_layer: TextLayerView;
+  /**  The document is `verified`: layout, ATS and fabrication all pass. */
+  verified: boolean;
+  /**  The lines the fit removed to get the CV inside its budget. */
+  cut: CutView[];
+};
+
+/**  One claim of a draft with what backs it (FR-73/FR-74). */
+export type ClaimView = {
+  text: string;
+  fact_ids: string[];
+  facts: TraceFactView[];
+  /**  Whether the Profile backs every fact the claim names. */
+  backed: boolean;
+  /**  Fact ids the Profile does not have, each once (FR-74). */
+  unknown_facts: string[];
+};
+
 /**
  *  Where the OAuth client id came from (AC1: bundled public client, or the
  *  user's own).
@@ -350,6 +418,56 @@ export type ConnectionView = {
   connected_at: string;
 };
 
+/**  A line the fit removed, and why it went first (S7.5). */
+export type CutView = {
+  section: string | null;
+  text: string;
+  score: number | null;
+};
+
+/**  One change between the previous draft and the current one (AC1). */
+export type DiffChange = "added" | "removed" | "changed";
+
+/**  A claim that differs between two versions, with the slot it sits in. */
+export type DiffLine = {
+  /**
+   *  `Summary`, the section heading and its number, or `Paragraph 3`: where it
+   *  sits, so the toggle can point at the sentence.
+   */
+  slot: string;
+  before: string | null;
+  after: string | null;
+  change: DiffChange;
+};
+
+/**  The editable content of a draft: the same claims the validator walked. */
+export type DraftText = {
+  summary: ClaimView | null;
+  sections: SectionView[];
+  /**  Cover letters only; empty for a CV. */
+  paragraphs: ClaimView[];
+};
+
+/**  One inline edit the user made (AC1). */
+export type EditInput = {
+  application_id: string;
+  kind: StudioKind;
+  target: EditTarget;
+  text: string;
+};
+
+/**
+ *  Where an inline edit lands. The target is a claim, never a heading: a heading
+ *  carries no facts, and editing one changes nothing the validator reads.
+ */
+export type EditTarget =
+  /**  The CV summary line. */
+  | { slot: "summary" }
+  /**  Item `item` of section `section`. */
+  | { slot: "cv_item"; section: number; item: number }
+  /**  Paragraph `index` of the cover letter. */
+  | { slot: "cover_paragraph"; index: number };
+
 /**  Whether a connection may read the mailbox or only send (FR-37, AC3). */
 export type EmailMode =
   /**  Send only: reply parsing is off (FR-37). */
@@ -392,6 +510,14 @@ export type ExclusionView = {
    *  and is rendered as text, never as markup.
    */
   quote: string | null;
+};
+
+/**  A DOCX exported to `<app data>/exports/` (FR-78). */
+export type ExportedFile = {
+  /**  Where the file is, so the UI can open or reveal it. */
+  path: string;
+  file_name: string;
+  version: number;
 };
 
 /**  What the editor sends when the user saves a fact (AC1/AC3). */
@@ -438,6 +564,58 @@ export type FactView = {
   provenance: string;
   /**  Whether an agent run proposed this text (its run is audited in the DB). */
   from_agent_run: boolean;
+};
+
+/**
+ *  One thing the fresh-context reviewer wants changed. `message` says what is
+ *  wrong, `suggestion` what to do instead; both are the reviewer's words and are
+ *  shown as data only (ADR-010). A finding is not a claim: it never adds a fact
+ *  to a draft, it asks for a change that the revision run then has to make from
+ *  the profile.
+ */
+export type Finding = Finding_Serialize | Finding_Deserialize;
+
+/**  Which of the two drafts a finding is about. */
+export type FindingTarget = "cv" | "cover_letter";
+
+/**
+ *  One thing the fresh-context reviewer wants changed. `message` says what is
+ *  wrong, `suggestion` what to do instead; both are the reviewer's words and are
+ *  shown as data only (ADR-010). A finding is not a claim: it never adds a fact
+ *  to a draft, it asks for a change that the revision run then has to make from
+ *  the profile.
+ */
+export type Finding_Deserialize = {
+  severity: Severity;
+  target: FindingTarget;
+  message: string;
+  suggestion?: string | null;
+};
+
+/**
+ *  One thing the fresh-context reviewer wants changed. `message` says what is
+ *  wrong, `suggestion` what to do instead; both are the reviewer's words and are
+ *  shown as data only (ADR-010). A finding is not a claim: it never adds a fact
+ *  to a draft, it asks for a change that the revision run then has to make from
+ *  the profile.
+ */
+export type Finding_Serialize = {
+  severity: Severity;
+  target: FindingTarget;
+  message: string;
+  suggestion?: string | null;
+};
+
+/**  The layout facts of the last render (S7.5/S7.6). */
+export type LayoutView = {
+  pages: number;
+  orphans: number;
+  page_budget: number;
+  /**
+   *  FR-76: a CV inside its budget, a cover letter exactly one page, and
+   *  neither ending on a heading with nothing under it.
+   */
+  passes: boolean;
 };
 
 /**  How an IMAP/SMTP account authenticates (AC2). */
@@ -595,6 +773,12 @@ export type PreferencesSnapshot = {
   scores_stale: boolean;
 };
 
+/**  The previous version of a draft, as the studio links to it. */
+export type PreviousVersion = {
+  id: string;
+  version: number;
+};
+
 /**  The whole Profile screen in one read (AC1/AC2). */
 export type ProfileSnapshot = {
   /**  The current profile version (AC3). */
@@ -603,6 +787,32 @@ export type ProfileSnapshot = {
   facts: FactView[];
   /**  Facts an agent proposed that the user has not confirmed yet (S3.5). */
   pending_proposals: number;
+};
+
+/**  One requirement of the Offer with what the Profile backs of it (FR-75). */
+export type RequirementView = {
+  requirement: string;
+  covered: string[];
+  gaps: string[];
+};
+
+/**  The reviewer's findings and the version they judged (S7.4). */
+export type ReviewView = ReviewView_Serialize | ReviewView_Deserialize;
+
+/**  The reviewer's findings and the version they judged (S7.4). */
+export type ReviewView_Deserialize = {
+  /**  The version the critique was written for. */
+  document_id: string;
+  document_version: number;
+  findings: Finding_Deserialize[];
+};
+
+/**  The reviewer's findings and the version they judged (S7.4). */
+export type ReviewView_Serialize = {
+  /**  The version the critique was written for. */
+  document_id: string;
+  document_version: number;
+  findings: Finding_Serialize[];
 };
 
 /**  Whether the salary floor excludes Offers or only lowers their score (FR-7). */
@@ -623,8 +833,17 @@ export type SalaryFloor = {
   firmness: SalaryFirmness;
 };
 
+/**  A section of a CV, as the editor shows it. */
+export type SectionView = {
+  heading: string;
+  items: ClaimView[];
+};
+
 /**  Target seniority (FR-7). */
 export type Seniority = "intern" | "junior" | "mid" | "senior" | "lead" | "principal";
+
+/**  How serious a finding is; the studio ranks by this. */
+export type Severity = "high" | "medium" | "low";
 
 /**
  *  One move in the timeline (AC3). The Stage is the label the UI shows (FR-94:
@@ -640,6 +859,108 @@ export type StatusEventView = {
   source: string;
   reason: string | null;
   created_at: string;
+};
+
+/**  One draft of the application, with everything the studio shows about it. */
+export type StudioDocument = StudioDocument_Serialize | StudioDocument_Deserialize;
+
+/**  One draft of the application, with everything the studio shows about it. */
+export type StudioDocument_Deserialize = {
+  id: string;
+  kind: StudioKind;
+  version: number;
+  lang: string;
+  template: string;
+  created_at: string;
+  /**
+   *  Agent-written text that read the posting, until a version no longer is
+   *  (ADR-010). The studio renders such a draft as data only.
+   */
+  untrusted: boolean;
+  /**
+   *  The Offer's language when it was neither ES nor EN (FR-70). The studio
+   *  shows it as the reason for the language the user did not expect.
+   */
+  language_fallback_from: string | null;
+  text: DraftText;
+  /**
+   *  FR-74: no claim is missing a fact. *Ready* and *Send* stay blocked until
+   *  this is true **and** the document is verified.
+   */
+  ready: boolean;
+  /**  The checks of the last passing render, `None` until the draft passed. */
+  checks: ChecksView | null;
+  previous: PreviousVersion | null;
+  /**  The changes since [`Self::previous`], empty when both say the same thing. */
+  diff: DiffLine[];
+  /**  The newest critique of this kind, with the version it judged. */
+  review: ReviewView_Deserialize | null;
+};
+
+/**  One draft of the application, with everything the studio shows about it. */
+export type StudioDocument_Serialize = {
+  id: string;
+  kind: StudioKind;
+  version: number;
+  lang: string;
+  template: string;
+  created_at: string;
+  /**
+   *  Agent-written text that read the posting, until a version no longer is
+   *  (ADR-010). The studio renders such a draft as data only.
+   */
+  untrusted: boolean;
+  /**
+   *  The Offer's language when it was neither ES nor EN (FR-70). The studio
+   *  shows it as the reason for the language the user did not expect.
+   */
+  language_fallback_from: string | null;
+  text: DraftText;
+  /**
+   *  FR-74: no claim is missing a fact. *Ready* and *Send* stay blocked until
+   *  this is true **and** the document is verified.
+   */
+  ready: boolean;
+  /**  The checks of the last passing render, `None` until the draft passed. */
+  checks: ChecksView | null;
+  previous: PreviousVersion | null;
+  /**  The changes since [`Self::previous`], empty when both say the same thing. */
+  diff: DiffLine[];
+  /**  The newest critique of this kind, with the version it judged. */
+  review: ReviewView_Serialize | null;
+};
+
+/**
+ *  Which document of the application the studio is acting on, as the IPC layer
+ *  carries it (`boba_domain::DocumentKind` is not a wire type).
+ */
+export type StudioKind = "cv" | "cover_letter";
+
+/**  Everything the studio screen reads for one application (EXPERIENCE §9.5). */
+export type StudioView = StudioView_Serialize | StudioView_Deserialize;
+
+/**  Everything the studio screen reads for one application (EXPERIENCE §9.5). */
+export type StudioView_Deserialize = {
+  application_id: string;
+  posting_id: string;
+  page_budget: number;
+  templates: TemplateView[];
+  /**  The Offer's requirements against the Profile, in the draft's language. */
+  requirements: RequirementView[];
+  cv: StudioDocument_Deserialize | null;
+  cover: StudioDocument_Deserialize | null;
+};
+
+/**  Everything the studio screen reads for one application (EXPERIENCE §9.5). */
+export type StudioView_Serialize = {
+  application_id: string;
+  posting_id: string;
+  page_budget: number;
+  templates: TemplateView[];
+  /**  The Offer's requirements against the Profile, in the draft's language. */
+  requirements: RequirementView[];
+  cv: StudioDocument_Serialize | null;
+  cover: StudioDocument_Serialize | null;
 };
 
 /**  Terminal event for a long task, emitted as `task.finished`. */
@@ -677,10 +998,33 @@ export type TaskProgressed = {
   message_key: string | null;
 };
 
+/**  A template the user can render with (FR-71). */
+export type TemplateView = {
+  id: string;
+  kind: StudioKind;
+  default: boolean;
+};
+
+/**  What an ATS reads back out of the rendered PDF (S7.6, FR-77). */
+export type TextLayerView = {
+  passed: boolean;
+  missing_contact: string[];
+  missing_keywords: string[];
+  out_of_order: string[];
+  undecodable: string[];
+};
+
 /**  Hours the user is reachable, local time (FR-7). */
 export type TimezoneWindow = {
   from: number;
   to: number;
+};
+
+/**  One Profile fact behind a sentence, as the trace panel names it (FR-73). */
+export type TraceFactView = {
+  id: string;
+  /**  The fact's text in the draft's language; the id when it has no variant. */
+  label: string;
 };
 
 /**

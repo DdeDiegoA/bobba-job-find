@@ -1,0 +1,17 @@
+{
+  "errors.studio.no_draft": "Esta postulación aún no tiene un borrador de ese tipo. Genéralo primero.",
+  "errors.studio.invalid_edit": "Esa línea no existe en este borrador, o la edición la dejaría vacía.",
+  "errors.studio.stored_draft": "No se pudo leer el borrador guardado. Genéralo de nuevo.",
+  "errors.studio.store": "El estudio no pudo leer sus documentos.",
+  "errors.studio.render": "No se pudo generar el documento.",
+  "errors.studio.verify": "No se pudo comprobar el documento generado.",
+  "errors.studio.fit": "El CV no cabe en su límite de páginas, ni siquiera tras recortar todas las líneas.",
+  "errors.studio.no_engine": "Aún no hay ninguna CLI de agente instalada. Termina primero el paso del motor.",
+  "errors.studio.ambiguous_engine": "Hay más de una CLI de agente instalada. Elige el motor en la incorporación.",
+  "errors.studio.missing_id": "No se indicó ninguna postulación.",
+  "errors.studio.unknown_application": "Esa postulación no existe.",
+  "errors.studio.unknown_offer": "La oferta de la que salió esta postulación ya no está.",
+  "errors.studio.export_write": "No se pudo escribir el DOCX en el disco.",
+  "errors.studio.export_path": "No se pudo crear la carpeta de exportación.",
+  "errors.studio.run": "La ejecución del agente no terminó."
+}

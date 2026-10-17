@@ -1,0 +1,17 @@
+{
+  "errors.studio.no_draft": "This application has no draft of that kind yet. Generate it first.",
+  "errors.studio.invalid_edit": "That line is not one this draft has, or the edit would leave it empty.",
+  "errors.studio.stored_draft": "The stored draft could not be read. Regenerate it.",
+  "errors.studio.store": "The studio could not read its documents.",
+  "errors.studio.render": "The document could not be rendered.",
+  "errors.studio.verify": "The rendered document could not be checked.",
+  "errors.studio.fit": "The CV does not fit its page budget, even after cutting every line.",
+  "errors.studio.no_engine": "No agent CLI is installed yet. Finish the engine step first.",
+  "errors.studio.ambiguous_engine": "More than one agent CLI is installed. Choose the engine in onboarding first.",
+  "errors.studio.missing_id": "No application was named.",
+  "errors.studio.unknown_application": "That application does not exist.",
+  "errors.studio.unknown_offer": "The offer this application came from is gone.",
+  "errors.studio.export_write": "The DOCX could not be written to disk.",
+  "errors.studio.export_path": "The export folder could not be created.",
+  "errors.studio.run": "The agent run did not finish."
+}

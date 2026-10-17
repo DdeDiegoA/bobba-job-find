@@ -4,8 +4,11 @@
 //! updates in place. `id` is a ULID (AD-17); `probed_at` is stamped by the DB as
 //! UTC RFC 3339 (AD-17).
 
+use boba_app::ports::cli::{CliInstallsError, CliInstallsPort};
 use rusqlite::{Connection, params};
 use thiserror::Error;
+
+use crate::db::{Store, StoreError};
 
 #[derive(Debug, Error)]
 pub enum CliInstallError {
@@ -72,6 +75,21 @@ pub fn list(conn: &Connection) -> Result<Vec<CliInstallRecord>, CliInstallError>
 /// Remove one installation by id. Returns whether a row was deleted.
 pub fn delete(conn: &Connection, id: &str) -> Result<bool, CliInstallError> {
     Ok(conn.execute("DELETE FROM cli_install WHERE id = ?1", params![id])? > 0)
+}
+
+impl CliInstallsPort for Store {
+    fn installed(&self) -> Result<Vec<String>, CliInstallsError> {
+        let mut kinds = self
+            .read(|conn| {
+                list(conn)
+                    .map(|rows| rows.into_iter().map(|row| row.kind).collect::<Vec<_>>())
+                    .map_err(|error| StoreError::Sqlite(error.to_string()))
+            })
+            .map_err(|error| CliInstallsError::new(error.to_string()))?;
+        kinds.sort();
+        kinds.dedup();
+        Ok(kinds)
+    }
 }
 
 #[cfg(test)]

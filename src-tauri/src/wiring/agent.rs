@@ -32,9 +32,12 @@ use boba_agent::runtime::{AgentRuntime, Emitter, TaskGate};
 use boba_agent::supervisor::CommandSpec;
 use boba_app::ports::agent::{AgentEvent, AgentTask, FailureReason};
 use boba_app::ports::clock::ClockPort;
+use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
+use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::posting_features;
+use boba_app::tailoring;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
 use boba_store::repos::cli_install;
@@ -396,6 +399,51 @@ impl RepoTools {
     }
 }
 
+impl RepoTools {
+    /// `get_posting` (S7.7): the Offer the run drafts for, as the studio shows
+    /// it. Third-party text: the endpoint puts it in the untrusted envelope
+    /// (AD-7), so it can never arrive as instructions.
+    fn posting(&self, args: &Value) -> Result<Value, String> {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "`get_posting` needs the posting's `id`".to_string())?;
+        let offer = self
+            .store
+            .get_offer(id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("no posting `{id}`"))?;
+        Ok(json!({
+            "id": offer.id,
+            "title": offer.title,
+            "company": offer.company,
+            "lang": offer.lang,
+            "locations": offer.locations,
+            "work_mode": offer.work_mode.as_str(),
+            "money": offer.money,
+            "description_text": offer.description_text,
+            "requirements": offer.requirements,
+            "apply_url": offer.apply.url,
+        }))
+    }
+
+    /// `get_score_card` (S7.7): the deterministic score the core computed for
+    /// this Offer. The numbers are the core's — a run reads them and never
+    /// restates them (the tailor skill says so), so only the newest card is
+    /// served.
+    fn score_card(&self, args: &Value) -> Result<Value, String> {
+        let id = args
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "`get_score_card` needs the posting's `id`".to_string())?;
+        let card = self
+            .store
+            .latest_card(id)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({ "score_card": card }))
+    }
+}
+
 impl ToolHandler for RepoTools {
     fn call(
         &self,
@@ -427,6 +475,16 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == posting_features::PROPOSE_TOOL => {
                 self.validate_proposal(args)
             }
+            // S7.7: what a `tailor_application` run reads, and the two drafts it
+            // writes. The user's own data (facts, preferences) is not untrusted
+            // and the posting is (the endpoint decides the envelope, AD-7).
+            Some(spec) if spec.name == "get_profile_facts" => profile_facts(&self.store),
+            Some(spec) if spec.name == "get_preferences" => preferences(&self.store),
+            Some(spec) if spec.name == "get_posting" => self.posting(args),
+            Some(spec) if spec.name == "get_score_card" => self.score_card(args),
+            Some(spec) if spec.name == "save_document_draft" => {
+                save_document_draft(&self.store, application_id, args)
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -436,6 +494,88 @@ impl ToolHandler for RepoTools {
     }
 }
 
+/// `get_profile_facts` (S7.7): the user's confirmed facts, with their stable
+/// ids — the only source a tailor run may say anything about the user from
+/// (AD-15). Both language variants travel, so the run can see a missing one.
+fn profile_facts(store: &Arc<Store>) -> Result<Value, String> {
+    let facts = store.facts_current().map_err(|error| error.to_string())?;
+    let facts: Vec<Value> = facts
+        .iter()
+        .map(|fact| {
+            json!({
+                "id": fact.id,
+                "item_id": fact.item_id,
+                "kind": fact.kind.as_str(),
+                "text_en": fact.text_en,
+                "text_es": fact.text_es,
+            })
+        })
+        .collect();
+    Ok(json!({ "facts": facts }))
+}
+
+/// `get_preferences` (S7.7): the search and application preferences the user
+/// saved, exactly as the Preferences screen stores them. A row this build cannot
+/// parse is `null`, never an error: the run drafts without them rather than
+/// failing on a settings row nobody can read.
+fn preferences(store: &Arc<Store>) -> Result<Value, String> {
+    let key = crate::commands::preferences::KEY.to_string();
+    let raw = store
+        .read(move |conn| {
+            boba_store::repos::settings::get(conn, &key)
+                .map_err(|error| boba_store::db::StoreError::Sqlite(error.to_string()))
+        })
+        .map_err(|error| error.to_string())?;
+    let Some(raw) = raw else {
+        return Ok(json!({ "preferences": null }));
+    };
+    // A row this build cannot parse is the defaults, never an error: the run
+    // drafts without preferences instead of failing on a settings row nobody
+    // can read (the same rule the Preferences screen and the salary floor use).
+    let Ok(snapshot) =
+        serde_json::from_str::<crate::commands::preferences::PreferencesSnapshot>(&raw)
+    else {
+        return Ok(json!({ "preferences": null }));
+    };
+    Ok(json!({ "preferences": snapshot.values }))
+}
+
+/// `save_document_draft` (S7.7): store one draft a tailor run wrote — the CV,
+/// then the cover letter — for the application the run was started for.
+///
+/// The parsing, the no-fabrication backstop (a claim with no `fact_ids` does not
+/// deserialize) and the taint live in `boba_app::tailoring::save_agent_draft`;
+/// this handler resolves the posting's language for the fallback notice and
+/// nothing else.
+fn save_document_draft(
+    store: &Arc<Store>,
+    application_id: Option<&str>,
+    args: &Value,
+) -> Result<Value, String> {
+    let Some(application_id) = application_id else {
+        return Err("this run was started for no application".to_string());
+    };
+    let offer_lang = store
+        .application_get(application_id)
+        .ok()
+        .flatten()
+        .and_then(|application| store.get_offer(&application.posting_id).ok().flatten())
+        .map(|offer| offer.lang);
+    let saved = tailoring::save_agent_draft(
+        store.as_ref(),
+        application_id,
+        args,
+        offer_lang.as_deref(),
+        &boba_app::system::SystemClock.now_rfc3339(),
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(json!({
+        "app_id": application_id,
+        "kind": saved.kind.as_str(),
+        "version": saved.version,
+    }))
+}
+
 /// The slice that brings each tool's data, for the tools still waiting for one.
 /// A tool answered in [`RepoTools::call`] — `get_task_input`, `save_review`,
 /// `get_pending_postings`, `propose_posting_features` — is not listed, and the
@@ -443,14 +583,11 @@ impl ToolHandler for RepoTools {
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
         "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
-        "get_profile_facts"
-        | "get_preferences"
-        | "propose_profile_facts"
-        | "propose_translations" => "S3.4 (profile facts)",
-        "get_posting" | "get_company_research" => "S4.2 (postings)",
-        "get_score_card" => "S6.3 (scoring)",
+        "propose_profile_facts" | "propose_translations" => "S3.4 (profile facts)",
+        "get_company_research" => {
+            "no slice yet (company research is not built, and the tailor skill reads it only when it exists)"
+        }
         "save_score_narration" => "S6.5 (narration)",
-        "save_document_draft" => "S7.2 (documents)",
         "get_email_batch" => "S8.1 (mail)",
         "propose_status_change" => "S8.4 (status proposals)",
         // Never panic on a request path: an unmapped catalog tool is a bug, and
@@ -635,7 +772,15 @@ mod tests {
     fn served(name: &str) -> bool {
         matches!(
             name,
-            "get_task_input" | "save_review" | "save_answers" | "get_pending_postings"
+            "get_task_input"
+                | "save_review"
+                | "save_answers"
+                | "get_pending_postings"
+                | "get_profile_facts"
+                | "get_preferences"
+                | "get_posting"
+                | "get_score_card"
+                | "save_document_draft"
         ) || name == posting_features::PROPOSE_TOOL
     }
 
@@ -651,8 +796,8 @@ mod tests {
     }
 
     /// Store both drafts of one application, as a tailoring run leaves them.
-    /// Raw SQL on purpose: this crate does not depend on `boba-domain`, and the
-    /// document repository's own tests cover the SQL.
+    /// Raw SQL on purpose: the document repository's own tests cover the SQL,
+    /// and seeding specific rows is not what this module is being tested for.
     fn drafts(store: &Arc<Store>, application_id: &str) {
         for (id, kind) in [("doc_cv_1", "cv"), ("doc_cover_1", "cover_letter")] {
             let (id, kind, application_id) =
@@ -752,6 +897,244 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    /// A `save_document_draft` payload: the CV of a tailor run.
+    fn cv_draft() -> Value {
+        json!({
+            "app_id": "app_1",
+            "doc": {
+                "schema_version": 1,
+                "lang": "en",
+                "contact": {"full_name": "Ada Lovelace"},
+                "summary": {"text": "Backend developer.", "fact_ids": ["fact_1"]},
+                "sections": [{"heading": "Experience",
+                              "items": [{"text": "Shipped an API.", "fact_ids": ["fact_1"]}]}],
+                "declared_gaps": []
+            }
+        })
+    }
+
+    /// The document rows one application holds, as `(kind, version, untrusted)`.
+    fn document_rows(store: &Arc<Store>, application_id: &str) -> Vec<(String, i64, bool)> {
+        let application_id = application_id.to_string();
+        store
+            .read(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT kind, version, untrusted_origin FROM document \
+                         WHERE application_id = ?1 ORDER BY kind, version",
+                    )
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))?;
+                let rows = stmt
+                    .query_map([application_id.as_str()], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))?;
+                Ok(rows
+                    .into_iter()
+                    .map(|(kind, version, untrusted)| (kind, version, untrusted == 1))
+                    .collect())
+            })
+            .expect("read the documents")
+    }
+
+    /// S7.7: the tailor run's draft reaches the store, as the next version of the
+    /// application, tainted (ADR-010) and bound to the run's application.
+    #[test]
+    fn save_document_draft_stores_the_run_draft_and_refuses_another_application() {
+        let store = store("tailor-drafts");
+        application(&store, "app_1");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let answer = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "save_document_draft",
+                &cv_draft(),
+            )
+            .expect("the draft is stored");
+        assert_eq!(answer["app_id"], "app_1");
+        assert_eq!(answer["kind"], "cv");
+        assert_eq!(answer["version"], 1);
+        assert_eq!(
+            document_rows(&store, "app_1"),
+            vec![("cv".to_string(), 1, true)],
+            "the draft is the application's first CV version, and it is untrusted"
+        );
+
+        // A run bound to no application cannot write, whatever its payload says.
+        let unbound = tools
+            .call(
+                "tailor_application",
+                None,
+                "save_document_draft",
+                &cv_draft(),
+            )
+            .expect_err("no run application, no draft");
+        assert!(unbound.contains("no application"), "{unbound}");
+
+        // And a payload naming another application is refused by the use case.
+        let mut elsewhere = cv_draft();
+        elsewhere["app_id"] = json!("app_2");
+        let refused = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "save_document_draft",
+                &elsewhere,
+            )
+            .expect_err("a run disposes only of its own job");
+        assert!(refused.contains("app_2"), "{refused}");
+        assert_eq!(
+            document_rows(&store, "app_1").len(),
+            1,
+            "nothing else was stored"
+        );
+    }
+
+    /// S7.7: the facts, the posting and the score card a tailor run reads.
+    #[test]
+    fn the_tailor_run_reads_the_facts_the_posting_and_the_score_card() {
+        let store = store("tailor-reads");
+        application(&store, "app_1");
+        let fact = boba_domain::profile::ProfileFact {
+            id: "fact_1".to_string(),
+            item_id: "item_1".to_string(),
+            kind: boba_domain::profile::FactKind::Experience,
+            text_en: Some("Shipped a billing API.".to_string()),
+            text_es: Some("Entregué una API de facturación.".to_string()),
+            evidence: None,
+            detail_json: "{}".to_string(),
+            supersedes: None,
+            profile_version: 1,
+            provenance: boba_domain::profile::Provenance::User,
+            agent_run_id: None,
+            created_at: "t".to_string(),
+        };
+        store
+            .execute(move |conn| {
+                boba_store::repos::profile::fact_append(conn, &fact)
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the fact is stored");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let facts = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_profile_facts",
+                &json!({}),
+            )
+            .expect("the facts");
+        assert_eq!(facts["facts"][0]["id"], "fact_1");
+        assert_eq!(facts["facts"][0]["kind"], "experience");
+        assert_eq!(facts["facts"][0]["text_en"], "Shipped a billing API.");
+
+        let posting = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_posting",
+                &json!({"id": "pst_1"}),
+            )
+            .expect("the posting");
+        assert_eq!(posting["id"], "pst_1");
+        assert_eq!(posting["title"], "Backend Engineer");
+        assert_eq!(posting["lang"], "en");
+
+        let missing = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_posting",
+                &json!({"id": "pst_nope"}),
+            )
+            .expect_err("no such posting");
+        assert!(missing.contains("pst_nope"), "{missing}");
+
+        // Nothing has scored this Offer yet: an explicit `null`, not a fake card.
+        let card = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_score_card",
+                &json!({"id": "pst_1"}),
+            )
+            .expect("the score card slot");
+        assert!(card["score_card"].is_null(), "{card}");
+    }
+
+    /// S7.7: a preferences row this build cannot parse is `null`, never an
+    /// error — a run drafts without them rather than failing on a settings row
+    /// nobody can read (the same rule the Preferences screen applies).
+    #[test]
+    fn an_unparseable_preferences_row_does_not_fail_the_run() {
+        let store = store("tailor-preferences-broken");
+        let key = crate::commands::preferences::KEY.to_string();
+        store
+            .execute(move |conn| {
+                boba_store::repos::settings::put(conn, &key, "{not json", "t")
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the broken row is stored");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let answer = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_preferences",
+                &json!({}),
+            )
+            .expect("a broken row is not a failed run");
+        assert!(answer["preferences"].is_null(), "{answer}");
+    }
+
+    /// S7.7: the preferences the user saved, and `null` when they saved none.
+    #[test]
+    fn the_tailor_run_reads_the_users_preferences() {
+        let store = store("tailor-preferences");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let none = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_preferences",
+                &json!({}),
+            )
+            .expect("no preferences saved");
+        assert!(none["preferences"].is_null(), "{none}");
+
+        let key = crate::commands::preferences::KEY.to_string();
+        let mut snapshot = crate::commands::preferences::PreferencesSnapshot::default();
+        snapshot.values.roles = vec!["Backend engineer".to_string()];
+        let json = serde_json::to_string(&snapshot).expect("json");
+        store
+            .execute(move |conn| {
+                boba_store::repos::settings::put(conn, &key, &json, "t")
+                    .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the preferences are stored");
+
+        let saved = tools
+            .call(
+                "tailor_application",
+                Some("app_1"),
+                "get_preferences",
+                &json!({}),
+            )
+            .expect("the preferences");
+        assert_eq!(saved["preferences"]["roles"][0], "Backend engineer");
     }
 
     /// S7.4: `save_review` stores the fresh-context reviewer's critique on the

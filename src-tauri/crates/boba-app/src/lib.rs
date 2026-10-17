@@ -26,6 +26,7 @@ pub mod scoring;
 pub mod sources;
 pub mod stats;
 pub mod status_proposals;
+pub mod studio;
 pub mod system;
 pub mod tailoring;
 pub mod triage;
