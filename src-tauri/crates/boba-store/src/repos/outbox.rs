@@ -134,6 +134,41 @@ pub fn list_attempts(
     Ok(attempts)
 }
 
+/// Turn every `pending` attempt into `uncertain` and return the rows it
+/// changed (startup recovery, AC2).
+pub fn reconcile_pending(
+    conn: &Connection,
+    now: &str,
+) -> Result<Vec<ApplyAttempt>, OutboxRepoError> {
+    let store = |error: rusqlite::Error| OutboxRepoError::new(error.to_string());
+    let pending: Vec<ApplyAttempt> = conn
+        .prepare(&format!(
+            "{SELECT} WHERE state = 'pending' ORDER BY created_at, rowid"
+        ))
+        .map_err(store)?
+        .query_map([], row)
+        .map_err(store)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(store)?;
+    for attempt in &pending {
+        conn.execute(
+            "UPDATE apply_attempt SET state = 'uncertain', error = 'interrupted', \
+             updated_at = ?2 WHERE id = ?1 AND state = 'pending'",
+            params![attempt.id, now],
+        )
+        .map_err(store)?;
+    }
+    Ok(pending
+        .into_iter()
+        .map(|attempt| ApplyAttempt {
+            state: AttemptState::Uncertain,
+            error: Some("interrupted".to_string()),
+            updated_at: now.to_string(),
+            ..attempt
+        })
+        .collect())
+}
+
 /// Whether one attempt exists (used by the tests and the adapter's guard).
 pub fn attempt_get(conn: &Connection, id: &str) -> Option<ApplyAttempt> {
     conn.query_row(&format!("{SELECT} WHERE id = ?1"), params![id], row)
@@ -169,6 +204,12 @@ impl OutboxRepo for Store {
     fn attempts_for(&self, application_id: &str) -> Result<Vec<ApplyAttempt>, OutboxRepoError> {
         let application_id = application_id.to_string();
         self.read(move |conn| Ok(list_attempts(conn, &application_id)))
+            .map_err(|e| OutboxRepoError::new(e.to_string()))?
+    }
+
+    fn attempts_reconcile(&self, now: &str) -> Result<Vec<ApplyAttempt>, OutboxRepoError> {
+        let now = now.to_string();
+        self.execute(move |conn| Ok(reconcile_pending(conn, &now)))
             .map_err(|e| OutboxRepoError::new(e.to_string()))?
     }
 }
@@ -330,6 +371,36 @@ mod tests {
 
         assert_ne!(first.id, second.id);
         assert_eq!(list_attempts(&conn, "app_01").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_send_that_died_mid_flight_is_reconciled_to_uncertain_at_startup() {
+        let conn = connection();
+        let crashed =
+            insert_attempt(&conn, &attempt("app_01", "jobs@nimbus.example"), NOW).unwrap();
+
+        let reconciled = reconcile_pending(&conn, "2026-10-17T09:00:00Z").unwrap();
+
+        assert_eq!(reconciled.len(), 1);
+        assert_eq!(reconciled[0].id, crashed.id);
+        let stored = attempt_get(&conn, &crashed.id).unwrap();
+        assert_eq!(
+            stored.state,
+            AttemptState::Uncertain,
+            "not failed: delivery is unproven"
+        );
+        assert_eq!(stored.error.as_deref(), Some("interrupted"));
+        assert_eq!(stored.updated_at, "2026-10-17T09:00:00Z");
+
+        // The application is no longer stuck: a new attempt can be recorded
+        // (the user's confirmed resend), because `uncertain` is not a live row.
+        let resent = insert_attempt(
+            &conn,
+            &attempt("app_01", "jobs@nimbus.example"),
+            "2026-10-17T09:01:00Z",
+        )
+        .unwrap();
+        assert_eq!(resent.state, AttemptState::Pending);
     }
 
     #[test]

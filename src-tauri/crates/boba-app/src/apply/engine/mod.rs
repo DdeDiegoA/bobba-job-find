@@ -328,16 +328,51 @@ impl ApplyEngine {
                     MailError::UnknownAccount => (AttemptState::Failed, "unknown_account"),
                 };
                 let failed_at = self.clock.now_rfc3339();
-                self.close(&attempt.id, state, Some(class), &failed_at)?;
+                // AD-12 first: a state write that fails must not leave the
+                // intent open. If the state write fails too, the row stays
+                // pending and the startup reconcile turns it uncertain.
                 self.outcome(
                     &intent,
                     AuditOutcome::Failed,
                     &format!("{{\"message_id\":\"{message_id}\",\"reason\":\"{class}\"}}"),
                     &failed_at,
                 )?;
+                self.close(&attempt.id, state, Some(class), &failed_at)?;
                 Err(EngineError::Mail(error))
             }
         }
+    }
+
+    /// Reconcile the sends a crash interrupted (AC2, called once at startup).
+    ///
+    /// A `pending` attempt means the process stopped between writing the row
+    /// and recording the send's result: nothing proves the message left, and
+    /// nothing proves it did not. It becomes `uncertain`, which the review
+    /// screen can clear with the user's confirmation, and its open audit
+    /// `intent` gets the `unknown_after_crash` outcome AD-12 prescribes. Returns
+    /// how many attempts were reconciled.
+    pub fn recover(&self) -> Result<usize, EngineError> {
+        let now = self.clock.now_rfc3339();
+        let interrupts = self.outbox.attempts_reconcile(&now)?;
+        if interrupts.is_empty() {
+            return Ok(0);
+        }
+        let ids: Vec<&str> = interrupts
+            .iter()
+            .map(|attempt| attempt.id.as_str())
+            .collect();
+        for intent in self.system.audit_unresolved_intents()? {
+            if intent.action != APPLY_ACTION || !ids.contains(&intent.correlation_id.as_str()) {
+                continue;
+            }
+            let detail = serde_json::json!({
+                "message_id": intent.correlation_id,
+                "reason": "interrupted",
+            })
+            .to_string();
+            self.outcome(&intent, AuditOutcome::UnknownAfterCrash, &detail, &now)?;
+        }
+        Ok(interrupts.len())
     }
 
     /// Mark the application Applied through the Tracker's one writer (AD-16),
@@ -636,7 +671,18 @@ mod tests {
         }
 
         fn audit_unresolved_intents(&self) -> Result<Vec<AuditRow>, SystemRepoError> {
-            Ok(Vec::new())
+            let rows = self.rows.lock().unwrap();
+            Ok(rows
+                .iter()
+                .filter(|intent| {
+                    intent.phase == AuditPhase::Intent
+                        && !rows.iter().any(|outcome| {
+                            outcome.phase == AuditPhase::Outcome
+                                && outcome.intent_id.as_deref() == Some(intent.id.as_str())
+                        })
+                })
+                .cloned()
+                .collect())
         }
 
         fn audit_anchor_get(&self) -> Result<Option<String>, SystemRepoError> {
@@ -771,6 +817,20 @@ mod tests {
                 .into_iter()
                 .filter(|attempt| attempt.application_id == application_id)
                 .collect())
+        }
+
+        fn attempts_reconcile(&self, now: &str) -> Result<Vec<ApplyAttempt>, OutboxRepoError> {
+            let mut interrupts = Vec::new();
+            let mut attempts = self.attempts.lock().unwrap();
+            for attempt in attempts.iter_mut() {
+                if attempt.state == AttemptState::Pending {
+                    attempt.state = AttemptState::Uncertain;
+                    attempt.error = Some("interrupted".to_string());
+                    attempt.updated_at = now.to_string();
+                    interrupts.push(attempt.clone());
+                }
+            }
+            Ok(interrupts)
         }
     }
 
@@ -1309,6 +1369,76 @@ mod tests {
             assert_eq!(error.message_key(), "errors.apply.needs_check");
             assert!(harness.mail.sent().is_empty(), "AC2: evidence first");
         });
+    }
+
+    #[test]
+    fn a_crashed_send_is_reconciled_at_startup_and_the_user_can_confirm_a_resend() {
+        let harness = harness(FakeMail::default());
+        let application = application();
+        harness.apply.seed_application(application.clone());
+        seed_verified_cv(&harness, &application);
+        let posting = offer(Some("jobs@nimbus.example"));
+
+        // The crash left an open intent and a pending attempt behind.
+        harness
+            .system
+            .audit_append_intent(&NewIntent {
+                action: APPLY_ACTION.to_string(),
+                correlation_id: "att_crash".to_string(),
+                actor: "user".to_string(),
+                target_kind: "application".to_string(),
+                target_id: Some(application.id.clone()),
+                detail_json: "{}".to_string(),
+                payload_blake3: Some("deadbeef".to_string()),
+                created_at: NOW.to_string(),
+            })
+            .unwrap();
+        harness.outbox.seed(ApplyAttempt {
+            id: "att_crash".into(),
+            application_id: application.id.clone(),
+            channel: "email".into(),
+            account_id: "eml_1".into(),
+            recipient: "jobs@nimbus.example".into(),
+            subject: "Application: Backend Engineer".into(),
+            payload_blake3: "deadbeef".into(),
+            message_id: Some("<att_crash@boba.local>".into()),
+            state: AttemptState::Pending,
+            error: None,
+            created_at: NOW.into(),
+            updated_at: NOW.into(),
+            sent_at: None,
+        });
+
+        let engine = engine(&harness);
+
+        // Before the startup pass the send is a dead end.
+        let error = block_on(engine.send(&application, &posting, &request())).unwrap_err();
+        assert_eq!(error.message_key(), "errors.apply.needs_check");
+
+        assert_eq!(engine.recover().unwrap(), 1);
+
+        // The attempt is uncertain (delivery is unproven, not denied) and the
+        // audit intent is closed as AD-12 prescribes.
+        assert_eq!(harness.outbox.attempts()[0].state, AttemptState::Uncertain);
+        let rows = harness.system.rows();
+        let outcome = rows
+            .iter()
+            .find(|row| row.phase == AuditPhase::Outcome)
+            .expect("the crashed intent got its outcome");
+        assert_eq!(outcome.outcome, Some(AuditOutcome::UnknownAfterCrash));
+        assert_eq!(outcome.intent_id.as_deref(), Some(rows[0].id.as_str()));
+
+        // A plain retry asks; the user's word sends and proves it.
+        let error = block_on(engine.send(&application, &posting, &request())).unwrap_err();
+        assert_eq!(error.message_key(), "errors.apply.confirm_resend");
+
+        let confirmed = SendRequest {
+            confirm_resend: true,
+            ..request()
+        };
+        block_on(engine.send(&application, &posting, &confirmed)).unwrap();
+        assert_eq!(harness.mail.sent().len(), 1);
+        assert_eq!(harness.outbox.attempts()[1].state, AttemptState::Sent);
     }
 
     #[test]

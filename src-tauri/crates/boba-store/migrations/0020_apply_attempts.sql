@@ -7,11 +7,12 @@
 -- mid-send) asks the user to check, `uncertain` (transport, no answer) resends
 -- only with the user's word, and `failed` (provider refused) is free to retry.
 --
--- The payload — recipient, subject, body and attachments — is never stored
--- (AD-12): the row keeps its blake3, which is also what the audit `intent` row
--- names. `message_id` is Boba's id for the message: Microsoft Graph's
--- `sendMail` answers 202 with no body, so Boba assigns one when the attempt is
--- recorded and the audit `outcome` names it.
+-- The message body and the attachment bytes are never stored (AD-12): the row
+-- keeps the recipient and the subject as metadata, plus the payload's blake3,
+-- which is also what the audit `intent` row names. `message_id` is Boba's id
+-- for the message: Microsoft Graph's `sendMail` answers 202 with no body, so
+-- Boba assigns one when the attempt is recorded and the audit `outcome` names
+-- it.
 CREATE TABLE apply_attempt (
     id             TEXT PRIMARY KEY NOT NULL,
     application_id TEXT NOT NULL REFERENCES application (id) ON DELETE CASCADE,

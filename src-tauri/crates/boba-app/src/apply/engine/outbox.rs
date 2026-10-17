@@ -2,9 +2,9 @@
 //!
 //! An attempt is the record of one send: it is written **before** the message
 //! leaves, so a crash or a lost reply leaves evidence behind instead of a silent
-//! second send. The payload (recipient, subject, body, attachments) is hashed by
-//! the adapter and never stored (AD-12): the row keeps the blake3, the state and
-//! the message id.
+//! second send. The body and attachments are hashed by the adapter and never
+//! stored (AD-12): the row keeps the blake3, the recipient and subject as
+//! metadata, the state and the message id.
 //!
 //! The trait lives with the engine because the engine is its only caller; the
 //! adapter is `boba-store::repos::outbox`.
@@ -118,4 +118,14 @@ pub trait OutboxRepo: Send + Sync {
     /// Every attempt of one application, oldest first — the evidence a resend
     /// is checked against.
     fn attempts_for(&self, application_id: &str) -> Result<Vec<ApplyAttempt>, OutboxRepoError>;
+
+    /// Turn every `pending` attempt into `uncertain` and return the rows it
+    /// changed (startup recovery, AC2).
+    ///
+    /// Nothing is in flight when the app starts, so a `pending` row is a send
+    /// whose result was lost to a crash. Treating it as failed would claim
+    /// delivery did not happen; leaving it pending would refuse every future
+    /// send with no way out — so it becomes `uncertain`, which the user's
+    /// confirmation can clear.
+    fn attempts_reconcile(&self, now: &str) -> Result<Vec<ApplyAttempt>, OutboxRepoError>;
 }
