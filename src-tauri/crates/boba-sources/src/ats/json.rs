@@ -102,6 +102,18 @@ pub(crate) fn https_url(candidate: Option<String>) -> Option<String> {
     Some(url)
 }
 
+/// An id as one safe path segment, or `None` when it is empty or all dots.
+///
+/// Percent-encoding alone cannot stop `..`: WHATWG resolves `.`, `..` and their
+/// `%2E` spellings as dot segments, so an all-dot id would fetch the board
+/// itself instead of a posting. Such an id is refused, not encoded.
+pub(crate) fn id_segment(id: &str) -> Option<String> {
+    if id.is_empty() || id.chars().all(|character| character == '.') {
+        return None;
+    }
+    Some(encode_segment(id))
+}
+
 /// Percent-encode an id before it becomes one path segment, so a source id of
 /// `../admin` cannot walk out of the board path.
 pub(crate) fn encode_segment(segment: &str) -> String {
@@ -417,6 +429,7 @@ mod tests {
         assert_eq!(matched.len(), 1);
         assert_eq!(matched[0].title, "Senior Backend Engineer");
     }
+
     #[test]
     fn only_https_urls_are_kept() {
         assert_eq!(
@@ -441,6 +454,16 @@ mod tests {
         assert_eq!(encode_segment("../evil"), "..%2Fevil");
         assert_eq!(encode_segment("a b"), "a%20b");
         assert_eq!(encode_segment("ñ"), "%C3%B1");
+    }
+
+    #[test]
+    fn an_all_dot_id_is_refused_before_it_reaches_a_path() {
+        assert_eq!(id_segment("4512345").as_deref(), Some("4512345"));
+        assert_eq!(id_segment("../evil").as_deref(), Some("..%2Fevil"));
+        assert_eq!(id_segment("."), None);
+        assert_eq!(id_segment(".."), None);
+        assert_eq!(id_segment("..."), None);
+        assert_eq!(id_segment(""), None);
     }
 
     #[test]

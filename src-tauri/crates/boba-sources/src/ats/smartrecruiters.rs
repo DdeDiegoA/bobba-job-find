@@ -43,13 +43,12 @@ impl SmartRecruiters {
         )
     }
 
-    fn detail_url(&self, external_id: &str) -> String {
-        format!(
-            "{}/v1/companies/{}/postings/{}",
-            self.base,
-            self.board.token,
-            json::encode_segment(external_id)
-        )
+    fn detail_url(&self, external_id: &str) -> Option<String> {
+        let id = json::id_segment(external_id)?;
+        Some(format!(
+            "{}/v1/companies/{}/postings/{id}",
+            self.base, self.board.token
+        ))
     }
 }
 
@@ -155,7 +154,12 @@ impl SourceAdapter for SmartRecruiters {
         ctx: &'a SourceCtx<'_>,
     ) -> BoxFuture<'a, Result<RawPosting, SourceError>> {
         Box::pin(async move {
-            let url = self.detail_url(external_id);
+            let url = self
+                .detail_url(external_id)
+                .ok_or_else(|| SourceError::InvalidValue {
+                    field: "smartrecruiters posting id".into(),
+                    value: external_id.to_string(),
+                })?;
             let body = json::get_json(ctx.http, &url, self.board.limits()).await?;
             let payload = json::parse(&body)?;
             let description = job_ad_html(&payload);
@@ -265,8 +269,24 @@ mod tests {
     #[test]
     fn a_detail_id_cannot_escape_the_company_path() {
         let adapter = SmartRecruiters::new(board());
-        let url = adapter.detail_url("../evil");
+        let url = adapter
+            .detail_url("../evil")
+            .expect("a mixed id is encoded");
         assert!(url.ends_with("/Boba/postings/..%2Fevil"), "{url}");
         assert!(!url.contains("/../"), "{url}");
+        assert_eq!(adapter.detail_url(".."), None);
+        assert_eq!(adapter.detail_url("."), None);
+    }
+    #[tokio::test]
+    async fn a_detail_id_of_dots_is_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let adapter = SmartRecruiters::with_base(server.uri(), board());
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let error = adapter.detail("..", &ctx).await.expect_err("refused");
+        assert!(matches!(error, SourceError::InvalidValue { .. }));
     }
 }

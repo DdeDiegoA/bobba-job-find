@@ -42,13 +42,12 @@ impl Greenhouse {
         )
     }
 
-    fn detail_url(&self, external_id: &str) -> String {
-        format!(
-            "{}/v1/boards/{}/jobs/{}",
-            self.base,
-            self.board.token,
-            json::encode_segment(external_id)
-        )
+    fn detail_url(&self, external_id: &str) -> Option<String> {
+        let id = json::id_segment(external_id)?;
+        Some(format!(
+            "{}/v1/boards/{}/jobs/{id}",
+            self.base, self.board.token
+        ))
     }
 }
 
@@ -124,7 +123,12 @@ impl SourceAdapter for Greenhouse {
         ctx: &'a SourceCtx<'_>,
     ) -> BoxFuture<'a, Result<RawPosting, SourceError>> {
         Box::pin(async move {
-            let url = self.detail_url(external_id);
+            let url = self
+                .detail_url(external_id)
+                .ok_or_else(|| SourceError::InvalidValue {
+                    field: "greenhouse posting id".into(),
+                    value: external_id.to_string(),
+                })?;
             let body = json::get_json(ctx.http, &url, self.board.limits()).await?;
             let payload = json::parse(&body)?;
             parse_job(&payload, &self.board).ok_or_else(|| SourceError::InvalidPayload {
@@ -313,8 +317,25 @@ mod tests {
     #[test]
     fn a_detail_id_cannot_escape_the_board_path() {
         let adapter = Greenhouse::new(board());
-        let url = adapter.detail_url("../evil");
+        let url = adapter
+            .detail_url("../evil")
+            .expect("a mixed id is encoded");
         assert!(url.ends_with("/jobs/..%2Fevil"), "{url}");
         assert!(!url.contains("/../"), "{url}");
+        assert_eq!(adapter.detail_url(".."), None);
+        assert_eq!(adapter.detail_url("."), None);
+        assert_eq!(adapter.detail_url(""), None);
+    }
+    #[tokio::test]
+    async fn a_detail_id_of_dots_is_refused_before_any_request() {
+        let server = MockServer::start().await;
+        let adapter = Greenhouse::with_base(server.uri(), board());
+        let http = client();
+        let ctx = SourceCtx {
+            http: &http,
+            cancel: tokio_util::sync::CancellationToken::new(),
+        };
+        let error = adapter.detail("..", &ctx).await.expect_err("refused");
+        assert!(matches!(error, SourceError::InvalidValue { .. }));
     }
 }
