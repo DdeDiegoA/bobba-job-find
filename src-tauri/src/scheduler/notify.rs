@@ -14,7 +14,10 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
+use boba_app::digest::settings::SETTINGS_KEY;
+use boba_app::digest::{EventKind, NotificationSettings};
 use boba_app::ports::notifier::{Notification, NotifierError, NotifierPort};
+use boba_app::ports::repo::system::SystemRepo;
 
 const EN: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -140,6 +143,32 @@ fn parse(raw: &str, lang: &str) -> HashMap<String, String> {
         .collect()
 }
 
+/// Whether the user wants this notification (FR-107, S5.3).
+///
+/// The events they chose can be silenced; the security ones never are — a
+/// locked store, a paused session board and anything the Kill Switch reports
+/// always arrive (orquestador, 2026-10-17). A store that cannot be read (still
+/// locked) reads as the defaults, which notify: a silent app is the bug.
+fn allows(settings: &NotificationSettings, notification: Notification) -> bool {
+    let kind = match notification {
+        Notification::LockedSearch | Notification::SessionChallengePaused => return true,
+        Notification::OutboxHold => EventKind::Outbox,
+        Notification::SourceFailing => EventKind::Errors,
+        // A host without the digest port (S5.3) still shows the plain notice,
+        // under the same "the daily digest" choice.
+        Notification::TopMatches { .. } => EventKind::Digest,
+    };
+    settings.allows(kind)
+}
+
+/// The stored notification settings; the defaults when the store is not open.
+fn stored_settings<R: Runtime>(app: &AppHandle<R>) -> NotificationSettings {
+    let raw = crate::wiring::port::<dyn SystemRepo>(app)
+        .ok()
+        .and_then(|repo| repo.setting_get(SETTINGS_KEY).ok().flatten());
+    NotificationSettings::from_json(raw.as_deref())
+}
+
 /// The [`NotifierPort`] adapter: one native notification through the OS.
 pub struct TauriNotifier<R: Runtime> {
     app: AppHandle<R>,
@@ -153,6 +182,9 @@ impl<R: Runtime> TauriNotifier<R> {
 
 impl<R: Runtime> NotifierPort for TauriNotifier<R> {
     fn notify(&self, notification: Notification) -> Result<(), NotifierError> {
+        if !allows(&stored_settings(&self.app), notification) {
+            return Ok(());
+        }
         let locale = crate::lifecycle::ui_locale(&self.app);
         let (title, body): (&str, String) = match notification {
             Notification::LockedSearch => (
@@ -238,6 +270,37 @@ mod tests {
                     entry.message_key
                 );
             }
+        }
+    }
+
+    /// S5.3 (FR-107): the user's choices gate the events they can silence —
+    /// and never the security ones.
+    #[test]
+    fn the_users_choices_gate_what_they_can_silence() {
+        use boba_app::digest::NotificationSettings;
+
+        let mut off = NotificationSettings::default();
+        off.events.outbox = false;
+        off.events.errors = false;
+        off.events.digest = false;
+
+        // Silenced when asked.
+        assert!(!allows(&off, Notification::OutboxHold));
+        assert!(!allows(&off, Notification::SourceFailing));
+        assert!(!allows(&off, Notification::TopMatches { count: 3 }));
+
+        // Never silenced: a locked store and a paused board need the user.
+        assert!(allows(&off, Notification::LockedSearch));
+        assert!(allows(&off, Notification::SessionChallengePaused));
+
+        // Everything on by default.
+        let on = NotificationSettings::default();
+        for notification in [
+            Notification::OutboxHold,
+            Notification::SourceFailing,
+            Notification::TopMatches { count: 1 },
+        ] {
+            assert!(allows(&on, notification));
         }
     }
 

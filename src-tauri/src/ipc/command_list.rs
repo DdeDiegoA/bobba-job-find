@@ -113,6 +113,8 @@ macro_rules! boba_commands {
             crate::commands::onboarding::onboarding_status,
             crate::commands::onboarding::onboarding_complete,
             crate::commands::capabilities::capabilities_snapshot,
+            crate::notifications::commands::notifications_snapshot,
+            crate::notifications::commands::notifications_save,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
@@ -127,6 +129,7 @@ macro_rules! boba_events {
             crate::events::TaskFinished,
             crate::commands::daily_search::RunReportProgressed,
             crate::commands::kill_switch::KillSwitchChanged,
+            crate::notifications::NotificationOpened,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };

@@ -6,6 +6,7 @@ import Onboarding from "@/features/onboarding";
 import { useOnboardingGate } from "@/features/onboarding/wizard/use-onboarding";
 import Profile from "@/features/profile";
 import Settings from "@/features/settings";
+import { OpenToday } from "@/features/settings/notifications/open-today";
 import Studio from "@/features/studio";
 import Today from "@/features/today";
 import Tracker from "@/features/tracker";
@@ -33,7 +34,13 @@ export const routes = [
   { path: "/onboarding/*", element: <Onboarding /> },
   { path: "/unlock", element: <Unlock /> },
   {
-    element: <Shell />,
+    // S5.3: a digest click opens Today from wherever the user is.
+    element: (
+      <>
+        <OpenToday />
+        <Shell />
+      </>
+    ),
     children: [
       { index: true, element: <FirstRun /> },
       { path: "inbox", element: <Inbox /> },
