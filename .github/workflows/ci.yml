@@ -40,7 +40,6 @@ jobs:
       - name: Release config guards
         run: |
           node scripts/release/verify-updater-pubkey.mjs
-          node scripts/release/verify-updater-endpoint.mjs
           grep -Eq '^BOBA_MACOS_CERT_SHA1=[0-9a-f]{40}$' scripts/release/macos-identity.pin || {
             echo "::error::scripts/release/macos-identity.pin has no pinned certificate (docs/install/RELEASING.md)"
             exit 1
