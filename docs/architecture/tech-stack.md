@@ -2,7 +2,7 @@
 
 > **Status:** v1, 2026-10-04 · **Owner:** architect · Binding decisions are in [`ARCHITECTURE-SPINE.md`](./ARCHITECTURE-SPINE.md). Rationale is in [`architecture.md`](./architecture.md) and [`adr/`](./adr/).
 > **Versions** were checked against crates.io, the npm registry and the GitHub API on **2026-10-04**. Pin minor versions in manifests (`^x.y` for npm, `x.y` for Cargo) and commit the lockfiles. Licences are taken from the registry metadata.
-> **Licence policy:** the app is distributed under MIT (Apache-2.0 compatible). Allowed: MIT, Apache-2.0, BSD, ISC, Zlib, MPL-2.0 (file-level), OFL (fonts), CC-BY (data). Copyleft (GPL/AGPL/LGPL-static) is **not allowed**. `cargo deny` and a license-checker script enforce this in CI.
+> **Licence policy:** the app is distributed under MIT (Apache-2.0 compatible). Allowed (as in `deny.toml`): MIT, Apache-2.0 (also WITH LLVM-exception), BSD-2/3-Clause, ISC, Zlib, MPL-2.0 (file-level), OFL-1.1 (fonts), CC-BY-4.0 (data), CC0-1.0, Unicode-3.0, Unicode-DFS-2016, 0BSD. `CDLA-Permissive-2.0` (Mozilla CA root data, not code) is allowed only for `webpki-root-certs` and `webpki-roots`. Copyleft (GPL/AGPL/LGPL-static) is **not allowed**. `cargo deny` and a license-checker script enforce this in CI.
 
 ---
 

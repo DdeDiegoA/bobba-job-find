@@ -17,3 +17,7 @@ Format: Context → Decision → Consequences → Alternatives considered. Statu
 | [011](./011-audit-chain-canonical-form.md) | Audit chain: frozen canonical form and anchor semantics | Accepted | AD-12 |
 | [012](./012-composition-root-and-port-wiring.md) | Composition root and port wiring | Accepted | AD-3, AD-14 |
 | [013](./013-passphrase-kdf-record-and-session-key.md) | Passphrase KDF record (Argon2id) and the login-session key | Accepted · Approved (Diego standing OK) | AD-13, AD-18, AD-20 |
+| [014](./014-per-run-lockdown-gate.md) | Per-run untrusted-content gate: pinned config plus the run's own init event | Accepted · Approved (Diego) | AD-4, AD-6, AD-7 |
+| [015](./015-migration-numbering.md) | Migration numbers are assigned at rebase time | Accepted | AD-2, AD-20 |
+| [016](./016-per-area-error-locale-files.md) | Core error keys live in per-area locale files | Accepted | AD-21 |
+| [017](./017-event-names-without-dots.md) | Event names: `<area>:<verb-ed>`, no dots | Accepted | AD-3 |
