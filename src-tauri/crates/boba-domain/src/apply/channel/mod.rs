@@ -98,19 +98,19 @@ pub fn detect(offer: &Offer) -> Vec<ApplyChannel> {
         });
     }
 
+    // Manual is the original page: only a page we can open is a channel.
     let url = offer.apply.url.trim();
-    if let Some(host) = host_of(url)
-        && let Some(provider) = AtsProvider::from_host(host)
-    {
-        channels.push(ApplyChannel::AtsForm {
-            provider,
+    if let Some(host) = host_of(url) {
+        if let Some(provider) = AtsProvider::from_host(host) {
+            channels.push(ApplyChannel::AtsForm {
+                provider,
+                url: url.to_string(),
+            });
+        }
+        channels.push(ApplyChannel::Manual {
             url: url.to_string(),
         });
     }
-
-    channels.push(ApplyChannel::Manual {
-        url: url.to_string(),
-    });
     channels
 }
 
@@ -125,7 +125,18 @@ fn host_of(url: &str) -> Option<&str> {
         return None;
     }
     let authority = rest.split('/').next().unwrap_or_default();
-    let authority = authority.rsplit('@').next().unwrap_or_default();
+    // Whitelist what may sit in a host:port. A backslash is a path separator
+    // to a browser, and a fragment, query or `@` cannot be part of the
+    // authority at all, so anything else is a URL the browser would read
+    // differently from this check (reviewer-1 F1: it would visit another host
+    // than the one matched here).
+    if authority.is_empty()
+        || !authority
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+    {
+        return None;
+    }
     let host = authority.split(':').next().unwrap_or_default();
     if host.is_empty() { None } else { Some(host) }
 }
@@ -270,8 +281,6 @@ mod tests {
         for url in [
             "https://greenhouse.io.example.com/jobs/1",
             "https://nimbus.example/careers/1",
-            "not a url",
-            "mailto:jobs@nimbus.example",
         ] {
             let channels = detect(&offer(url, None));
             assert_eq!(
@@ -279,6 +288,39 @@ mod tests {
                 vec![ApplyChannel::Manual { url: url.into() }],
                 "{url}"
             );
+        }
+    }
+
+    #[test]
+    fn a_string_that_is_not_an_http_url_has_no_manual_channel() {
+        for url in [
+            "not a url",
+            "",
+            "mailto:jobs@nimbus.example",
+            "ftp://boards.greenhouse.io/x",
+        ] {
+            assert_eq!(
+                detect(&offer(url, None)),
+                vec![],
+                "{url:?} is not a page the bar could open"
+            );
+        }
+    }
+
+    #[test]
+    fn an_authority_a_browser_reads_differently_is_not_an_ats_form() {
+        // A backslash and a fragment are path/URL separators to a browser, so
+        // the host it visits is not the one this check would match (reviewer-1
+        // F1): every one of these opens an attacker's page, not an ATS form.
+        for url in [
+            "https://evil.com\\@boards.greenhouse.io/x",
+            "https://evil.com#@boards.greenhouse.io/x",
+            "https://evil.com?@boards.greenhouse.io/x",
+            "https://user:pass@boards.greenhouse.io/x",
+            "https://boards .greenhouse.io/x",
+            "https://boards.greenhouse.io\u{1}/x",
+        ] {
+            assert_eq!(detect(&offer(url, None)), vec![], "{url:?}");
         }
     }
 

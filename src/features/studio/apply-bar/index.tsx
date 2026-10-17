@@ -43,12 +43,16 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
   const failure = mark.error ?? exported.error;
   const kinds = bar.pending.map((kind) => kindLabel(kind, t));
 
-  const copy = (answer: KitAnswerView, index: number) => {
+  const copy = async (answer: KitAnswerView, index: number) => {
+    const clipboard = navigator.clipboard;
+    // A webview without the clipboard API still shows the text to select; the
+    // label only says "Copied" once a write actually resolved (reviewer-1 F3).
+    if (!clipboard?.writeText) return;
     try {
-      void navigator.clipboard?.writeText(answer.answer);
+      await clipboard.writeText(answer.answer);
       setCopied(index);
     } catch {
-      // A webview without clipboard access still shows the text to select.
+      // Denied by the webview: nothing was copied, so the label stays "Copy".
     }
   };
 
@@ -155,7 +159,7 @@ export default function StudioApplyBar({ applicationId }: { applicationId: strin
                   <button
                     type="button"
                     className="shrink-0 text-xs underline hover:text-fg"
-                    onClick={() => copy(answer, index)}
+                    onClick={() => void copy(answer, index)}
                   >
                     {copied === index ? t("kit.copied") : t("kit.copy")}
                   </button>
