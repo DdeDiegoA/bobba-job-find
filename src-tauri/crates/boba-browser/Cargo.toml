@@ -23,3 +23,6 @@ blake3 = { workspace = true }
 # Whether a Linux keyring holds Chrome's cookie key (S11.1a): the same store
 # the app installs at unlock (S1.2a), read-only here.
 keyring-core = { workspace = true }
+
+[lints]
+workspace = true

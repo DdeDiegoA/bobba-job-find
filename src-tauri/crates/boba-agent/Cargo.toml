@@ -20,3 +20,6 @@ process-wrap = { workspace = true, features = ["std"] }
 # MCP endpoint (AD-6): owner-only local socket / named pipe, plus per-run token bytes.
 interprocess = { workspace = true }
 getrandom = { workspace = true }
+
+[lints]
+workspace = true

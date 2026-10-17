@@ -80,3 +80,6 @@ tauri-plugin-process = { workspace = true }
 tauri = { workspace = true, features = ["test"] }
 # The manual-intake fetch (S4.7) is tested against a local HTTP server.
 wiremock = { workspace = true }
+
+[lints]
+workspace = true

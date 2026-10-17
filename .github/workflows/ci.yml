@@ -33,6 +33,10 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Actions pinned by SHA, no job-board/LLM endpoints
         run: node scripts/ci/check-workflow-policy.mjs
+      # CH13: architecture conventions that no compiler sees — event names,
+      # error catalogs, migrations, the IPC list and the port list.
+      - name: Repository conventions
+        run: node scripts/ci/check-conventions.mjs
       - name: stories.yaml fresh, deps acyclic, MVP FRs covered
         run: python3 scripts/gen_stories.py --check
       # S10.5 (AD-22): the updater pubkey in tauri.conf.json must stay a real

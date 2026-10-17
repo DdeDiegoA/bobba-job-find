@@ -12,3 +12,6 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 time = { workspace = true, features = ["serde-well-known"] }
 ulid = { workspace = true, features = ["serde"] }
+
+[lints]
+workspace = true

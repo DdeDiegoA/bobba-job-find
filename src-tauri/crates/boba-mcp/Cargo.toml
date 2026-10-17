@@ -18,3 +18,6 @@ serde_json = { workspace = true }
 [dev-dependencies]
 interprocess = { workspace = true }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

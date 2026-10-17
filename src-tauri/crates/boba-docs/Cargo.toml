@@ -31,3 +31,6 @@ pdf-extract = { workspace = true }
 docx-rs = { workspace = true, default-features = false }
 
 [dev-dependencies]
+
+[lints]
+workspace = true
