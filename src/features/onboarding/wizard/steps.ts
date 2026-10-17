@@ -1,3 +1,4 @@
+import CvImportStep from "../steps/cv-import";
 import EngineStep, { engineStepIsValid } from "../steps/engine";
 import LanguageStep from "../steps/language";
 import PreferencesStep from "../steps/preferences";
@@ -18,6 +19,14 @@ export const WIZARD_STEPS: WizardStep[] = [
     isValid: engineStepIsValid,
     invalidKey: "onboarding_engine:step.invalid",
     Component: EngineStep,
+  },
+  // The Master CV comes before Preferences (PRD §4.1, FR-5). Optional: a user
+  // with no CV on hand adds facts by hand, and the gap interview fills the rest.
+  {
+    id: "cv-import",
+    titleKey: "onboarding_cv:step.title",
+    optional: true,
+    Component: CvImportStep,
   },
   { id: "preferences", titleKey: "preferences:step.title", Component: PreferencesStep },
 ];

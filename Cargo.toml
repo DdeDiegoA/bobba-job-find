@@ -125,6 +125,16 @@ typst-layout = "0.15"
 pdf-extract = "0.12"
 lopdf = "0.45"
 docx-rs = "0.4.22"
+# Master CV import (S3.5): read the user's own DOCX/ZIP files. `zip` must stay
+# >= 9.0.3: the deny.toml advisories RUSTSEC-2026-0367/0368/0369 are ignored by
+# id for the updater's zip 4.6.1, so an 8.x here would pass cargo-deny silently.
+# (9.0.0–9.0.2 are yanked.) docx-rs keeps its own zip 8.x for writing.
+zip = "9.0.3"
+quick-xml = "0.42"
+# The PDF bomb pre-scan (S3.5 review F2): inflate a FlateDecode stream with a
+# byte cap so a small PDF cannot expand into gigabytes before `pdf-extract`
+# reads it. Already in the lock through zip/pdf-extract.
+flate2 = "1"
 chromiumoxide = "0.9"
 lettre = "0.11"
 async-imap = "0.12"

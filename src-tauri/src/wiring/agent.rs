@@ -37,6 +37,7 @@ use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::posting_features;
+use boba_app::profile_import;
 use boba_app::tailoring;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
@@ -568,6 +569,15 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == posting_features::PROPOSE_TOOL => {
                 self.validate_proposal(args)
             }
+            // S3.5: a `profile_import` run's proposal. The payload is
+            // shape-checked here so a malformed call costs the run a retry;
+            // the excerpts are verified in `boba_app::profile_import`, which
+            // holds the extracted CV text and stores the survivors.
+            Some(spec) if spec.name == profile_import::PROPOSE_TOOL => {
+                profile_import::validate_proposal(args)
+                    .map(|accepted| json!({ "accepted": accepted }))
+                    .map_err(|error| error.to_string())
+            }
             // S7.7: what a `tailor_application` run reads, and the two drafts it
             // writes. The user's own data (facts, preferences) is not untrusted
             // and the posting is (the endpoint decides the envelope, AD-7).
@@ -681,7 +691,7 @@ fn save_document_draft(
 fn pending_slice(tool_name: &str) -> &'static str {
     match tool_name {
         "get_task_input" => "the MCP endpoint (S2.4 serves the run's own input there)",
-        "propose_profile_facts" | "propose_translations" => "S3.4 (profile facts)",
+        "propose_translations" => "S3.6 (bilingual drafting)",
         "get_company_research" => {
             "no slice yet (company research is not built, and the tailor skill reads it only when it exists)"
         }
@@ -914,6 +924,7 @@ mod tests {
                 | "save_document_draft"
                 | "save_score_narration"
         ) || name == posting_features::PROPOSE_TOOL
+            || name == profile_import::PROPOSE_TOOL
     }
 
     /// A handler over a real (encrypted, temp) store: the same construction the
@@ -1798,6 +1809,41 @@ mod tests {
         assert_eq!(spec.name, posting_features::PROPOSE_TOOL);
         assert_eq!(spec.tasks, &[tool::EXTRACT_POSTINGS]);
         assert!(spec.kind.is_write(), "a proposal, not a read");
+    }
+
+    /// The CV import's proposal tool must be the catalog's (AD-5), and the
+    /// boundary must refuse a malformed payload rather than accept it.
+    #[test]
+    fn the_profile_import_proposal_is_the_catalog_tool() {
+        let spec = tool::find(profile_import::PROPOSE_TOOL).expect("in the catalog");
+        assert_eq!(spec.name, profile_import::PROPOSE_TOOL);
+        assert!(spec.tasks.contains(&tool::PROFILE_IMPORT));
+        assert!(spec.kind.is_write(), "a proposal, not a read");
+
+        let tools = repo_tools("profile-import");
+        let accepted = tools
+            .call(
+                "profile_import",
+                None,
+                profile_import::PROPOSE_TOOL,
+                &json!({"facts": [{
+                    "kind": "skill",
+                    "text_en": "Rust",
+                    "source_excerpt": "Skills: Rust",
+                }]}),
+            )
+            .expect("a well-formed proposal is accepted");
+        assert_eq!(accepted, json!({ "accepted": 1 }));
+
+        let refused = tools
+            .call(
+                "profile_import",
+                None,
+                profile_import::PROPOSE_TOOL,
+                &json!({"facts": [{"kind": "hobby", "text_en": "Chess", "source_excerpt": "Chess"}]}),
+            )
+            .expect_err("an unknown section is refused");
+        assert!(refused.contains("hobby"), "{refused}");
     }
 
     /// A run reads its queue and is checked at the tool boundary (AD-5). The

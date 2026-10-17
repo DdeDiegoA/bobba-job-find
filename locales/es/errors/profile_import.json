@@ -1,0 +1,12 @@
+{
+  "errors.profile_import.no_text": "No se pudo leer texto de ese archivo: prueba con un DOCX o pega el texto.",
+  "errors.profile_import.unsupported": "Ese tipo de archivo no está soportado aquí. Usa un PDF, DOCX, ZIP de exportación de LinkedIn o texto plano.",
+  "errors.profile_import.read": "No se pudo leer ese archivo. Comprueba que sigue existiendo e inténtalo de nuevo.",
+  "errors.profile_import.too_large": "Esa importación es demasiado grande. Usa un CV más corto o pega el texto.",
+  "errors.profile_import.store": "No se pudo leer ni guardar tu perfil.",
+  "errors.profile_import.contract": "El agente envió datos que Boba no pudo leer. Vuelve a ejecutar la importación.",
+  "errors.profile_import.unknown_proposal": "Esa sugerencia ya no está esperando revisión.",
+  "errors.profile_import.run": "La importación no terminó. Puede que el motor de IA no tenga sesión o cuota.",
+  "errors.profile_import.no_engine": "Elige un motor de IA en el paso anterior antes de importar tu CV.",
+  "errors.profile_import.nothing": "Elige un archivo de CV o pega el texto de tu CV primero."
+}
