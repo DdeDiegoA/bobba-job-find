@@ -168,12 +168,10 @@ describe("Tracker — a card moves without a drag", () => {
   it("moves a card along the columns with Cmd/Ctrl + Arrow", async () => {
     render(providers(<Board />));
 
-    // The draggable itself is the `<li>` dnd-kit turned into a button; it is
-    // also the element that carries the Cmd/Ctrl + ←/→ handler.
-    await screen.findByRole("button", { name: /Open Backend Engineer/ });
-    const card = document.querySelector<HTMLElement>('li[aria-label="Open Backend Engineer"]');
-    expect(card).toBeTruthy();
-    fireEvent.keyDown(card as HTMLElement, { key: "ArrowRight", metaKey: true });
+    // The card is a plain list item; its open control is the focusable button
+    // and the key event bubbles to the card's Cmd/Ctrl + ←/→ handler (A11Y-2).
+    const open = await screen.findByRole("button", { name: "Open Backend Engineer" });
+    fireEvent.keyDown(open, { key: "ArrowRight", metaKey: true });
 
     await waitFor(() =>
       expect(commands.trackerTransitionStatus).toHaveBeenCalledWith(

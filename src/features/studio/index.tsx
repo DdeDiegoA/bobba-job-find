@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,32 @@ export default function StudioIndex() {
   const regenerate = useStudioRegenerate(applicationId);
   const exported = useStudioExport(applicationId);
   const [kind, setKind] = useState<StudioKind>("cv");
+  const documentTabs = [
+    { id: "cv" as const, label: t("documents.cv") },
+    { id: "cover_letter" as const, label: t("documents.cover_letter") },
+  ];
+  const tabId = (id: string) => `studio-tab-${id}`;
+  const documentPanelId = "studio-document-panel";
+
+  // A11Y-8: a real tablist — roving tabindex and arrow-key selection.
+  const onDocumentTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step =
+      event.key === "ArrowRight"
+        ? 1
+        : event.key === "ArrowLeft"
+          ? -1
+          : event.key === "Home"
+            ? -index
+            : event.key === "End"
+              ? documentTabs.length - 1 - index
+              : 0;
+    if (step === 0 && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const next = documentTabs[(index + step + documentTabs.length) % documentTabs.length];
+    setKind(next.id);
+    // `document` is the draft in this scope; the DOM lives on globalThis.
+    globalThis.document.getElementById(tabId(next.id))?.focus();
+  };
 
   if (applicationId.length === 0) {
     // The route names no application (S1.5's table has no parameter): offer the
@@ -140,41 +166,52 @@ export default function StudioIndex() {
         </p>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 flex-1 gap-4 max-[959.98px]:flex-col">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
           <div role="tablist" aria-label={t("documents.aria")} className="flex gap-2">
-            {(["cv", "cover_letter"] as const).map((tab) => (
+            {documentTabs.map((tab, index) => (
               <button
-                key={tab}
+                key={tab.id}
+                id={tabId(tab.id)}
                 type="button"
                 role="tab"
-                aria-selected={kind === tab}
-                onClick={() => setKind(tab)}
+                aria-selected={kind === tab.id}
+                aria-controls={documentPanelId}
+                tabIndex={kind === tab.id ? 0 : -1}
+                onClick={() => setKind(tab.id)}
+                onKeyDown={(event) => onDocumentTabKeyDown(event, index)}
                 className={cn(
                   "rounded-xl px-3 py-1 text-sm",
-                  kind === tab
+                  kind === tab.id
                     ? "bg-primary-soft text-on-primary-soft"
                     : "text-fg-muted hover:text-fg",
                 )}
               >
-                {tab === "cv" ? t("documents.cv") : t("documents.cover_letter")}
+                {tab.label}
               </button>
             ))}
           </div>
 
-          {document ? (
-            <StudioEditor
-              document={document}
-              onEdit={onEdit}
-              onRegenerate={onRegenerate}
-              busy={busy}
-            />
-          ) : (
-            <EmptyState title={t("no_drafts.title")} description={t("no_drafts.body")} />
-          )}
+          <div
+            role="tabpanel"
+            id={documentPanelId}
+            aria-labelledby={tabId(kind)}
+            className="flex min-h-0 flex-1 flex-col gap-3"
+          >
+            {document ? (
+              <StudioEditor
+                document={document}
+                onEdit={onEdit}
+                onRegenerate={onRegenerate}
+                busy={busy}
+              />
+            ) : (
+              <EmptyState title={t("no_drafts.title")} description={t("no_drafts.body")} />
+            )}
+          </div>
         </div>
 
-        <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto">
+        <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-y-auto max-[959.98px]:w-full max-[959.98px]:overflow-visible">
           <ChecksPanel document={document} blocked={blocked} />
           {document ? <FindingsPanel document={document} /> : null}
           {document ? (

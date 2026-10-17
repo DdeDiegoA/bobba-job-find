@@ -6,13 +6,11 @@ import { describe, expect, it } from "vitest";
  * 200% zoom (S10.6 AC1, NFR-15, EXPERIENCE §7: "Zoom to 200% without loss of
  * content or function").
  *
- * Zoom halves the CSS viewport. The shell replaces itself with a resize notice
- * below 960 CSS px (`src/styles/index.css`), so a 200% zoom on a 1440-px window
- * (720 CSS px) shows the notice instead of the app — and the window itself is
- * allowed down to 940 px, which is already inside that range. This test pins
- * the numbers so the pass has evidence, and pins the defect as `it.fails` for
- * the shell's owner to fix (A11Y-6). Fixing it means either lowering the floor
- * to a width that reflows, or matching the window minimum to it.
+ * Zoom halves the CSS viewport. A11Y-6: the shell used to replace itself with a
+ * resize notice below 960 CSS px, so a 200% zoom on a 1440-px window (720 CSS
+ * px) and the window's own 940-px minimum both lost the app. It now reflows into
+ * a compact layout at every width; these assertions pin that (the physical
+ * visual pass stays manual, script D in `docs/qa/accessibility.md`).
  */
 
 const CSS = readFileSync(join(process.cwd(), "src/styles/index.css"), "utf8").replace(
@@ -23,41 +21,53 @@ const CONF = JSON.parse(
   readFileSync(join(process.cwd(), "src-tauri/tauri.conf.json"), "utf8"),
 ) as { app?: { windows?: { minWidth?: number }[] } };
 
-/** The widest viewport that still triggers the resize floor. */
-function floorWidth(): number {
-  const match = /@media \(max-width: ([\d.]+)px\)\s*\{[\s\S]*?\.shell\s*\{\s*display:\s*none/.exec(
-    CSS,
-  );
-  expect(match, "the shell floor rule exists").not.toBeNull();
-  return Number(match?.[1]);
+/** The compact-layout rule: its widest width and the rail column it sets. */
+function compactRule(): { floor: number; columns: string } {
+  const match = /@media \(max-width: ([\d.]+)px\)\s*\{\s*\.shell\s*\{([^}]*)\}/.exec(CSS);
+  expect(match, "the compact shell rule exists").not.toBeNull();
+  const columns = /grid-template-columns:\s*([^;]+);/.exec(match?.[2] ?? "")?.[1].trim() ?? "";
+  return { floor: Number(match?.[1]), columns };
 }
 
-const FLOOR = floorWidth();
-const MIN_WINDOW = CONF.app?.windows?.[0]?.minWidth ?? 0;
+/** The compact sidebar rail in CSS px (`3.5rem` → 56). */
+function railWidth(columns: string): number {
+  const rem = /^([\d.]+)rem/.exec(columns);
+  expect(rem, `the rail column is set in rem: ${columns}`).not.toBeNull();
+  return Number(rem?.[1]) * 16;
+}
 
-describe("the shell floor and the window minimum", () => {
-  it("documents the floor the app ships", () => {
-    expect(FLOOR).toBeGreaterThan(0);
-    expect(FLOOR).toBeLessThan(1000);
+const { floor: FLOOR, columns: COLUMNS } = compactRule();
+const MIN_WINDOW = CONF.app?.windows?.[0]?.minWidth ?? 0;
+const RAIL = railWidth(COLUMNS);
+/** 200% zoom on a 1440-px window. */
+const ZOOMED = 1440 / 2;
+
+describe("the shell at 200% zoom (A11Y-6)", () => {
+  it("never hides the shell at any width", () => {
+    // The old defect: `.shell { display: none }` below 960 px.
+    expect(CSS).not.toMatch(/\.shell\s*\{[^}]*display:\s*none/);
   });
 
-  it("hides the shell at the window's own minimum size", () => {
-    // Evidence for A11Y-6: at the smallest window the user may make, the app
-    // is already below its floor.
+  it("reflows into a compact layout below the 960-px breakpoint", () => {
+    expect(FLOOR).toBeGreaterThan(0);
+    expect(FLOOR).toBeLessThan(1000);
+    expect(COLUMNS).toContain("minmax(0, 1fr)");
+    expect(RAIL).toBeGreaterThan(0);
+  });
+
+  it("stays in the compact layout at the window's own minimum size", () => {
     expect(MIN_WINDOW).toBeGreaterThan(0);
+    // The window cannot open narrower than the breakpoint: no width the user
+    // can reach unzoomed falls outside the reflowing range.
     expect(MIN_WINDOW).toBeLessThanOrEqual(FLOOR);
   });
 
-  it("loses the content at 200% zoom on a 1440-px window", () => {
-    // 1440 / 2 = 720 CSS px, below the floor: the notice replaces the app.
-    expect(1440 / 2).toBeLessThanOrEqual(FLOOR);
-  });
-
-  it.fails("keeps the app usable at 200% zoom (A11Y-6)", () => {
-    // Passes only when the floor reflows below 720 px, or when the app opts in
-    // to a zoom/scroll model that keeps content visible. Owned by the shell
-    // slice (S1.5) with DESIGN.md §10.4 — delete this pin when it lands.
-    const zoomed = 1440 / 2;
-    expect(zoomed).toBeGreaterThan(FLOOR);
+  it("keeps content and function at 200% zoom on a 1440-px window", () => {
+    // 1440 / 2 = 720 CSS px: the compact layout, not a resize notice.
+    expect(ZOOMED).toBeLessThanOrEqual(FLOOR);
+    // The rail leaves a usable content column even at the window minimum.
+    expect(ZOOMED - RAIL).toBeGreaterThanOrEqual(320);
+    expect(MIN_WINDOW).toBeGreaterThanOrEqual(940);
+    expect(MIN_WINDOW / 2 - RAIL).toBeGreaterThanOrEqual(320);
   });
 });

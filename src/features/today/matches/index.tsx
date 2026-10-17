@@ -2,7 +2,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   bandCounts,
   isExcluded,
@@ -91,11 +91,12 @@ export default function TodayMatches() {
                 </li>
               ))}
             </ul>
-            <Link to="/inbox" className="ml-auto">
-              <Button variant="outline" size="sm">
-                {t("matches.open_inbox")}
-                <ArrowRight aria-hidden className="size-3.5" />
-              </Button>
+            <Link
+              to="/inbox"
+              className={`${buttonVariants({ variant: "outline", size: "sm" })} ml-auto`}
+            >
+              {t("matches.open_inbox")}
+              <ArrowRight aria-hidden className="size-3.5" />
             </Link>
           </div>
 
@@ -125,6 +126,7 @@ export default function TodayMatches() {
                           {verdict ? (
                             <span className="inline-flex items-center gap-1 text-fg">
                               {VERDICT_LABELS[verdict] ? t(VERDICT_LABELS[verdict]) : null}
+                              {/* A11Y-5: a real space, so the tree reads "Strong 78". */}{" "}
                               {card.rank !== null ? Math.round(card.rank) : null}
                             </span>
                           ) : null}

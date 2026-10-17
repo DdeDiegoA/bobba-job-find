@@ -313,7 +313,9 @@ export function Header({ detail, locale }: { detail: Detail; locale: string }) {
 
   return (
     <header className="flex flex-col gap-1">
-      <h1 className="font-display text-2xl text-fg">{detail.title || t("untitled")}</h1>
+      <h1 id="offer-title" className="font-display text-2xl text-fg">
+        {detail.title || t("untitled")}
+      </h1>
       {company ? <p className="text-sm text-fg-muted">{company}</p> : null}
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-subtle">
         <span>{t(WORK_MODE_LABELS[detail.work_mode] ?? "offer:work_mode.unknown")}</span>

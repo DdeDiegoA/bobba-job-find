@@ -176,7 +176,7 @@ Raw ramps. Components must not reference these directly — map through semantic
 | `--surface-sunken` | `#F0E4D5` | wells, skeletons, preview gutters |
 | `--fg` | `#2B201A` | primary text |
 | `--fg-muted` | `#6B594C` | secondary text |
-| `--fg-subtle` | `#8A7866` | decorative / non-text only (see §12) |
+| `--fg-subtle` | `#756249` | lowest-emphasis text (see §2.4) |
 | `--border` | `#E4D3BF` | default borders, dividers |
 | `--border-strong` | `#C4AE94` | emphasized borders, input hover |
 | `--primary` | `#9A5418` | brand, primary actions |
@@ -202,7 +202,7 @@ Raw ramps. Components must not reference these directly — map through semantic
 | `--surface-sunken` | `#14100E` | |
 | `--fg` | `#F5EDE4` | |
 | `--fg-muted` | `#BDAB9A` | |
-| `--fg-subtle` | `#7E6B5C` | decorative only |
+| `--fg-subtle` | `#A6907F` | lowest-emphasis text |
 | `--border` | `#3E2F27` | |
 | `--border-strong` | `#5A463A` | |
 | `--primary` | `#E8A860` | lightened caramel for contrast on dark |
@@ -236,9 +236,20 @@ normal text):
 | warning text | 6.33 | 10.11 |
 | info text | 8.40 | 8.15 |
 
-`--fg-subtle` (`#8A7866` light / `#7E6B5C` dark) does **not** meet 4.5:1 and is therefore
-**non-text / decorative only** — never use it for body copy, labels, or icon-only controls that
-carry meaning.
+`--fg-subtle` is a **text** token (A11Y-4 re-tuned it from the decorative-only
+`#8A7866` / `#7E6B5C`): light `#756249`, dark `#A6907F`. It is the lowest-emphasis text
+level and meets 4.5:1 on every background it lands on:
+
+| `--fg-subtle` on | Light | Dark |
+|---|---:|---:|
+| bg | 5.66 | 6.09 |
+| surface | 5.83 | 5.60 |
+| surface-muted | 4.99 | 5.08 |
+| surface-sunken | 4.66 | 6.23 |
+| primary-soft (selected option) | 4.81 | 4.52 |
+
+Below 4.5:1 is no longer allowed for text: use `--fg-muted` for anything that must read
+comfortably, and keep `--border` / `--border-strong` for dividers and purely decorative glyphs.
 
 ### 2.5 Theme switching
 
@@ -852,7 +863,7 @@ unlocked (P1-5).
 Non-negotiable. Any component failing these is not shippable.
 
 1. **Contrast:** normal text ≥4.5:1, large text/UI ≥3:1 — verified in §2.4. `--fg-subtle` is
-   decorative only.
+   the lowest-emphasis text level and meets 4.5:1 on every background it lands on.
 2. **Never color alone:** every score carries number + word + glyph; gates carry icon + label;
    statuses carry icon + text; kanban stages show labels.
 3. **Focus:** visible ring `2px solid var(--focus)` + `2px` offset on **all** interactive elements;
@@ -885,7 +896,7 @@ Non-negotiable. Any component failing these is not shippable.
 - Don't rely on color alone for any state (scores, gates, statuses).
 - Don't use pure black/white surfaces; keep the warm cast (espresso, cream).
 - Don't animate layout properties; don't use spring/confetti unless a new match lands.
-- Don't put `--fg-subtle` on text; don't use emoji as icons.
+- Don't use `--fg-subtle` where `--fg-muted` is the right emphasis; don't use emoji as icons.
 - Don't hide VETOs; show the evidence and the override.
 - Don't fork a near-duplicate component — extend the system.
 
@@ -906,7 +917,7 @@ Shape (CSS custom properties + Tailwind v4 `@theme` bridge):
   /* semantic — light */
   --bg: var(--cream-50);      --surface: #FFFFFF;      --surface-muted: var(--neutral-150);
   --surface-sunken: #F0E4D5;  --fg: var(--neutral-800);--fg-muted: var(--neutral-600);
-  --fg-subtle: #8A7866;       --border: var(--border-light); --border-strong: var(--border-strong-light);
+  --fg-subtle: #756249;       --border: var(--border-light); --border-strong: var(--border-strong-light);
   --primary: var(--caramel-600); --on-primary: #FFFFFF; --primary-hover: var(--caramel-700);
   --primary-soft: #F7E7D3;    --on-primary-soft: var(--caramel-700);
   --accent: #5B3E8A;          --on-accent: #FFFFFF;
@@ -928,7 +939,7 @@ Shape (CSS custom properties + Tailwind v4 `@theme` bridge):
 
 .dark {
   --bg: #191210; --surface: #241A16; --surface-muted: #2E221C; --surface-sunken: #14100E;
-  --fg: #F5EDE4; --fg-muted: #BDAB9A; --fg-subtle: #7E6B5C;
+  --fg: #F5EDE4; --fg-muted: #BDAB9A; --fg-subtle: #A6907F;
   --border: #3E2F27; --border-strong: #5A463A;
   --primary: #E8A860; --on-primary: #241A16; --primary-hover: #F0B878;
   --primary-soft: #3A2A1E; --on-primary-soft: #F0B878;

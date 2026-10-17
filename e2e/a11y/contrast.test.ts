@@ -12,11 +12,12 @@ import { describe, expect, it } from "vitest";
  * same ratios — so a token edit that drifts below AA fails CI instead of
  * shipping.
  *
+ * Covered: every normal-size text token, including `--fg-subtle` after A11Y-4
+ * re-tuned it to clearer warm values (light `#756249`, dark `#A6907F`) so the
+ * text it paints meets AA on every background it lands on — including the
+ * selected-option `--primary-soft` in onboarding.
+ *
  * NOT covered here (see `docs/qa/accessibility.md`):
- * - `--fg-subtle`: DESIGN.md §2.4 marks it decorative/non-text only because it
- *   measures 4.11 (light) / 3.65 (dark) against the page background. The app
- *   still paints normal-size text with it (78 occurrences); that is finding
- *   A11Y-4, owned by the screens that use it, not a token defect.
  * - Colour *usage* (band dots, icon-only meaning): a contrast test cannot see
  *   whether a colour is the only carrier; the screen audits and the manual pass
  *   cover it.
@@ -76,6 +77,11 @@ const PAIRS: [fg: string, bg: string][] = [
   ["--fg-muted", "--bg"],
   ["--fg-muted", "--surface"],
   ["--fg-muted", "--surface-muted"],
+  ["--fg-subtle", "--bg"],
+  ["--fg-subtle", "--surface"],
+  ["--fg-subtle", "--surface-muted"],
+  ["--fg-subtle", "--surface-sunken"],
+  ["--fg-subtle", "--primary-soft"],
   ["--on-primary", "--primary"],
   ["--on-primary-soft", "--primary-soft"],
   ["--danger", "--bg"],
@@ -96,12 +102,4 @@ describe.each([
       expect(ratio, `${fg} on ${bg} = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
     });
   }
-});
-
-describe("documented exceptions", () => {
-  // A11Y-4: fg-subtle is decorative-only by design, but the app paints text
-  // with it. The fix is per-screen (swap to fg-muted), filed as a follow-up;
-  // when it lands, move these two cases into PAIRS above.
-  it.todo("fg-subtle on bg meets 4.5:1 in light (A11Y-4)");
-  it.todo("fg-subtle on surface meets 4.5:1 in dark (A11Y-4)");
 });

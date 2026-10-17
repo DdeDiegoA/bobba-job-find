@@ -24,8 +24,6 @@
   "sidebar.language.toggle": "Idioma: {locale}. Activa para cambiar.",
   "sidebar.tapi": "Tapi está inactivo",
   "shell.skipToContent": "Saltar al contenido",
-  "shell.resizeTitle": "Amplía para continuar",
-  "shell.resizeBody": "Boba necesita una ventana de al menos 960 px de ancho.",
   "empty.title": "Aún no hay nada aquí",
   "empty.body": "Esta pantalla se irá llenando a medida que uses Boba."
 }

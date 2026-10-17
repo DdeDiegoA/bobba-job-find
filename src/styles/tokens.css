@@ -19,7 +19,7 @@
   --surface-sunken: #f0e4d5;
   --fg: var(--neutral-800);
   --fg-muted: var(--neutral-600);
-  --fg-subtle: #8a7866;
+  --fg-subtle: #756249;
   --border: var(--border-light);
   --border-strong: var(--border-strong-light);
   --primary: var(--caramel-600);
@@ -67,7 +67,7 @@
   --surface-sunken: #14100e;
   --fg: #f5ede4;
   --fg-muted: #bdab9a;
-  --fg-subtle: #7e6b5c;
+  --fg-subtle: #a6907f;
   --border: #3e2f27;
   --border-strong: #5a463a;
   --primary: #e8a860;
