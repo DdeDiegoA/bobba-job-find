@@ -12,6 +12,7 @@ import {
   SECTIONS,
   salaryLabel,
   sortCards,
+  VERDICT_FILTERS,
   verdictId,
 } from "./offers";
 
@@ -165,6 +166,20 @@ describe("filters (FR-63)", () => {
     expect(ids({ lang: "es" })).toEqual(["b"]);
     expect(ids({ verdict: "strong" })).toEqual(["a"]);
     expect(ids({ source: "manual", salaryKnown: true })).toEqual([]);
+  });
+
+  // FR-57/AC3: a Lead is the Verdict the card shows, so it is a filter choice of
+  // its own — and a Lead is not also reachable under its band.
+  it("filters by Lead, and the band filter keeps only cards shown as that band", () => {
+    const lead = card({ posting_id: "l", verdict: "good", lead: true });
+    const plain = card({ posting_id: "p", verdict: "good", lead: false });
+    expect(
+      filterCards([lead, plain], { ...NO_FILTERS, verdict: "lead" }).map((c) => c.posting_id),
+    ).toEqual(["l"]);
+    expect(
+      filterCards([lead, plain], { ...NO_FILTERS, verdict: "good" }).map((c) => c.posting_id),
+    ).toEqual(["p"]);
+    expect(VERDICT_FILTERS).toContain("lead");
   });
 
   it("keeps only Offers whose salary is known", () => {

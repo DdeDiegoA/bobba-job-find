@@ -184,17 +184,33 @@ export function hasFilters(filters: Filters): boolean {
   );
 }
 
-/** The cards the filters keep, in the core's order. */
+/**
+ * The cards the filters keep, in the core's order.
+ *
+ * The Verdict filter compares the Verdict the card **shows** ([`verdictId`]):
+ * FR-57 draws a Low Confidence card as a Lead, so "Lead" is one of the choices
+ * and a card shown as a Lead is not also reachable under its band.
+ */
 export function filterCards(cards: readonly Card[], filters: Filters): Card[] {
   return cards.filter((card) => {
     if (filters.source !== null && !card.sources.includes(filters.source)) return false;
     if (filters.workMode !== null && card.work_mode !== filters.workMode) return false;
     if (filters.lang !== null && card.lang !== filters.lang) return false;
     if (filters.salaryKnown && card.amount_minor === null) return false;
-    if (filters.verdict !== null && card.verdict !== filters.verdict) return false;
+    if (filters.verdict !== null && verdictId(card) !== filters.verdict) return false;
     return true;
   });
 }
+
+/** The Verdict choices of FR-63: the five bands, plus the Lead FR-57 shows. */
+export const VERDICT_FILTERS: readonly string[] = [
+  "strong",
+  "good",
+  "moderate",
+  "weak",
+  "poor",
+  "lead",
+];
 
 /** The choices each filter offers, from the cards themselves (sorted, unique). */
 export function filterOptions(cards: readonly Card[]): {

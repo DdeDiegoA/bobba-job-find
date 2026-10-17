@@ -19,6 +19,7 @@ import {
   type SortKey,
   sortCards,
   useInboxOffers,
+  VERDICT_FILTERS,
   VERDICT_LABELS,
   WORK_MODE_LABELS,
 } from "./offers";
@@ -223,7 +224,7 @@ function FilterBar({
         label={t("filter.verdict")}
         value={filters.verdict ?? ""}
         onChange={(value) => onChange({ ...filters, verdict: value || null })}
-        options={["strong", "good", "moderate", "weak", "poor"]}
+        options={[...VERDICT_FILTERS]}
         labelOf={(id) => (VERDICT_LABELS[id] ? t(VERDICT_LABELS[id]) : id)}
         anyLabel={t("filter.any")}
       />

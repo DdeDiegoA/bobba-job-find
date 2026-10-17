@@ -143,7 +143,8 @@ describe("the Offer card (AC2)", () => {
     vi.mocked(commands.offersInbox).mockReturnValue(ok([card({ lead: true, confidence: "low" })]));
     renderList();
 
-    const lead = await screen.findByText("Lead");
+    // The Verdict filter also offers "Lead"; the chip is the one inside a card.
+    const lead = await screen.findByText("Lead", { selector: "span" });
     expect(lead.parentElement?.className).toContain("border-dashed");
     expect(screen.getByText(/confidence low/)).toBeTruthy();
   });
@@ -207,6 +208,19 @@ describe("filters and sorts (AC3)", () => {
     expect(screen.getByText("No Offers for these filters.")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" }).at(-1) as HTMLElement);
     expect(await screen.findByText("No Salary")).toBeTruthy();
+  });
+
+  it("filters by Lead, the Verdict a Low Confidence card shows (FR-57)", async () => {
+    const lead = card({ posting_id: "pst_lead", title: "Lead Offer", verdict: "good", lead: true });
+    const plain = card({ posting_id: "pst_plain", title: "Plain Good", verdict: "good" });
+    vi.mocked(commands.offersInbox).mockReturnValue(ok([lead, plain]));
+    renderList();
+
+    await screen.findByText("Plain Good");
+    fireEvent.change(screen.getByLabelText("Verdict"), { target: { value: "lead" } });
+
+    expect(screen.getByText("Lead Offer")).toBeTruthy();
+    expect(screen.queryByText("Plain Good")).toBeNull();
   });
 
   it("sorts by Fit when asked, best first", async () => {
