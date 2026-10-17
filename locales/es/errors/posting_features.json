@@ -1,0 +1,6 @@
+{
+  "errors.posting_features.store": "Boba no pudo leer ni guardar las características de esta oferta. Inténtalo de nuevo.",
+  "errors.posting_features.unknown_offer": "Esa oferta ya no está guardada, así que no se pueden leer sus características.",
+  "errors.posting_features.contract": "El agente envió características que no coinciden con lo que Boba espera. Vuelve a lanzar la extracción.",
+  "errors.posting_features.run": "La extracción de características terminó antes de tiempo (sesión, cuota, tiempo de espera o un fallo). Boba conservó lo que leyó por su cuenta y lo volverá a intentar."
+}

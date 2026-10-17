@@ -5,9 +5,14 @@
 //! into one posting with one provenance row per source, and re-seeing the same
 //! source item refreshes that row (its url, raw payload and fetch time) rather
 //! than adding a copy; a source's row is never deleted (AD-19).
+//!
+//! The feature methods (S6.2) are keyed by `(posting, profile version)`, which
+//! is the cache FR-61 asks for: a version that has been read is read again from
+//! here, never re-extracted.
 
 use boba_domain::dedup::DedupProbe;
 use boba_domain::posting::{Offer, Provenance};
+use boba_domain::posting_features::{PendingPosting, PostingFeatures};
 
 /// Errors from the ingestion repository.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -48,4 +53,49 @@ pub trait IngestionRepo: Send + Sync {
         provenance: &Provenance,
         now: &str,
     ) -> Result<(), IngestionRepoError>;
+
+    /// The features stored for one (Offer, Profile version), `None` when that
+    /// version has never been read. An empty `Some` is a real answer: a posting
+    /// with nothing to extract is cached as such (FR-61).
+    fn features(
+        &self,
+        posting_id: &str,
+        profile_version: u32,
+    ) -> Result<Option<PostingFeatures>, IngestionRepoError>;
+
+    /// Whether an agent pass has been served for one (Offer, Profile version).
+    /// A served pass is never run again (FR-61), including one that proposed
+    /// nothing.
+    fn features_agent_done(
+        &self,
+        posting_id: &str,
+        profile_version: u32,
+    ) -> Result<bool, IngestionRepoError>;
+
+    /// Store the deterministic pass for one (Offer, Profile version),
+    /// `extracted_at` being UTC RFC 3339 from the caller's clock (AD-17). In one
+    /// transaction it upserts the claims, the cache marker and the posting's
+    /// `requirements_json` (which S4.2 declared this slice's to fill).
+    fn save_deterministic_features(
+        &self,
+        features: &PostingFeatures,
+        extracted_at: &str,
+    ) -> Result<(), IngestionRepoError>;
+
+    /// Merge an agent run's claims into one (Offer, Profile version) and mark
+    /// the agent pass done — even when the run proposed nothing at all, which is
+    /// a real answer too. A deterministic claim is never replaced (AD-5).
+    fn save_agent_features(
+        &self,
+        features: &PostingFeatures,
+        extracted_at: &str,
+    ) -> Result<(), IngestionRepoError>;
+
+    /// Postings still waiting for an agent pass at this Profile version, newest
+    /// first, at most `limit`.
+    fn features_pending(
+        &self,
+        profile_version: u32,
+        limit: usize,
+    ) -> Result<Vec<PendingPosting>, IngestionRepoError>;
 }

@@ -23,7 +23,8 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::posting::{Money, Offer, WorkMode};
 
-mod scan;
+// S6.2 reads posting text with the same whole-word scanner (granted 2026-10-16).
+pub(crate) mod scan;
 
 #[cfg(test)]
 mod tests;

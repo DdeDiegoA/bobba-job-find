@@ -1,0 +1,6 @@
+{
+  "errors.posting_features.store": "Boba could not read or save this Offer's features. Try again.",
+  "errors.posting_features.unknown_offer": "That Offer is no longer stored, so its features cannot be read.",
+  "errors.posting_features.contract": "The agent sent features that do not match what Boba expects. Run the extraction again.",
+  "errors.posting_features.run": "The feature extraction run ended early (login, quota, timeout or a crash). Boba kept what it read itself and will try again."
+}

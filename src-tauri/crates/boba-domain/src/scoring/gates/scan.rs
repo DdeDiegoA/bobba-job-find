@@ -133,7 +133,7 @@ const LEVEL_WORDS: &[(&str, Cefr)] = &[
 /// Lowercase without changing the byte length, so match offsets stay valid on
 /// the original text (`İ` lowercases to two bytes: such a character is left as
 /// it stands).
-fn fold(text: &str) -> String {
+pub(crate) fn fold(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         let mut lower = ch.to_lowercase();
@@ -216,7 +216,7 @@ fn stated_bar(window: &str) -> Option<Cefr> {
 /// Every occurrence of `needle` in the folded `haystack` that sits at a word
 /// boundary: `"us only"` must not be read out of `"focus only"`, nor `"native"`
 /// out of `"alternative"` — both are ordinary posting wording (review round 1).
-fn matches(haystack: &str, needle: &str) -> Vec<usize> {
+pub(crate) fn matches(haystack: &str, needle: &str) -> Vec<usize> {
     let mut found = Vec::new();
     let mut from = 0;
     while let Some(offset) = haystack[from..].find(needle) {
@@ -240,7 +240,7 @@ fn is_edge(neighbour: Option<char>) -> bool {
 /// The sentence (or bullet line) around `[start, end)`, trimmed — the words the
 /// UI quotes. Boundaries are `.` `!` `?` `;` and a newline; a dot inside a word
 /// ("U.S.") does not end a sentence.
-fn sentence(text: &str, start: usize, end: usize) -> QuotedSpan {
+pub(crate) fn sentence(text: &str, start: usize, end: usize) -> QuotedSpan {
     let left = text[..start]
         .char_indices()
         .filter(|(i, ch)| ends_sentence(text, *i, *ch))
