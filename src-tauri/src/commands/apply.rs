@@ -761,6 +761,34 @@ pub async fn apply_outbox_release_due(app: tauri::AppHandle) -> AppResult<Vec<Ou
     release_due(&app).await
 }
 
+/// The follow-up nudge sweep (S9.5, FR-95), run by the scheduler tick: one
+/// notice per application and threshold, ever; quiet hours hold it (S5.3).
+/// Nothing here fails the tick — a locked store has no ports to read.
+pub fn spawn_nudge_sweep<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    tauri::async_runtime::spawn(async move {
+        let result = (|| -> AppResult<usize> {
+            let service = boba_app::apply::nudges::NudgesService::new(
+                wiring::port::<dyn ApplyRepo>(&app)?,
+                wiring::port::<dyn SystemRepo>(&app)?,
+                Arc::new(SystemClock),
+                Some(Arc::new(crate::scheduler::notify::TauriNotifier::new(
+                    app.clone(),
+                ))),
+            );
+            let hour = boba_app::digest::local_hour(&ClockPort::now_rfc3339(&SystemClock));
+            service
+                .sweep(hour)
+                .map(|sent| sent.len())
+                .map_err(|_| CommandError::Store.app_error())
+        })();
+        match result {
+            Ok(0) => {}
+            Ok(count) => tracing::debug!(count, "nudges: follow-up notices sent"),
+            Err(error) => tracing::warn!(key = error.message_key, "nudges: sweep failed"),
+        }
+    });
+}
+
 /// The release sweep, run by the scheduler tick every minute (S9.7, FR-85).
 pub fn spawn_outbox_sweep<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
     tauri::async_runtime::spawn(async move {

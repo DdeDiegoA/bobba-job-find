@@ -6,6 +6,7 @@ pub mod engine;
 pub mod guard;
 pub mod kill_switch;
 pub mod manual;
+pub mod nudges;
 pub mod outbox;
 pub mod rules;
 pub mod session;

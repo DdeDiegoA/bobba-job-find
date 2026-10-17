@@ -233,6 +233,9 @@ fn tick<R: Runtime>(app: &AppHandle<R>) {
     // tick stays quiet until the user unlocks.
     if !matches!(wiring::store_state(app), StoreStatus::Locked { .. }) {
         crate::commands::apply::spawn_outbox_sweep(app.clone());
+        // Follow-up nudges (S9.5, FR-95): a card that went quiet gets one
+        // notice per threshold; the sweep itself holds them for quiet hours.
+        crate::commands::apply::spawn_nudge_sweep(app.clone());
     }
     let Some(repo) = jobs_repo(app) else {
         // No store this launch (locked at startup): nothing can be recorded,

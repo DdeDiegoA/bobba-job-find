@@ -8,5 +8,9 @@
   "confirm.no": "Not yet",
   "undo.label": "Moved {title} to No Response",
   "undo.action": "Undo",
-  "error.move": "That move did not stick. Try again."
+  "error.move": "That move did not stick. Try again.",
+  "notification.check_in.title": "Still waiting to hear back?",
+  "notification.check_in.body": "{title} at {company} has been quiet for {days} days. A short follow-up goes a long way.",
+  "notification.no_response.title": "Time to call it?",
+  "notification.no_response.body": "{title} at {company} has had no reply for {days} days. Open the Tracker to mark it No Response."
 }
