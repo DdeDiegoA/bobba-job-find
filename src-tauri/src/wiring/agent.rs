@@ -198,15 +198,18 @@ fn terminal_of(event: &AgentEvent) -> Option<(TaskOutcome, Option<String>)> {
 }
 
 /// The minimal CLI invocation for a task: the CLI, how it reaches this run's
-/// `boba-mcp` server, the pinned lockdown config, its non-interactive flags, and
-/// the prompt.
+/// `boba-mcp` server, the pinned lockdown config, its non-interactive flags, the
+/// prompt, and the model the user picked.
 ///
-/// Two refusals come first, both fail-closed:
+/// Three refusals come first, all fail-closed:
 /// 1. **No sidecar.** Without `boba-mcp` the CLI would run with its own native
 ///    tools and none of ours, so no run starts (AD-6).
 /// 2. **A prompt that could be parsed as an option.** No CLI documents an
 ///    end-of-options `--`, so a prompt starting with `-` is refused instead of
 ///    guessed at.
+/// 3. **A model that could be parsed as an option.** It is one argv entry
+///    (`--model=<value>`), and an empty, leading-dash or control-character
+///    value is refused rather than quoted into place.
 ///
 /// What a task is allowed to *do* is not decided here: ADR-010's gate runs in
 /// the runtime, before a run exists ([`task_gate`]), and the runtime re-checks
@@ -265,6 +268,24 @@ fn command_builder(
         // invariant); a CLI that cannot be pinned only ever runs the user's own
         // input, with the security badge.
         let pinned = lockdown::pinned_args(kind, task.kind.id());
+        // The model the user picked (FR-3, FR-17): without it the CLI runs its
+        // own default and the test call would report an identity the run never
+        // used. Every driver's recorded `--help` documents `--model` (S2.1), so
+        // one `--model=<value>` entry serves all five; appending it after the
+        // prompt keeps each CLI's own positional order intact.
+        let model = match task.model.as_deref() {
+            None => Vec::new(),
+            Some(raw) => {
+                let model = raw.trim();
+                if model.is_empty() || model.starts_with('-') || model.contains(char::is_control) {
+                    return refusal(
+                        task,
+                        "the model is empty, starts with '-', or contains a control character",
+                    );
+                }
+                vec![format!("--model={model}")]
+            }
+        };
 
         CommandSpec {
             program: PathBuf::from(kind.binary_names()[0]),
@@ -272,6 +293,7 @@ fn command_builder(
                 .into_iter()
                 .chain(pinned.unwrap_or_default())
                 .chain(argv)
+                .chain(model)
                 .collect(),
             // The runtime sets `cwd` to the run's workspace and adds the endpoint
             // and token to the environment; argv never carries secrets.
@@ -325,20 +347,24 @@ impl EngineProbe {
         self.store
             .execute(move |conn| {
                 let store_error = |error: String| boba_store::db::StoreError::Sqlite(error);
-                let existing = cli_install::list(conn).map_err(|e| store_error(e.to_string()))?;
+                // One transaction: a failed upsert must not leave the deletes
+                // behind, so the evidence flips from all-old to all-new.
+                let tx = conn.transaction().map_err(|e| store_error(e.to_string()))?;
+                let existing = cli_install::list(&tx).map_err(|e| store_error(e.to_string()))?;
                 for row in existing {
                     let still_installed = probed
                         .iter()
                         .any(|(kind, path, ..)| *kind == row.kind && *path == row.path);
                     if !still_installed {
-                        cli_install::delete(conn, &row.id)
+                        cli_install::delete(&tx, &row.id)
                             .map_err(|e| store_error(e.to_string()))?;
                     }
                 }
                 for (kind, path, version, capabilities) in &probed {
-                    cli_install::upsert(conn, kind, path, version, capabilities)
+                    cli_install::upsert(&tx, kind, path, version, capabilities)
                         .map_err(|e| store_error(e.to_string()))?;
                 }
+                tx.commit().map_err(|e| store_error(e.to_string()))?;
                 Ok(())
             })
             .map_err(|error| error.to_string())
@@ -350,10 +376,13 @@ impl EngineProbe {
 /// runtime consults it before a run gets a workspace, a token or a CLI, so no
 /// caller can route around it.
 ///
-/// This answers one question — may an untrusted task **start** on this CLI? The
-/// question that follows, "did the CLI keep to the pin?", is the run's own init
-/// event, checked by the runtime before any tool call (ADR-010 §1). Nothing is
-/// cached, so a scheduled run after a restart is checked just as strictly.
+/// This answers one question — may an untrusted task **start** on this CLI? It
+/// reads the probed `cli_install` row (refreshed by the engine step's probe and
+/// by each manual-intake trigger, which re-probes before it dispatches), so an
+/// upgrade that leaves the driver's verified range revokes the lockdown at the
+/// next refresh. The question that follows, "did the CLI keep to the pin?", is
+/// the run's own init event, checked by the runtime on **every** untrusted run
+/// before any tool call (ADR-010 §1) — stored rows never replace that check.
 fn task_gate(store: Arc<Store>) -> Arc<TaskGate> {
     Arc::new(move |task: &AgentTask| {
         let Some(kind) = CliKind::ALL.into_iter().find(|kind| kind.id() == task.cli) else {
@@ -1841,6 +1870,66 @@ mod tests {
             // Secrets never travel in argv, and the runtime owns cwd.
             assert!(!spec.args.iter().any(|arg| arg.contains("a-token")));
             assert_eq!(spec.cwd, None);
+        }
+    }
+
+    /// S3.2 F1: the model the user picked is in the argv, as one entry per CLI,
+    /// so the run (and the identity its Started event reports) is the one the
+    /// step tested.
+    #[test]
+    fn the_picked_model_reaches_every_runnable_cli() {
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
+        for cli in ["claude_code", "codex", "opencode", "gemini_cli"] {
+            let sandbox = run_sandbox(&format!("model-{cli}"));
+            let mut picked = task_of(
+                cli,
+                boba_app::ports::agent::AgentTaskKind::ProfileImport,
+                InputTrust::User,
+            );
+            picked.model = Some("a/model-1".to_string());
+
+            let spec = builder(&picked, &sandbox);
+            // One entry, so the value can never be read as another flag; every
+            // driver's recorded `--help` documents `--model`.
+            assert!(
+                spec.args.contains(&"--model=a/model-1".to_string()),
+                "{cli}: {:?}",
+                spec.args
+            );
+            assert!(!spec.args.iter().any(|arg| arg == "--model"), "{cli}");
+        }
+        // Aider never runs at all (no MCP support), model or not.
+        let aider = task_of(
+            "aider",
+            boba_app::ports::agent::AgentTaskKind::ProfileImport,
+            InputTrust::User,
+        );
+        assert!(
+            builder(&aider, &run_sandbox("model-aider"))
+                .program
+                .to_string_lossy()
+                .starts_with("boba-refused-")
+        );
+    }
+
+    /// S3.2 F1: a model that could be parsed as an option is refused, never
+    /// quoted into place.
+    #[test]
+    fn a_model_that_could_be_read_as_a_flag_is_refused() {
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
+        for bad in ["", "   ", "-danger", "op\nus"] {
+            let mut picked = task_of(
+                "claude_code",
+                boba_app::ports::agent::AgentTaskKind::ProfileImport,
+                InputTrust::User,
+            );
+            picked.model = Some(bad.to_string());
+            let spec = builder(&picked, &run_sandbox("model-bad"));
+            assert!(
+                spec.program.to_string_lossy().starts_with("boba-refused-"),
+                "{bad:?} was not refused"
+            );
+            assert!(spec.args.is_empty(), "{bad:?}: {:?}", spec.args);
         }
     }
 

@@ -96,20 +96,26 @@ pub fn ingest_manual_text(app: tauri::AppHandle, text: String) -> AppResult<Manu
 /// still stored by the normal read path — without mounted ports, or on a CLI
 /// ADR-010's gate refuses: the runtime refuses untrusted runs on an unverified
 /// CLI before it starts, and that refusal is logged here, never retried.
+///
+/// The background thread re-probes first: the pre-run gate reads the stored
+/// `cli_install` evidence, and a CLI upgraded since the engine step must lose a
+/// lockdown it no longer has before this untrusted run is dispatched.
 fn trigger_extraction(app: &tauri::AppHandle, offer_id: &str) {
     let Some(choice) = crate::commands::agent::stored_choice(app) else {
         return;
     };
-    let (Ok(ingestion), Ok(profile), Ok(agents)) = (
+    let (Ok(ingestion), Ok(profile), Ok(agents), Ok(probe)) = (
         wiring::port::<dyn IngestionRepo>(app),
         wiring::port::<dyn ProfileRepo>(app),
         wiring::port::<dyn AgentPort>(app),
+        wiring::port::<crate::wiring::agent::EngineProbe>(app),
     ) else {
         return;
     };
     let features = ExtractFeatures::new(ingestion, profile, agents, Arc::new(SystemClock));
     let offer_id = offer_id.to_string();
     std::thread::spawn(move || {
+        probe.detect_and_store();
         let request = ExtractRequest {
             cli: choice.cli,
             model: choice.model,
