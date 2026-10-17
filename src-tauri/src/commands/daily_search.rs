@@ -552,7 +552,14 @@ fn execute<R: Runtime>(
 
     let mut options = options;
     options.only_sources = only_sources;
-    options.agent = stored_engine(system.as_ref()).map(|(cli, model)| AgentPass::new(cli, model));
+    options.agent = stored_engine(system.as_ref()).map(|(cli, model)| {
+        let mut pass = AgentPass::new(cli, model);
+        // FR-20 (S2.5): the user's per-run offer budget, default 30. Offers
+        // past it stay on deterministic features and are marked "not yet
+        // analysed" in the Inbox.
+        pass.max_tasks = crate::commands::agent::stored_budget(system.as_ref()).offers_per_run;
+        pass
+    });
     if options.agent.is_none() {
         tracing::info!("daily search: no engine chosen, scoring from deterministic features");
     }

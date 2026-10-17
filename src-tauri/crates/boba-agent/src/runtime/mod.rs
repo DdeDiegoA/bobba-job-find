@@ -14,6 +14,7 @@ use boba_app::ports::agent::{
 };
 use boba_app::ports::repo::agent::{AgentRepo, FinishAgentRun, NewAgentRun, RunStatus};
 
+use crate::budget::{self, Meter};
 use crate::drivers::{self, CliKind, HealthStatus};
 use crate::lockdown::{self, TaskSupport, Unverified};
 use crate::mcp::config::{self, RunSandbox, SandboxConfig};
@@ -131,6 +132,10 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         build: impl FnOnce(&AgentTask, Option<&RunSandbox>) -> Option<RunSpec>,
     ) -> RunHandle {
         let run_id = ulid::Ulid::generate().to_string();
+        // S2.5 AC2: a caller that names no limit still runs bounded — turns,
+        // tool calls and a wall clock come from the task kind's defaults.
+        let mut task = task;
+        task.budget = budget::with_defaults(task.kind, task.budget);
 
         if let Some(refused) = self.held_back(task.clone(), run_id.clone()) {
             return refused;
@@ -531,8 +536,8 @@ fn run_process<R: AgentRepo>(
     let mut reader = cli_kind(&state.task.cli)
         .map(drivers::StreamReader::for_cli)
         .unwrap_or_default();
-    let mut usage = Usage::default();
-    let mut tool_calls: u32 = 0;
+    let mut usage = budget::Usage::default();
+    let mut meter = Meter::default();
     let mut polls: u64 = 0;
     // Whether this run has been opened by its init event (ADR-010 §1).
     let mut opened = false;
@@ -545,15 +550,6 @@ fn run_process<R: AgentRepo>(
         if deadline.is_some_and(|d| Instant::now() >= d) {
             proc.kill();
             return Outcome::Failed(FailureReason::Timeout);
-        }
-        if state
-            .task
-            .budget
-            .max_tool_calls
-            .is_some_and(|cap| tool_calls >= cap)
-        {
-            proc.kill();
-            return Outcome::Failed(FailureReason::LimitExceeded);
         }
         if state
             .endpoint
@@ -601,7 +597,7 @@ fn run_process<R: AgentRepo>(
                     }
                     opened = true;
                 }
-                for event in parsed.events {
+                for event in &parsed.events {
                     // ADR-010 §1, defence in depth (CH8): the init list is not
                     // the only word. Any later tool_use this app does not own
                     // means the pinned tool set did not hold, so an untrusted run
@@ -610,7 +606,7 @@ fn run_process<R: AgentRepo>(
                     // this one tool reuses that answer rather than restating it.
                     if state.task.reads_untrusted()
                         && matches!(
-                            &event,
+                            event,
                             AgentEvent::ToolCall { name, .. }
                                 if !lockdown::init_event_is_locked_down(std::slice::from_ref(name))
                         )
@@ -618,16 +614,23 @@ fn run_process<R: AgentRepo>(
                         proc.kill();
                         return Outcome::Failed(FailureReason::Unsupported);
                     }
-                    match &event {
-                        AgentEvent::Usage {
-                            tokens_in,
-                            tokens_out,
-                            cost_usd,
-                        } => usage.absorb(*tokens_in, *tokens_out, *cost_usd),
-                        AgentEvent::ToolCall { .. } => tool_calls += 1,
-                        _ => {}
+                    if let AgentEvent::Usage {
+                        tokens_in,
+                        tokens_out,
+                        cost_usd,
+                    } = event
+                    {
+                        usage.absorb(*tokens_in, *tokens_out, *cost_usd);
                     }
-                    state.emit(&event);
+                    state.emit(event);
+                }
+                // S2.5 AC2: count the line against the task's budget (one turn
+                // per assistant message, plus its tool calls and reported
+                // cost). Crossing any limit ends the run as `LimitExceeded` —
+                // never a silent truncation (architecture §5.4).
+                if meter.observe(&parsed.events, &state.task.budget).is_some() {
+                    proc.kill();
+                    return Outcome::Failed(FailureReason::LimitExceeded);
                 }
             }
             Stream::Idle => continue,
@@ -768,27 +771,6 @@ pub(crate) fn fake_cli_path() -> std::path::PathBuf {
         bin
     })
     .clone()
-}
-
-#[derive(Default, Clone, Copy)]
-struct Usage {
-    tokens_in: Option<i64>,
-    tokens_out: Option<i64>,
-    cost_usd: Option<f64>,
-}
-
-impl Usage {
-    fn absorb(&mut self, tokens_in: Option<i64>, tokens_out: Option<i64>, cost_usd: Option<f64>) {
-        if let Some(v) = tokens_in {
-            *self.tokens_in.get_or_insert(0) += v;
-        }
-        if let Some(v) = tokens_out {
-            *self.tokens_out.get_or_insert(0) += v;
-        }
-        if let Some(v) = cost_usd {
-            *self.cost_usd.get_or_insert(0.0) += v;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1628,6 +1610,78 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    /// S2.5 AC2: a run that takes more turns than its budget allows is killed
+    /// and reported as `LimitExceeded`, never finished silently.
+    #[test]
+    fn a_run_that_outruns_its_turn_budget_fails_with_limit_exceeded() {
+        let root = scratch();
+        let repo = Arc::new(FakeRepo::default());
+        let runtime = AgentRuntime::new(Arc::clone(&repo))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: PathBuf::from("/nonexistent/boba-mcp"),
+                },
+                Arc::new(NoTools),
+            );
+
+        let lines = [
+            r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input"]}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}"#,
+            r#"{"type":"result","subtype":"success","result":"done","usage":{}}"#,
+        ]
+        .join("\n");
+        let mut task = task();
+        task.budget.max_turns = Some(1);
+        let handle = runtime.start(
+            task,
+            RunSpec {
+                spec: CommandSpec {
+                    program: fake_cli_path(),
+                    args: vec![],
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "replay".to_string()),
+                        ("BOBA_FAKE_LINES".to_string(), lines),
+                    ],
+                },
+            },
+        );
+        let events: Vec<AgentEvent> = handle.events.iter().collect();
+
+        assert!(
+            matches!(
+                events.last(),
+                Some(AgentEvent::Failed {
+                    reason: FailureReason::LimitExceeded,
+                    ..
+                })
+            ),
+            "the second turn should have hit the limit: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, AgentEvent::Finished { .. })),
+            "a limit-exceeded run must not report success: {events:?}"
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    /// S2.5 AC2: a caller that names no limits still gets the task's defaults
+    /// (turns, tool calls, wall clock), so no run is ever unbounded.
+    #[test]
+    fn a_task_without_limits_gets_the_kind_defaults() {
+        let budget =
+            crate::budget::with_defaults(AgentTaskKind::ExtractPostings, RunBudget::default());
+        assert!(budget.max_turns.is_some());
+        assert!(budget.max_tool_calls.is_some());
+        assert!(budget.wall_clock.is_some());
+    }
+
     /// The fake CLI replaying a Claude stream, with its init event's tool list.
     fn fake_run_spec(mode: &str, tools: &str) -> RunSpec {
         let env = vec![
@@ -1692,15 +1746,5 @@ mod tests {
     fn cli_kind_resolves_task_ids() {
         assert_eq!(cli_kind("claude_code"), Some(CliKind::ClaudeCode));
         assert_eq!(cli_kind("nope"), None);
-    }
-
-    #[test]
-    fn usage_accumulates_reported_values_only() {
-        let mut usage = Usage::default();
-        usage.absorb(Some(10), None, Some(0.5));
-        usage.absorb(Some(5), Some(3), None);
-        assert_eq!(usage.tokens_in, Some(15));
-        assert_eq!(usage.tokens_out, Some(3));
-        assert_eq!(usage.cost_usd, Some(0.5));
     }
 }

@@ -1,1 +1,38 @@
-{}
+{
+  "title": "AI engine",
+  "intro": "How much AI work one search run may do, and what your CLI reported it used.",
+  "budget": {
+    "title": "Run budget",
+    "body": "A search run hands at most this many Offers to the AI. The rest are still ranked from the posting's own words and marked \"Low confidence: not yet analysed\".",
+    "loading": "Loading the budget…",
+    "label": "Offers analysed per run",
+    "range": "Default is 30. Between 1 and {max}.",
+    "save": "Save budget",
+    "saved": "Budget saved.",
+    "error": {
+      "load": "Boba could not read the run budget.",
+      "save": "Boba could not save the run budget."
+    }
+  },
+  "limits": {
+    "title": "Per-task limits",
+    "body": "Every AI task stops when it reaches its limit, so a run never burns through your quota. The core enforces these; they include turns, tool calls and wall-clock time.",
+    "task": "Task",
+    "limits": "Limits",
+    "summary": "{turns} turns · {toolCalls} tool calls · {seconds} s"
+  },
+  "usage": {
+    "title": "Token usage",
+    "body": "Run a quick test call to see what your CLI reports about a task. Boba shows what the CLI sends and never estimates the rest.",
+    "run": "Run a test call",
+    "running": "Running…",
+    "noEngine": "Choose an engine in onboarding first to see its usage.",
+    "error": "The test call could not run.",
+    "tokensIn": "Tokens in",
+    "tokensOut": "Tokens out",
+    "cost": "Cost",
+    "latency": "Latency",
+    "latencyValue": "{ms} ms",
+    "notReported": "Not reported by this CLI."
+  }
+}

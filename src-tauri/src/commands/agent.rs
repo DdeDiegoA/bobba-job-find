@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
+use boba_agent::budget::{self, BudgetSettings};
 use boba_agent::detect::CliStatus;
 use boba_agent::drivers::{CliKind, HealthStatus};
 use boba_agent::lockdown;
@@ -35,6 +36,9 @@ use crate::wiring::agent::EngineProbe;
 
 /// The one `setting` row that holds the chosen engine (FR-17).
 pub const ENGINE_KEY: &str = "ai_engine";
+
+/// The one `setting` row that holds the per-run offer budget (FR-20, S2.5).
+pub const BUDGET_KEY: &str = "agent_budget";
 
 /// How long the test call waits for the run to end. The run's own wall-clock
 /// budget is a little shorter, so the CLI's process tree is killed by the
@@ -80,8 +84,31 @@ pub struct EngineSnapshot {
     pub chosen: Option<EngineChoice>,
 }
 
-/// The result of the round-trip test call (FR-3).
+/// One task kind's default limits, as Settings → AI engine shows them
+/// (architecture §5.4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TaskLimitView {
+    /// `AgentTaskKind::id`.
+    pub task: String,
+    pub max_turns: Option<u32>,
+    pub max_tool_calls: Option<u32>,
+    pub wall_clock_secs: Option<u32>,
+}
+
+/// What Settings → AI engine reads: the user's per-run budget and the limits
+/// every task starts with (FR-20, AC2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct BudgetSnapshot {
+    /// Offers one Search Run may hand to the agent (default 30).
+    pub offers_per_run: u32,
+    /// The sanity cap the core clamps to.
+    pub max_offers_per_run: u32,
+    /// Every task's default per-task limits.
+    pub limits: Vec<TaskLimitView>,
+}
+
+/// The result of the round-trip test call (FR-3).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct TestCallResult {
     pub ok: bool,
     /// The CLI and model the run started with, as the run reported them.
@@ -99,6 +126,12 @@ pub struct TestCallResult {
     pub failure_reason: Option<String>,
     /// The i18n key the step shows for that failure (AD-3).
     pub message_key: Option<String>,
+    /// Tokens the CLI reported, summed over the run (§6.3). `None` when it
+    /// reported none: the UI says "not reported", never a zero.
+    pub tokens_in: Option<f64>,
+    pub tokens_out: Option<f64>,
+    /// USD the CLI reported, when it reports a cost at all.
+    pub cost_usd: Option<f64>,
 }
 
 /// An engine use-case failure.
@@ -158,6 +191,60 @@ fn parse_choice(raw: &str) -> Option<EngineChoice> {
             .map(|model| model.trim().to_string())
             .filter(|model| !model.is_empty()),
     })
+}
+
+/// The stored per-run budget (FR-20), tolerant on read like the engine choice:
+/// a row this build cannot read is the PRD default, not a broken Settings page.
+pub fn read_budget(repo: &dyn SystemRepo) -> Result<BudgetSettings, AgentError> {
+    let Some(raw) = repo.setting_get(BUDGET_KEY)? else {
+        return Ok(BudgetSettings::default());
+    };
+    Ok(serde_json::from_str::<BudgetSettings>(&raw)
+        .unwrap_or_default()
+        .normalized())
+}
+
+/// The budget a run uses, for callers that must never fail on it (the daily
+/// search): a corrupt row runs on the default, never on nothing.
+pub fn stored_budget(repo: &dyn SystemRepo) -> BudgetSettings {
+    read_budget(repo).unwrap_or_default()
+}
+
+/// Store the budget; every later run reads this row (FR-20).
+fn save_budget(
+    repo: &dyn SystemRepo,
+    clock: &dyn ClockPort,
+    offers_per_run: u32,
+) -> Result<BudgetSettings, AgentError> {
+    let settings = BudgetSettings { offers_per_run }.normalized();
+    let json = serde_json::to_string(&settings)
+        .map_err(|error| AgentError::Repo(SystemRepoError::new(error.to_string())))?;
+    repo.setting_put(BUDGET_KEY, &json, &clock.now_rfc3339())?;
+    Ok(settings)
+}
+
+/// What Settings → AI engine reads: the budget in force and every task's
+/// default limits (AC2).
+fn budget_snapshot(settings: BudgetSettings) -> BudgetSnapshot {
+    let limits = AgentTaskKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let budget = budget::default_budget(kind);
+            TaskLimitView {
+                task: kind.id().to_string(),
+                max_turns: budget.max_turns,
+                max_tool_calls: budget.max_tool_calls,
+                wall_clock_secs: budget
+                    .wall_clock
+                    .map(|wall_clock| u32::try_from(wall_clock.as_secs()).unwrap_or(u32::MAX)),
+            }
+        })
+        .collect();
+    BudgetSnapshot {
+        offers_per_run: settings.offers_per_run,
+        max_offers_per_run: budget::MAX_OFFERS_PER_RUN,
+        limits,
+    }
 }
 
 /// Store the choice; every later task reads this row (FR-17).
@@ -300,6 +387,7 @@ fn outcome(events: &[AgentEvent], elapsed: Duration) -> TestCallResult {
             Some(FailureReason::Crashed.message_key().to_string()),
         ),
     };
+    let usage = usage_of(events);
     TestCallResult {
         ok,
         cli,
@@ -308,7 +396,26 @@ fn outcome(events: &[AgentEvent], elapsed: Duration) -> TestCallResult {
         reply: reply_of(events),
         failure_reason: reason,
         message_key,
+        tokens_in: usage.tokens_in.map(|tokens| tokens as f64),
+        tokens_out: usage.tokens_out.map(|tokens| tokens as f64),
+        cost_usd: usage.cost_usd,
     }
+}
+
+/// What the CLI reported about this run (§6.3). Absent stays absent.
+fn usage_of(events: &[AgentEvent]) -> budget::Usage {
+    let mut usage = budget::Usage::default();
+    for event in events {
+        if let AgentEvent::Usage {
+            tokens_in,
+            tokens_out,
+            cost_usd,
+        } = event
+        {
+            usage.absorb(*tokens_in, *tokens_out, *cost_usd);
+        }
+    }
+    usage
 }
 
 /// The CLI's text output, trimmed and capped: it is shown as the CLI's own
@@ -367,6 +474,7 @@ fn test_call(agents: &dyn AgentPort, choice: EngineChoice) -> TestCallResult {
 /// The run did not answer inside the deadline: stop it and report the timeout.
 fn timed_out(choice: &EngineChoice, events: &[AgentEvent], started: Instant) -> TestCallResult {
     let reason = FailureReason::Timeout;
+    let usage = usage_of(events);
     TestCallResult {
         ok: false,
         cli: choice.cli.clone(),
@@ -375,6 +483,9 @@ fn timed_out(choice: &EngineChoice, events: &[AgentEvent], started: Instant) -> 
         reply: reply_of(events),
         failure_reason: Some(reason.id().to_string()),
         message_key: Some(reason.message_key().to_string()),
+        tokens_in: usage.tokens_in.map(|tokens| tokens as f64),
+        tokens_out: usage.tokens_out.map(|tokens| tokens as f64),
+        cost_usd: usage.cost_usd,
     }
 }
 
@@ -410,6 +521,24 @@ pub fn agent_engine_choose(
     let choice = make_choice(&cli, model).map_err(to_app)?;
     save_choice(repo(&app)?.as_ref(), &SystemClock, choice.clone()).map_err(to_app)?;
     Ok(choice)
+}
+
+/// The per-run budget Settings → AI engine shows, with every task's limits
+/// (FR-20, AC2).
+#[tauri::command]
+#[specta::specta]
+pub fn agent_budget_snapshot(app: tauri::AppHandle) -> AppResult<BudgetSnapshot> {
+    let system = repo(&app)?;
+    let stored = read_budget(system.as_ref()).map_err(to_app)?;
+    Ok(budget_snapshot(stored))
+}
+
+/// Store the per-run offer budget (FR-20): the next Search Run reads it.
+#[tauri::command]
+#[specta::specta]
+pub fn agent_budget_save(app: tauri::AppHandle, offers_per_run: u32) -> AppResult<u32> {
+    let saved = save_budget(repo(&app)?.as_ref(), &SystemClock, offers_per_run).map_err(to_app)?;
+    Ok(saved.offers_per_run)
 }
 
 /// Run the round-trip test on the picked CLI and model (FR-3).
@@ -772,6 +901,89 @@ mod tests {
         assert!(!result.ok);
         assert_eq!(result.failure_reason.as_deref(), Some("crashed"));
         assert_eq!(result.message_key.as_deref(), Some("errors.agent.crashed"));
+    }
+
+    /// S2.5 (FR-20): the per-run offer budget round-trips through the setting
+    /// row, and a row this build cannot read falls back to the PRD default.
+    #[test]
+    fn the_run_budget_round_trips_and_a_corrupt_row_reads_the_default() {
+        let repo = repo("budget");
+        assert_eq!(
+            read_budget(&repo).expect("read"),
+            BudgetSettings::default(),
+            "nothing stored is the PRD default"
+        );
+
+        save_budget(&repo, &clock(), 12).expect("save");
+        assert_eq!(
+            read_budget(&repo).expect("read").offers_per_run,
+            12,
+            "the stored budget is what the run reads"
+        );
+
+        repo.setting_put(BUDGET_KEY, "{not json", "seed")
+            .expect("seed");
+        assert_eq!(
+            read_budget(&repo).expect("read").offers_per_run,
+            30,
+            "a corrupt row never traps the user"
+        );
+
+        // A wild value is clamped on read, so no run honours a typo.
+        repo.setting_put(BUDGET_KEY, r#"{"offers_per_run":0}"#, "seed")
+            .expect("seed");
+        assert_eq!(read_budget(&repo).expect("read").offers_per_run, 1);
+    }
+
+    /// S2.5 (§6.3 cost): a run reports the tokens and cost the CLI sent, and
+    /// leaves them `None` — never zero — when the CLI reports nothing.
+    #[test]
+    fn the_test_call_reports_the_usage_the_cli_sent_but_never_invents_it() {
+        let reported = vec![
+            AgentEvent::Started {
+                cli: "claude_code".to_string(),
+                model: Some("sonnet".to_string()),
+            },
+            AgentEvent::Usage {
+                tokens_in: Some(120),
+                tokens_out: Some(40),
+                cost_usd: Some(0.002),
+            },
+            AgentEvent::Usage {
+                tokens_in: Some(8),
+                tokens_out: None,
+                cost_usd: None,
+            },
+            AgentEvent::Finished { exit_code: 0 },
+        ];
+        let result = outcome(&reported, Duration::from_millis(10));
+        assert_eq!(result.tokens_in, Some(128.0));
+        assert_eq!(result.tokens_out, Some(40.0));
+        assert_eq!(result.cost_usd, Some(0.002));
+
+        let silent = vec![
+            AgentEvent::Started {
+                cli: "aider".to_string(),
+                model: None,
+            },
+            AgentEvent::Finished { exit_code: 0 },
+        ];
+        let result = outcome(&silent, Duration::from_millis(5));
+        assert_eq!(result.tokens_in, None, "the core never guesses tokens");
+        assert_eq!(result.tokens_out, None);
+        assert_eq!(result.cost_usd, None);
+    }
+
+    #[test]
+    fn the_budget_snapshot_shows_every_task_default_limit() {
+        let snapshot = budget_snapshot(BudgetSettings::default());
+        assert_eq!(snapshot.offers_per_run, 30);
+        assert_eq!(snapshot.limits.len(), AgentTaskKind::ALL.len());
+        for limit in &snapshot.limits {
+            assert!(limit.max_turns.is_some(), "{limit:?}");
+            assert!(limit.max_tool_calls.is_some(), "{limit:?}");
+            assert!(limit.wall_clock_secs.is_some(), "{limit:?}");
+        }
     }
 
     #[test]

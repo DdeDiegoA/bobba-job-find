@@ -720,6 +720,39 @@ pub fn features_agent_done(
         .is_some_and(|done| done == 1))
 }
 
+/// Which of `posting_ids` have had their agent pass at `profile_version`, in
+/// one query (FR-20: the Inbox's "not yet analysed" marker). An Offer with no
+/// marker row is not done.
+pub fn agent_done_many(
+    conn: &Connection,
+    posting_ids: &[String],
+    profile_version: u32,
+) -> Result<std::collections::HashSet<String>, StoreError> {
+    let mut done = std::collections::HashSet::new();
+    if posting_ids.is_empty() {
+        return Ok(done);
+    }
+    let placeholders = vec!["?"; posting_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT posting_id FROM posting_features_run \
+         WHERE profile_version = ?1 AND agent_done = 1 AND posting_id IN ({placeholders})"
+    );
+    let version = i64::from(profile_version);
+    let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(posting_ids.len() + 1);
+    values.push(&version);
+    for id in posting_ids {
+        values.push(id);
+    }
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(values), |r| {
+        r.get::<_, String>(0)
+    })?;
+    for row in rows {
+        done.insert(row?);
+    }
+    Ok(done)
+}
+
 /// Postings still waiting for an agent pass at this Profile version, newest
 /// first: no marker row, or one that says no run has been served.
 pub fn features_pending(
@@ -825,6 +858,16 @@ impl IngestionRepo for Store {
     ) -> Result<bool, IngestionRepoError> {
         let posting_id = posting_id.to_string();
         self.read(move |conn| features_agent_done(conn, &posting_id, profile_version))
+            .map_err(map_err)
+    }
+
+    fn agent_done_many(
+        &self,
+        posting_ids: &[String],
+        profile_version: u32,
+    ) -> Result<std::collections::HashSet<String>, IngestionRepoError> {
+        let ids = posting_ids.to_vec();
+        self.read(move |conn| agent_done_many(conn, &ids, profile_version))
             .map_err(map_err)
     }
 
@@ -1520,6 +1563,37 @@ mod tests {
         assert!(features_agent_done(&conn, "pst_1", 1).unwrap());
         assert!(
             !features_agent_done(&conn, "pst_1", 2).unwrap(),
+            "the marker is per Profile version"
+        );
+    }
+
+    /// FR-20 (S2.5): the Inbox asks once for a whole page of Offers.
+    #[test]
+    fn which_offers_have_had_their_agent_pass_reads_in_one_query() {
+        let (conn, _) = stored("pst_1");
+        insert_offer(
+            &conn,
+            &offer("pst_2"),
+            &provenance("pst_2", "remotive", "abc-2"),
+        )
+        .unwrap();
+        save_features(&conn, &PostingFeatures::new("pst_1", 1), "t", 1).unwrap();
+        save_features(&conn, &PostingFeatures::new("pst_2", 1), "t", 0).unwrap();
+
+        let ids = vec![
+            "pst_1".to_string(),
+            "pst_2".to_string(),
+            // Never seen by this Profile version: not done, and no row at all.
+            "pst_3".to_string(),
+        ];
+        let done = agent_done_many(&conn, &ids, 1).unwrap();
+        assert_eq!(
+            done,
+            ["pst_1".to_string()].into_iter().collect(),
+            "only a served pass counts as analysed"
+        );
+        assert!(
+            agent_done_many(&conn, &ids, 2).unwrap().is_empty(),
             "the marker is per Profile version"
         );
     }

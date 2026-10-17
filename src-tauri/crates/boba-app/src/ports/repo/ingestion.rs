@@ -125,6 +125,24 @@ pub trait IngestionRepo: Send + Sync {
         extracted_at: &str,
     ) -> Result<(), IngestionRepoError>;
 
+    /// Which of `posting_ids` have had their agent feature pass at
+    /// `profile_version` (FR-20: the others are "not yet analysed"). The
+    /// default is the per-Offer read — correct, but not batched; `boba-store`
+    /// answers it in one query, which is what the Inbox page uses.
+    fn agent_done_many(
+        &self,
+        posting_ids: &[String],
+        profile_version: u32,
+    ) -> Result<std::collections::HashSet<String>, IngestionRepoError> {
+        let mut done = std::collections::HashSet::with_capacity(posting_ids.len());
+        for posting_id in posting_ids {
+            if self.features_agent_done(posting_id, profile_version)? {
+                done.insert(posting_id.clone());
+            }
+        }
+        Ok(done)
+    }
+
     /// Postings still waiting for an agent pass at this Profile version, newest
     /// first, at most `limit`.
     fn features_pending(

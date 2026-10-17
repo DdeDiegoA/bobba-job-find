@@ -16,6 +16,7 @@
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::offers::{OfferCardView, OfferDetailView, OffersError, OffersInbox};
 use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::triage::TriageRepo;
 
@@ -33,7 +34,10 @@ fn service(app: &tauri::AppHandle) -> AppResult<OffersInbox> {
         wiring::port::<dyn IngestionRepo>(app)?,
         wiring::port::<dyn ScoringRepo>(app)?,
     )
-    .with_triage(wiring::port::<dyn TriageRepo>(app)?))
+    .with_triage(wiring::port::<dyn TriageRepo>(app)?)
+    // S2.5: the Profile version the "not yet analysed" badge is measured
+    // against (FR-20).
+    .with_profile(wiring::port::<dyn ProfileRepo>(app)?))
 }
 
 /// Map a use-case failure onto the typed IPC error (AD-3).

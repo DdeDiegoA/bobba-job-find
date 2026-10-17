@@ -47,6 +47,9 @@ const passed = (over: Partial<TestCallResult> = {}): TestCallResult => ({
   reply: "pong",
   failure_reason: null,
   message_key: null,
+  tokens_in: null,
+  tokens_out: null,
+  cost_usd: null,
   ...over,
 });
 
@@ -58,6 +61,9 @@ const failed = (over: Partial<TestCallResult> = {}): TestCallResult => ({
   reply: "error: not logged in",
   failure_reason: "auth_expired",
   message_key: "errors.agent.auth_expired",
+  tokens_in: null,
+  tokens_out: null,
+  cost_usd: null,
   ...over,
 });
 

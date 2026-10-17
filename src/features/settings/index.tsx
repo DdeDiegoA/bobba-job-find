@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
+import SettingsAiEngine from "./ai-engine";
 import SettingsApplyingRules from "./applying/rules";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyBackup from "./privacy/backup";
@@ -21,6 +22,7 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
   },
   { id: "privacy/backup", labelKey: "backup:title", Component: SettingsPrivacyBackup },
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
+  { id: "ai-engine", labelKey: "ai_engine:title", Component: SettingsAiEngine },
 ];
 
 export default function SettingsIndex() {

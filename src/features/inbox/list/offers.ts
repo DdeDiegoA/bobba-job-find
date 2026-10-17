@@ -293,6 +293,7 @@ export const WORK_MODE_LABELS: Record<string, string> = {
 
 export const BADGE_LABELS: Record<string, string> = {
   lead: "inbox:badge.lead",
+  not_yet_analysed: "inbox:badge.not_yet_analysed",
   closing_soon: "inbox:badge.closing_soon",
   expired: "inbox:badge.expired",
   below_floor: "inbox:badge.below_floor",
