@@ -38,6 +38,11 @@ pub fn spend_below(
     cap: u32,
     updated_at: &str,
 ) -> rusqlite::Result<Option<u32>> {
+    // A zero cap is refused before the INSERT: the WHERE below only guards the
+    // update path, and a fresh key would otherwise be created at 1.
+    if cap == 0 {
+        return Ok(None);
+    }
     let changed = conn.execute(
         "INSERT INTO setting (key, value, updated_at) VALUES (?1, '1', ?3)
          ON CONFLICT(key) DO UPDATE SET
