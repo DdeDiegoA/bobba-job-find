@@ -370,6 +370,8 @@ impl GmailReader {
         account: &EmailAccount,
         cap: u64,
     ) -> Result<Value, MailError> {
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Email, url);
         let mut renewed = false;
         let mut attempt = 0;
         loop {

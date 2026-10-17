@@ -1,0 +1,6 @@
+{
+  "errors.network.fx_store": "The FX setting could not be saved.",
+  "errors.network.fx_invalid": "The rate source answered with something Boba could not read.",
+  "errors.network.fx_unreachable": "The rate source could not be reached. Exchange rates are still off.",
+  "errors.network.invalid_destination": "A network destination could not be read."
+}

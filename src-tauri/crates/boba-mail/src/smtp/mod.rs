@@ -120,6 +120,8 @@ pub async fn test_connection(settings: &SmtpSettings, auth: &Auth) -> Result<(),
 /// The secured socket, and whether the 220 greeting has already been read
 /// (`STARTTLS` upgrades mid-session, so there is none after the upgrade).
 async fn connect(settings: &SmtpSettings) -> Result<(SecuredStream, bool), SmtpError> {
+    // The network-activity view (S10.4, NFR-1): host and time only.
+    boba_app::network_log::record_host(boba_app::network_log::Purpose::Email, settings.host.trim());
     let tcp = TcpStream::connect((settings.host.as_str(), settings.port))
         .await
         .map_err(|_| SmtpError::Connect)?;

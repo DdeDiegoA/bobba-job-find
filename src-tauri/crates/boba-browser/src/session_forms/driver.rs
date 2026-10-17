@@ -67,6 +67,8 @@ impl<T: CdpTransport> SessionPageDriver<T> {
     /// Open `url`, press the board's own apply button and read the step it
     /// opened. Never submits and never signs in.
     fn open(&self, url: &str) -> Result<SessionPage, BrowserError> {
+        // The network-activity view (S10.4, NFR-1): host and time only.
+        boba_app::network_log::record(boba_app::network_log::Purpose::Sources, url);
         self.transport.navigate(url)?;
         let opened = self.transport.evaluate(page::OPEN_APPLY_JS)?;
         let clicked = serde_json::from_str::<serde_json::Value>(&opened)

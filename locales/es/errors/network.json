@@ -1,0 +1,6 @@
+{
+  "errors.network.fx_store": "No se pudo guardar el ajuste de tipo de cambio.",
+  "errors.network.fx_invalid": "La fuente de tipos de cambio respondió algo que Boba no pudo leer.",
+  "errors.network.fx_unreachable": "No se pudo contactar la fuente de tipos de cambio. La conversión sigue desactivada.",
+  "errors.network.invalid_destination": "No se pudo leer un destino de red."
+}

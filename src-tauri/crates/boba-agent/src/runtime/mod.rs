@@ -214,6 +214,12 @@ impl<R: AgentRepo + 'static> AgentRuntime<R> {
         let cancel = CancelToken::new();
         let (tx, events) = std::sync::mpsc::channel();
 
+        // The network-activity view (S10.4, NFR-1): which CLI ran, when. The
+        // CLI's own provider is its business; the label is never a URL.
+        let cli = task.cli.clone();
+        if !cli.trim().is_empty() {
+            boba_app::network_log::record_host(boba_app::network_log::Purpose::AgentCli, &cli);
+        }
         // Open the run before spawning so a crash can be detected (AD-16).
         let _ = self.repo.start_run(NewAgentRun {
             id: run_id.clone(),

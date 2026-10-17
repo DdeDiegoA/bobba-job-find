@@ -1,1 +1,25 @@
-{}
+{
+  "title": "Actividad de red",
+  "intro": "Cada destino que Boba contacta, por ti, agrupado según su finalidad. Solo se guardan el host y la hora: nunca una ruta, una búsqueda, una cabecera ni un mensaje.",
+  "no_telemetry": "No hay telemetría ni envío de fallos. Boba no manda nada por su cuenta.",
+  "empty": "Todavía no se ha contactado ningún destino. Aparecerán aquí en cuanto Boba llegue a uno.",
+  "never": "Configurado, sin contactar todavía",
+  "requests": "{count}×",
+  "columns.destination": "Destino",
+  "columns.last_seen": "Último contacto",
+  "columns.requests": "Peticiones",
+  "purpose.sources": "Fuentes",
+  "purpose.email": "Correo",
+  "purpose.agent_cli": "CLI del agente",
+  "purpose.update": "Comprobación de actualizaciones",
+  "purpose.model_download": "Descarga del modelo",
+  "purpose.fx": "Tipos de cambio",
+  "fx.title": "Conversión de salarios",
+  "fx.description": "Los salarios siempre se muestran en su propia moneda. Activa esto para añadir un importe convertido con la fecha del tipo de cambio usado. Desactivado por defecto.",
+  "fx.toggle": "Convertir salarios",
+  "fx.on": "La conversión está activa. Cada importe convertido muestra la fecha de su tipo de cambio.",
+  "fx.off": "La conversión está desactivada. Los salarios se muestran solo en su moneda original.",
+  "fx.rate_as_of": "Tipos del {date}, por 1 {currency}.",
+  "fx.no_rate": "Todavía no se ha obtenido ningún tipo de cambio.",
+  "fx.error": "No se pudo activar la conversión de salarios."
+}

@@ -15,6 +15,7 @@ pub mod embeddings;
 pub mod export;
 pub mod ingest;
 pub mod kill_switch;
+pub mod network;
 pub mod offers;
 pub mod onboarding;
 pub mod preferences;

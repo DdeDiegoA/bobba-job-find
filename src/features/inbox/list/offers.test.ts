@@ -256,6 +256,14 @@ describe("what the card reads (FR-64)", () => {
     expect(salaryLabel(card(), "en")).toBeTruthy();
     expect(salaryLabel(card({ amount_minor: null, currency: null }), "en")).toBeNull();
   });
+
+  it("adds a converted amount only when FX produced one, labelled with its rate date", () => {
+    const conversion = { amount_minor: 5_000_000, currency: "USD", as_of: "2026-10-16" };
+    expect(salaryLabel(card(), "en-US")).not.toContain("≈");
+    const label = salaryLabel(card(), "en-US", conversion);
+    expect(label).toContain("≈");
+    expect(label).toContain("Oct 16, 2026");
+  });
 });
 
 describe("the Inbox decisions (S6.6)", () => {
