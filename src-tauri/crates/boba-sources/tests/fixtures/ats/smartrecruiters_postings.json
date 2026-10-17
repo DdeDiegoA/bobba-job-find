@@ -1,0 +1,45 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 2,
+  "content": [
+    {
+      "id": "7440000123456789",
+      "name": "Security Engineer",
+      "uuid": "8a7b6c5d-4e3f-2a1b-0c9d-8e7f6a5b4c3d",
+      "refNumber": "SEC-42",
+      "company": {
+        "identifier": "Boba",
+        "name": "Boba Labs"
+      },
+      "location": {
+        "city": "Madrid",
+        "region": "Comunidad de Madrid",
+        "country": "es",
+        "remote": true
+      },
+      "releasedDate": "2026-09-26T08:00:00.000Z",
+      "typeOfEmployment": { "label": "Full-time" },
+      "experienceLevel": { "label": "Mid-Senior Level" },
+      "industry": { "label": "Software" },
+      "functions": [{ "label": "Engineering" }]
+    },
+    {
+      "id": "7440000123456790",
+      "name": "Recruiter",
+      "uuid": "1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e",
+      "company": {
+        "identifier": "Boba",
+        "name": "Boba Labs"
+      },
+      "location": {
+        "city": "Barcelona",
+        "region": "Catalonia",
+        "country": "es",
+        "remote": false
+      },
+      "releasedDate": "2026-09-15T08:00:00.000Z",
+      "typeOfEmployment": { "label": "Full-time" }
+    }
+  ]
+}

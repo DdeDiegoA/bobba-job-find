@@ -1,0 +1,40 @@
+[
+  {
+    "id": "6f2c1a44-0d2e-4f71-9c3e-2b8f0e1a7d10",
+    "text": "Staff Platform Engineer",
+    "hostedUrl": "https://jobs.lever.co/bobalabs/6f2c1a44-0d2e-4f71-9c3e-2b8f0e1a7d10",
+    "applyUrl": "https://jobs.lever.co/bobalabs/6f2c1a44-0d2e-4f71-9c3e-2b8f0e1a7d10/apply",
+    "categories": {
+      "team": "Platform",
+      "location": "Remote - Europe",
+      "commitment": "Full-time",
+      "department": "Engineering"
+    },
+    "description": "<div>Own the platform that ships Boba.</div>",
+    "descriptionPlain": "Own the platform that ships Boba.",
+    "additional": "<p>We are a remote-first team.</p>",
+    "additionalPlain": "We are a remote-first team.",
+    "createdAt": 1727740800000,
+    "salaryRange": {
+      "min": 120000,
+      "max": 160000,
+      "currency": "EUR",
+      "interval": "per-year-salary"
+    }
+  },
+  {
+    "id": "b3d9e2a0-77ab-4c1f-8d55-6a1e4c2b9f03",
+    "text": "Customer Support Specialist",
+    "hostedUrl": "https://jobs.lever.co/bobalabs/b3d9e2a0-77ab-4c1f-8d55-6a1e4c2b9f03",
+    "applyUrl": "https://jobs.lever.co/bobalabs/b3d9e2a0-77ab-4c1f-8d55-6a1e4c2b9f03/apply",
+    "categories": {
+      "team": "Support",
+      "location": "Austin, TX",
+      "commitment": "Full-time",
+      "department": "Operations"
+    },
+    "description": "<div>Help our customers every day.</div>",
+    "descriptionPlain": "Help our customers every day.",
+    "createdAt": 1727395200000
+  }
+]
