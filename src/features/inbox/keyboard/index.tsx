@@ -53,7 +53,7 @@ export default function InboxKeyboard() {
   const save = useSaveOffer();
   const dismiss = useDismissOffer();
   const undo = useUndoDismiss();
-  const lastDismissed = useRef<string | null>(null);
+  const lastDismissed = useRef<{ id: string; at: number } | null>(null);
   const restored = useRef(false);
 
   const titleOf = useCallback(
@@ -115,7 +115,8 @@ export default function InboxKeyboard() {
       { postingIds: [id], reason: null },
       {
         onSuccess: () => {
-          lastDismissed.current = id;
+          // Cmd/Ctrl+Z is only live as long as the toast's Undo (FR-66).
+          lastDismissed.current = { id, at: Date.now() };
           const title = titleOf(id);
           // The card is about to leave the list: move the cursor on before it goes.
           focusNeighbour(id);
@@ -141,9 +142,9 @@ export default function InboxKeyboard() {
 
       if (mod && key === "z" && !event.shiftKey && !isEditable(event.target)) {
         const last = lastDismissed.current;
-        if (!last) return;
+        if (!last || Date.now() - last.at > UNDO_WINDOW_MS) return;
         event.preventDefault();
-        handlers.current.undo(last);
+        handlers.current.undo(last.id);
         return;
       }
       if (mod || event.altKey || event.shiftKey || isEditable(event.target)) return;

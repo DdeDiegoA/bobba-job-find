@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OfferCardView } from "@/lib/ipc/bindings";
 import { commands } from "@/lib/ipc/bindings";
 import "@/lib/i18n";
+import { UNDO_WINDOW_MS } from "../actions";
 import { rememberCard } from "./dom";
 import InboxKeyboard from "./index";
 
@@ -158,6 +159,26 @@ describe("S saves and D dismisses the focused card (AC1)", () => {
 
     fireEvent.keyDown(window, { key: "z", metaKey: true });
     await waitFor(() => expect(commands.inboxUndoDismiss).toHaveBeenCalledWith("pst_01"));
+  });
+
+  it("stops undoing once the 6-second window has passed (R1)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-17T10:00:00Z"));
+      renderTriage();
+      fireEvent.keyDown(window, { key: "j" });
+      fireEvent.keyDown(window, { key: "d" });
+      await waitFor(() => expect(commands.inboxDismiss).toHaveBeenCalledWith(["pst_01"], null));
+
+      // Past the toast's Undo, Cmd/Ctrl+Z is an ordinary undo again.
+      vi.setSystemTime(new Date(Date.now() + UNDO_WINDOW_MS + 1));
+      fireEvent.keyDown(window, { key: "z", metaKey: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(commands.inboxUndoDismiss).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("leaves the cursor where it was after a dismissal", async () => {

@@ -171,7 +171,7 @@ function PaletteDialog() {
             type="text"
             role="combobox"
             aria-expanded={rows.length > 0}
-            aria-controls="palette-rows"
+            aria-controls={rows.length > 0 ? "palette-rows" : undefined}
             aria-activedescendant={activeId}
             aria-autocomplete="list"
             aria-label={t("placeholder")}
@@ -273,10 +273,7 @@ function Row({
       aria-selected={selected}
       tabIndex={-1}
       onMouseMove={onHover}
-      onClick={onChoose}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onChoose();
-      }}
+      onMouseDown={onChoose}
       className={cn(
         "flex cursor-pointer flex-col gap-0.5 rounded-xl px-2 py-2 text-sm",
         selected ? "bg-surface-muted text-fg" : "text-fg-muted",
