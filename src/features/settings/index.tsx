@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation } from "react-router";
 import { cn } from "@/lib/utils";
+import SettingsApplyingRules from "./applying/rules";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacySessions from "./privacy/sessions";
 
@@ -17,6 +18,7 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
     labelKey: "session_optin:privacy.title",
     Component: SettingsPrivacySessions,
   },
+  { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
 ];
 
 export default function SettingsIndex() {

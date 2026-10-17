@@ -10,6 +10,7 @@
 //! that folder (AD-14) — the S7.7 UI block is not the gate.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use boba_app::applications::TrackerError;
 use boba_app::apply::ats_form::{
@@ -17,18 +18,28 @@ use boba_app::apply::ats_form::{
 };
 use boba_app::apply::engine::{ApplyEngine, EmailApplyView, EngineError, SendReceipt, SendRequest};
 use boba_app::apply::manual::{ManualError, ManualService, ManualView};
+use boba_app::apply::rules::{
+    self, AutoRulesService, DecisionView, RuleInput, RuleView, RulesError, RulesSnapshot,
+};
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::browser::BrowserPort;
+use boba_app::ports::clock::ClockPort;
 use boba_app::ports::mail::{MailError, MailPort};
 use boba_app::ports::repo::apply::{ApplyRepo, ApplyRepoError};
+use boba_app::ports::repo::auto_rules::AutoRulesRepo;
 use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::outbox::OutboxRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
+use boba_app::ports::repo::scoring::ScoringRepo;
+use boba_app::ports::repo::sources::SourcesRepo;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::system::SystemClock;
 use boba_domain::application::Application;
+use boba_domain::apply::policy::{self, PolicyCandidate, RuleChannel};
 use boba_domain::posting::Offer;
+use boba_domain::scoring::gates::{Confidence, Verdict as GateVerdict};
+use boba_domain::scoring::rank::Verdict;
 use tauri::Manager;
 
 use crate::commands::studio::ExportedFile;
@@ -361,6 +372,166 @@ pub async fn apply_ats_confirm(
     })
     .await
     .map_err(|_| CommandError::Store.app_error())?
+}
+
+// ---- Auto Rules (S9.6, FR-83/FR-87/FR-108, AD-11) ---------------------------
+
+/// The rules and the global Auto settings (AC1).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rules_snapshot(app: tauri::AppHandle) -> AppResult<RulesSnapshot> {
+    rules_service(&app)?.snapshot().map_err(rules_error)
+}
+
+/// Create or edit one Auto Rule; core validates every bound (AC1, AD-11).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rule_save(app: tauri::AppHandle, input: RuleInput) -> AppResult<RuleView> {
+    rules_service(&app)?.save_rule(input).map_err(rules_error)
+}
+
+/// Remove one Auto Rule. Returns whether a row went.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rule_delete(app: tauri::AppHandle, rule_id: String) -> AppResult<bool> {
+    rules_service(&app)?
+        .delete_rule(&rule_id)
+        .map_err(rules_error)
+}
+
+/// Turn Auto on (only after the consequences dialog, AC3) or off.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rules_set_enabled(
+    app: tauri::AppHandle,
+    enabled: bool,
+    confirmed: bool,
+) -> AppResult<RulesSnapshot> {
+    rules_service(&app)?
+        .set_enabled(enabled, confirmed)
+        .map_err(rules_error)
+}
+
+/// Set the cap across every rule (FR-83); core validates the range.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rules_set_global_cap(app: tauri::AppHandle, cap: u8) -> AppResult<RulesSnapshot> {
+    rules_service(&app)?
+        .set_global_cap(cap)
+        .map_err(rules_error)
+}
+
+/// FR-108: turn Auto off and restore the default caps (AC4).
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rules_reset(app: tauri::AppHandle) -> AppResult<RulesSnapshot> {
+    rules_service(&app)?
+        .reset_to_defaults()
+        .map_err(rules_error)
+}
+
+/// Why Auto would or would not send one application (AC2). This is the reason
+/// list the screen shows verbatim; the send paths call the same use case
+/// in-process, so the preview and enforcement cannot drift.
+///
+/// `local_minute` is the user's minute of day and `utc_offset_minutes` their
+/// offset from UTC, sent by the UI because the active hours and the daily caps
+/// are local (FR-83, S9.6 review F1); `None` reads the OS offset here.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_rules_explain(
+    app: tauri::AppHandle,
+    application_id: String,
+    channel: String,
+    local_minute: Option<u16>,
+    utc_offset_minutes: Option<i32>,
+) -> AppResult<DecisionView> {
+    let application_id = required_id(application_id)?;
+    let channel = RuleChannel::parse(&channel)
+        .ok_or_else(|| AppError::invalid_input("errors.apply.rule_invalid"))?;
+    let (application, offer) = context(&app, &application_id)?;
+
+    let card = wiring::port::<dyn ScoringRepo>(&app)?
+        .latest_card(&application.posting_id)
+        .map_err(|_| CommandError::Store.app_error())?;
+    let package = wiring::port::<dyn ApplyRepo>(&app)?
+        .package(&application_id)
+        .map_err(|_| CommandError::Store.app_error())?;
+    let documents = wiring::port::<dyn DocumentsRepo>(&app)?
+        .list_for_application(&application_id)
+        .map_err(|_| CommandError::Store.app_error())?;
+    let opt_in = wiring::port::<dyn SourcesRepo>(&app)?
+        .get_optin(&offer.source_id)
+        .map_err(|_| CommandError::Store.app_error())?
+        .is_some();
+    let offset = utc_offset_minutes.unwrap_or_else(rules::local_offset_minutes);
+
+    let candidate = PolicyCandidate {
+        source_id: offer.source_id.clone(),
+        channel,
+        company_key: policy::company_key(&offer.company),
+        rank: card.as_ref().map(|card| card.card.rank),
+        fit: card.as_ref().and_then(|card| card.card.fit),
+        verdict: card
+            .as_ref()
+            .map(|card| card.card.verdict)
+            .unwrap_or(Verdict::Poor),
+        confidence: card
+            .as_ref()
+            .map(|card| card.card.confidence)
+            .unwrap_or(Confidence::Low),
+        gates: card
+            .as_ref()
+            .map(|card| card.gates.verdict())
+            .unwrap_or(GateVerdict::Pass),
+        // The owning slices supply these when they land: the fraud badge (E6),
+        // the duplicate guard (S9.5) and the agent runtime's lockdown verdict.
+        // Until then no badge and no duplicate is known, and the package was
+        // not produced by an agent on this path.
+        fraud_badge: false,
+        documents_verified: !package.is_empty()
+            && package.iter().all(|item| item.verified_at.is_some()),
+        language_variant_confirmed: documents
+            .iter()
+            .all(|document| document.language_fallback_from.is_none()),
+        duplicate: false,
+        agent_used: false,
+        cli_tool_lockdown: true,
+        source_auto_opt_in: opt_in,
+        utc_offset_minutes: offset,
+        local_minute: local_minute.unwrap_or_else(|| {
+            rules::local_minute_at(&ClockPort::now_rfc3339(&SystemClock), offset)
+        }),
+    };
+    // The sample only drives the 5–20 minute gap (AC4); a preview never sends,
+    // so the sample is deterministic here and the reason names the longest wait.
+    rules_service(&app)?
+        .decide(&candidate, 0)
+        .map_err(rules_error)
+}
+
+/// The Auto Rules use case, built from the mounted ports (ADR-012).
+fn rules_service(app: &tauri::AppHandle) -> AppResult<AutoRulesService> {
+    Ok(AutoRulesService::new(
+        wiring::port::<dyn AutoRulesRepo>(app)?,
+        wiring::port::<dyn SystemRepo>(app)?,
+        Arc::new(SystemClock),
+    ))
+}
+
+/// Map an Auto Rules failure onto the typed IPC error (AD-3, CH7).
+fn rules_error(error: RulesError) -> AppError {
+    let code = match &error {
+        RulesError::InvalidRule(_)
+        | RulesError::InvalidSettings(_)
+        | RulesError::CannotEnable(_)
+        | RulesError::UnknownChannel(_)
+        | RulesError::UnknownConfidence(_)
+        | RulesError::UnknownVerdict(_) => ErrorCode::InvalidInput,
+        RulesError::UnknownRule(_) => ErrorCode::NotFound,
+        RulesError::Repo(_) | RulesError::System(_) | RulesError::Clock => ErrorCode::Internal,
+    };
+    AppError::new(code, error.message_key())
 }
 
 /// The folder one application's kit is written to, created on demand.

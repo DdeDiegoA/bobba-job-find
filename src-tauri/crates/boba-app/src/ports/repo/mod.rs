@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod apply;
+pub mod auto_rules;
 pub mod documents;
 pub mod email;
 pub mod ingestion;

@@ -3,6 +3,7 @@
 pub mod agent_run;
 pub mod applications;
 pub mod audit;
+pub mod auto_rules;
 pub mod cli_install;
 pub mod documents;
 pub mod email;

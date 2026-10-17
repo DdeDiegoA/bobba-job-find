@@ -66,6 +66,13 @@ macro_rules! boba_commands {
             crate::commands::profile_import::profile_import_proposals,
             crate::commands::profile_import::profile_import_confirm,
             crate::commands::profile_import::profile_import_discard,
+            crate::commands::apply::apply_rules_snapshot,
+            crate::commands::apply::apply_rule_save,
+            crate::commands::apply::apply_rule_delete,
+            crate::commands::apply::apply_rules_set_enabled,
+            crate::commands::apply::apply_rules_set_global_cap,
+            crate::commands::apply::apply_rules_reset,
+            crate::commands::apply::apply_rules_explain,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
