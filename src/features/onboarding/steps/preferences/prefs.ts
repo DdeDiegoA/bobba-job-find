@@ -1,3 +1,4 @@
+import { majorUnits, minorUnitScale } from "@/lib/format";
 import type {
   MoneyPeriod,
   Preferences,
@@ -61,8 +62,10 @@ export function preferenceValuesEqual(a: Preferences, b: Preferences): boolean {
 
 /**
  * The salary floor as the user typed it, in major units, to the stored shape:
- * integer minor units (AD-17). An empty, negative or unparsable amount clears
- * the floor rather than storing a wrong one; the core re-checks it anyway.
+ * integer minor units (AD-17), scaled by the currency's own ISO-4217 exponent
+ * (CLP and JPY have none, so their amount is stored as typed). An empty,
+ * negative or unparsable amount clears the floor rather than storing a wrong
+ * one; the core re-checks it anyway.
  */
 export function salaryFloorFromInput(
   amount: string,
@@ -72,5 +75,15 @@ export function salaryFloorFromInput(
 ): SalaryFloor | null {
   const major = Number(amount.trim());
   if (amount.trim() === "" || !Number.isFinite(major) || major < 0) return null;
-  return { amount_minor: Math.round(major * 100), currency, period, firmness };
+  return {
+    amount_minor: Math.round(major * minorUnitScale(currency)),
+    currency,
+    period,
+    firmness,
+  };
+}
+
+/** The stored salary floor back in major units, as the amount field edits it. */
+export function salaryFloorToInput(floor: SalaryFloor | null): string {
+  return floor ? String(majorUnits(floor.amount_minor, floor.currency)) : "";
 }

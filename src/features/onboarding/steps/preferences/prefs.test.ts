@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Preferences } from "@/lib/ipc/bindings";
-import { preferenceValuesEqual, salaryFloorFromInput } from "./prefs";
+import { preferenceValuesEqual, salaryFloorFromInput, salaryFloorToInput } from "./prefs";
 
 const values = (over: Partial<Preferences> = {}): Preferences => ({
   roles: [],
@@ -26,6 +26,35 @@ describe("Preferences — the core's money shape (AD-17)", () => {
       firmness: "hard",
     });
     expect(salaryFloorFromInput("2500.5", "EUR", "month", "soft")?.amount_minor).toBe(250_050);
+  });
+
+  it("stores CLP by its own exponent: no centavos", () => {
+    expect(salaryFloorFromInput("1500000", "CLP", "year", "hard")).toEqual({
+      amount_minor: 1_500_000,
+      currency: "CLP",
+      period: "year",
+      firmness: "hard",
+    });
+    expect(
+      salaryFloorToInput({
+        amount_minor: 1_500_000,
+        currency: "CLP",
+        period: "year",
+        firmness: "hard",
+      }),
+    ).toBe("1500000");
+  });
+
+  it("edits the floor in the currency's major units", () => {
+    expect(salaryFloorToInput(null)).toBe("");
+    expect(
+      salaryFloorToInput({
+        amount_minor: 6_000_000,
+        currency: "USD",
+        period: "year",
+        firmness: "hard",
+      }),
+    ).toBe("60000");
   });
 
   it("clears the floor instead of storing a bad amount", () => {

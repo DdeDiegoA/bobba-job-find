@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { majorUnits } from "@/lib/format";
 import type { ManualOffer } from "@/lib/ipc/bindings";
 import { commands } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
@@ -156,7 +157,7 @@ function OfferCard({ offer, language }: { offer: ManualOffer; language: string }
           style: "currency",
           currency: offer.currency,
           maximumFractionDigits: 0,
-        }).format(offer.amount_minor / 100)
+        }).format(majorUnits(offer.amount_minor, offer.currency))
       : null;
 
   return (

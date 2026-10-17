@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import type { Preferences, SalaryFloor } from "@/lib/ipc/bindings";
+import type { Preferences } from "@/lib/ipc/bindings";
 import {
   CURRENCY_OPTIONS,
   HOURS,
@@ -9,16 +9,13 @@ import {
   SALARY_FIRMNESS_OPTIONS,
   SENIORITY_OPTIONS,
   salaryFloorFromInput,
+  salaryFloorToInput,
   WORK_MODE_OPTIONS,
   WORKING_LANGUAGE_OPTIONS,
 } from "./prefs";
 
 const selectClass = "rounded-xl border border-border bg-surface-muted px-3 py-2 text-fg";
 const textClass = "rounded-xl border border-border bg-surface-muted px-3 py-2 text-fg";
-
-/** Text of the amount field; the stored floor is in minor units (AD-17). */
-const amountText = (floor: SalaryFloor | null): string =>
-  floor ? String(floor.amount_minor / 100) : "";
 
 /**
  * The FR-7 fields, shared by the onboarding step and Settings → Preferences so
@@ -36,7 +33,7 @@ export function PreferencesForm({
   // Money is committed when I leave the amount field, so typing 60000 does not
   // create five versions; the other money choices are decisions on their own.
   const [money, setMoney] = useState(() => ({
-    amount: amountText(values.salary_floor),
+    amount: salaryFloorToInput(values.salary_floor),
     currency: values.salary_floor?.currency ?? "USD",
     period: values.salary_floor?.period ?? ("year" as const),
     firmness: values.salary_floor?.firmness ?? ("hard" as const),
