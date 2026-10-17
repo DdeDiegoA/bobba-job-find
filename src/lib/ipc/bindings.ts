@@ -866,6 +866,15 @@ export type BackupStatusView = {
   confirmation_token: string;
 };
 
+/**  Where a badge's signal was read from (S6.8, FR-60). */
+export type BadgeSource =
+  /**  The posting's own words, plain text — untrusted data (AD-7). */
+  | { kind: "text"; value: string }
+  /**  A structured Offer field, by name (`money`, `posted_at`). */
+  | { kind: "field"; value: string }
+  /**  The published report a threshold comes from. */
+  | { kind: "report"; value: string };
+
 /**
  *  One badge on an Offer card (FR-60, FR-64): a stable id the UI resolves to a
  *  label in the active language. The Gate-driven badges are decided here because
@@ -877,6 +886,12 @@ export type BadgeView = {
   id: string;
   /**  The Gate it came from, when it came from one (`eligibility` … `deadline`). */
   gate: string | null;
+  /**
+   *  AC2: a ghost/fraud signal names its source — the posting's own words,
+   *  the Offer field it read, or the report its threshold comes from. Gate
+   *  badges carry none: their evidence is the Gate's own quote.
+   */
+  source: BadgeSource | null;
 };
 
 /**  One column (AC1). The four terminal columns collapse in the UI (FR-93). */
@@ -1851,6 +1866,11 @@ export type Preferences = {
   deal_breaker_keywords: string[];
   deal_breaker_notes: string;
   excluded_companies: string[];
+  /**
+   *  FR-58: how each factor and each axis weighs. Absent in a document
+   *  written before S6.8, which reads as the defaults.
+   */
+  weights?: ScoringWeights;
 };
 
 /**
@@ -2141,6 +2161,30 @@ export type SalaryFloor = {
 export type SaveOutcome = {
   application_id: string;
   created: boolean;
+};
+
+/**
+ *  The scoring weights as Settings → Scoring edits them (S6.8, FR-58), in whole
+ *  percent: `35` is the PRD's default `0.35`. Whole percent keeps the stored
+ *  document exact and comparable (`Preferences` is compared field by field),
+ *  and the core normalises each axis to one unit when it scores.
+ */
+export type ScoringWeights = {
+  skills: number;
+  experience: number;
+  semantic: number;
+  location: number;
+  education: number;
+  language: number;
+  compensation: number;
+  company: number;
+  terms: number;
+  legitimacy: number;
+  alignment: number;
+  /**  `w_fit` of `Rank = w_fit·Fit + w_quality·Quality`. */
+  fit: number;
+  /**  `w_quality` of the same formula. */
+  quality: number;
 };
 
 /**  A section of a CV, as the editor shows it. */

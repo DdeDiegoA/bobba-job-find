@@ -305,6 +305,15 @@ export const BADGE_LABELS: Record<string, string> = {
   location_unverified: "inbox:badge.location_unverified",
   compensation_unverified: "inbox:badge.compensation_unverified",
   check: "inbox:badge.check",
+  // S6.8 (FR-60): the fraud and ghost signals, labelled in the Scoring area's
+  // namespace so the settings page and the card read one catalogue.
+  pay_to_apply: "settings_scoring:badge.pay_to_apply",
+  off_platform_contact: "settings_scoring:badge.off_platform_contact",
+  implausible_pay: "settings_scoring:badge.implausible_pay",
+  ghost_stale_posting: "settings_scoring:badge.ghost_stale_posting",
+  ghost_vague_description: "settings_scoring:badge.ghost_vague_description",
+  ghost_no_salary: "settings_scoring:badge.ghost_no_salary",
+  ghost_talent_pool: "settings_scoring:badge.ghost_talent_pool",
 };
 
 export const EXCLUSION_REASON_LABELS: Record<string, string> = {

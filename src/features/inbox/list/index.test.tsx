@@ -116,7 +116,7 @@ describe("the Offer card (AC2)", () => {
       ok([
         card({
           sources: ["greenhouse", "rss"],
-          badges: [{ id: "closing_soon", gate: "deadline" }],
+          badges: [{ id: "closing_soon", gate: "deadline", source: null }],
           closing_soon: true,
         }),
       ]),

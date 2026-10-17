@@ -17,6 +17,8 @@ use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::repo::system::{SystemRepo, SystemRepoError};
 use boba_app::system::SystemClock;
+use boba_domain::scoring::factors::FactorWeights;
+use boba_domain::scoring::weights::{self as weight_rules, WeightViolation};
 use serde::{Deserialize, Serialize};
 
 use crate::wiring;
@@ -83,6 +85,110 @@ pub struct WorkModes {
     pub onsite: bool,
 }
 
+/// The scoring weights as Settings → Scoring edits them (S6.8, FR-58), in whole
+/// percent: `35` is the PRD's default `0.35`. Whole percent keeps the stored
+/// document exact and comparable (`Preferences` is compared field by field),
+/// and the core normalises each axis to one unit when it scores.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ScoringWeights {
+    pub skills: u16,
+    pub experience: u16,
+    pub semantic: u16,
+    pub location: u16,
+    pub education: u16,
+    pub language: u16,
+    pub compensation: u16,
+    pub company: u16,
+    pub terms: u16,
+    pub legitimacy: u16,
+    pub alignment: u16,
+    /// `w_fit` of `Rank = w_fit·Fit + w_quality·Quality`.
+    pub fit: u16,
+    /// `w_quality` of the same formula.
+    pub quality: u16,
+}
+
+impl ScoringWeights {
+    /// The largest weight a single field may carry (percent).
+    pub const MAX: u16 = 100;
+
+    /// A document in the scoring engine's shape.
+    pub(crate) fn to_factor_weights(self) -> FactorWeights {
+        FactorWeights {
+            f1: share(self.skills),
+            f2: share(self.experience),
+            f3: share(self.semantic),
+            f4: share(self.location),
+            f5: share(self.education),
+            f6: share(self.language),
+            q1: share(self.compensation),
+            q2: share(self.company),
+            q3: share(self.terms),
+            q4: share(self.legitimacy),
+            q5: share(self.alignment),
+            fit: share(self.fit),
+            quality: share(self.quality),
+        }
+    }
+
+    /// The stored document for a set of weights (the UI shows these).
+    pub(crate) fn from_factor_weights(weights: FactorWeights) -> Self {
+        Self {
+            skills: percent(weights.f1),
+            experience: percent(weights.f2),
+            semantic: percent(weights.f3),
+            location: percent(weights.f4),
+            education: percent(weights.f5),
+            language: percent(weights.f6),
+            compensation: percent(weights.q1),
+            company: percent(weights.q2),
+            terms: percent(weights.q3),
+            legitimacy: percent(weights.q4),
+            alignment: percent(weights.q5),
+            fit: percent(weights.fit),
+            quality: percent(weights.quality),
+        }
+    }
+
+    /// Every field, for the range check.
+    fn all(self) -> [u16; 13] {
+        [
+            self.skills,
+            self.experience,
+            self.semantic,
+            self.location,
+            self.education,
+            self.language,
+            self.compensation,
+            self.company,
+            self.terms,
+            self.legitimacy,
+            self.alignment,
+            self.fit,
+            self.quality,
+        ]
+    }
+}
+
+impl Default for ScoringWeights {
+    /// The PRD's defaults (FR-55..57), which a reset also returns to.
+    fn default() -> Self {
+        Self::from_factor_weights(FactorWeights::DEFAULT)
+    }
+}
+
+/// Whole percent to the engine's share.
+fn share(percent: u16) -> f32 {
+    f32::from(percent) / 100.0
+}
+
+/// The engine's share as whole percent (rounded).
+fn percent(value: f32) -> u16 {
+    (value * 100.0)
+        .round()
+        .clamp(0.0, f32::from(ScoringWeights::MAX)) as u16
+}
+
 /// Everything the user can edit (FR-7).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Preferences {
@@ -98,6 +204,10 @@ pub struct Preferences {
     pub deal_breaker_keywords: Vec<String>,
     pub deal_breaker_notes: String,
     pub excluded_companies: Vec<String>,
+    /// FR-58: how each factor and each axis weighs. Absent in a document
+    /// written before S6.8, which reads as the defaults.
+    #[serde(default)]
+    pub weights: ScoringWeights,
 }
 
 impl Default for Preferences {
@@ -119,6 +229,7 @@ impl Default for Preferences {
             deal_breaker_keywords: Vec::new(),
             deal_breaker_notes: String::new(),
             excluded_companies: Vec::new(),
+            weights: ScoringWeights::default(),
         }
     }
 }
@@ -153,6 +264,9 @@ pub enum PreferencesError {
     /// The document the caller sent breaks a preference rule.
     #[error("invalid preferences: {0}")]
     Invalid(String),
+    /// FR-58: the weights could not be scored with (S6.8).
+    #[error("invalid scoring weights: {0:?}")]
+    Weights(WeightViolation),
 }
 
 impl PreferencesError {
@@ -161,6 +275,7 @@ impl PreferencesError {
         match self {
             Self::Repo(_) => "errors.preferences.store",
             Self::Invalid(_) => "errors.preferences.invalid",
+            Self::Weights(violation) => violation.message_key(),
         }
     }
 }
@@ -169,7 +284,7 @@ impl PreferencesError {
 fn to_app(error: PreferencesError) -> AppError {
     let code = match error {
         PreferencesError::Repo(_) => ErrorCode::Internal,
-        PreferencesError::Invalid(_) => ErrorCode::InvalidInput,
+        PreferencesError::Invalid(_) | PreferencesError::Weights(_) => ErrorCode::InvalidInput,
     };
     AppError::new(code, error.message_key())
 }
@@ -229,6 +344,19 @@ fn validate(values: &Preferences) -> Result<(), PreferencesError> {
     if !modes.remote && !modes.hybrid && !modes.onsite {
         return Err(PreferencesError::Invalid("work_modes".to_string()));
     }
+    // S6.8: a weight outside 0–100% is a slider bug, and an axis with no weight
+    // could not be scored — refuse both rather than store a document the engine
+    // would have to reinterpret.
+    if values
+        .weights
+        .all()
+        .into_iter()
+        .any(|weight| weight > ScoringWeights::MAX)
+    {
+        return Err(PreferencesError::Invalid("weights_range".to_string()));
+    }
+    weight_rules::normalize(values.weights.to_factor_weights())
+        .map_err(PreferencesError::Weights)?;
     Ok(())
 }
 
@@ -484,8 +612,130 @@ mod tests {
         assert_eq!(mapped.code, ErrorCode::InvalidInput);
         assert_eq!(mapped.message_key, "errors.preferences.invalid");
 
+        let mapped = to_app(PreferencesError::Weights(WeightViolation::Negative(
+            boba_domain::scoring::weights::WeightField::F1,
+        )));
+        assert_eq!(mapped.code, ErrorCode::InvalidInput);
+        assert_eq!(mapped.message_key, "errors.settings_scoring.negative");
+
         let mapped = to_app(PreferencesError::Repo(SystemRepoError::new("disk")));
         assert_eq!(mapped.code, ErrorCode::Internal);
         assert_eq!(mapped.message_key, "errors.preferences.store");
+    }
+
+    // S6.8 (AC1): the document carries the PRD's weights by default.
+    #[test]
+    fn the_scoring_weights_default_to_the_prd_table() {
+        let weights = ScoringWeights::default();
+        assert_eq!(
+            (
+                weights.skills,
+                weights.experience,
+                weights.semantic,
+                weights.location,
+                weights.education,
+                weights.language
+            ),
+            (35, 25, 15, 10, 10, 5)
+        );
+        assert_eq!(
+            (
+                weights.compensation,
+                weights.company,
+                weights.terms,
+                weights.legitimacy,
+                weights.alignment
+            ),
+            (30, 25, 15, 20, 10)
+        );
+        assert_eq!((weights.fit, weights.quality), (65, 35));
+        assert_eq!(weights.to_factor_weights(), FactorWeights::DEFAULT);
+        assert_eq!(
+            ScoringWeights::from_factor_weights(FactorWeights::DEFAULT),
+            weights
+        );
+    }
+
+    // S6.8 (AC1): a weights edit is an ordinary Preferences change — a new
+    // version, scores stale, and a re-score is what consumes it (FR-14).
+    #[test]
+    fn a_weights_change_bumps_the_version_and_marks_scores_stale() {
+        let base = Preferences {
+            roles: vec!["SRE".to_string()],
+            ..Preferences::default()
+        };
+        let (repo, saved) = repo_with("weights-change", base.clone());
+        let mut values = base;
+        values.weights.skills = 40;
+        values.weights.fit = 70;
+        values.weights.quality = 30;
+
+        let again = save(&repo, &clock(), values).expect("save");
+
+        assert_eq!(saved.version, 1);
+        assert_eq!(again.version, 2);
+        assert!(again.scores_stale);
+        let stored = snapshot(&repo).expect("snapshot");
+        assert_eq!(stored.values.weights.skills, 40);
+        assert_eq!(stored.values.weights.fit, 70);
+        assert_eq!(stored.values.weights.quality, 30);
+    }
+
+    #[test]
+    fn a_reset_to_the_defaults_is_a_change_too() {
+        let mut edited = Preferences::default();
+        edited.weights.quality = 50;
+        let (repo, saved) = repo_with("weights-reset", edited);
+
+        let reset = save(&repo, &clock(), Preferences::default()).expect("save");
+        assert_eq!(reset.version, saved.version + 1);
+        assert_eq!(reset.values.weights, ScoringWeights::default());
+        assert!(reset.scores_stale);
+    }
+
+    #[test]
+    fn a_document_written_before_weights_reads_as_the_defaults() {
+        let repo = repo("weights-old");
+        let mut doc =
+            serde_json::to_value(PreferencesSnapshot::default()).expect("a serialisable document");
+        doc["values"]
+            .as_object_mut()
+            .expect("values is an object")
+            .remove("weights");
+        repo.setting_put(KEY, &doc.to_string(), "seed")
+            .expect("seed");
+
+        let stored = snapshot(&repo).expect("snapshot");
+        assert_eq!(stored.values.weights, ScoringWeights::default());
+        assert_eq!(stored.values.roles, Preferences::default().roles);
+    }
+
+    #[test]
+    fn a_weight_outside_the_slider_range_is_rejected() {
+        let mut values = Preferences::default();
+        values.weights.skills = ScoringWeights::MAX + 1;
+        assert!(matches!(
+            save(&repo("weights-range"), &clock(), values),
+            Err(PreferencesError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn weights_that_leave_an_axis_empty_are_rejected() {
+        let mut values = Preferences::default();
+        values.weights.skills = 0;
+        values.weights.experience = 0;
+        values.weights.semantic = 0;
+        values.weights.location = 0;
+        values.weights.education = 0;
+        values.weights.language = 0;
+
+        match save(&repo("weights-empty"), &clock(), values) {
+            Err(PreferencesError::Weights(violation)) => assert_eq!(
+                violation,
+                WeightViolation::EmptyAxis(boba_domain::scoring::factors::Axis::Fit)
+            ),
+            other => panic!("expected an empty-axis refusal, got {other:?}"),
+        }
     }
 }

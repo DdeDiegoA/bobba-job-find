@@ -1,0 +1,6 @@
+{
+  "errors.settings_scoring.negative": "Un peso no puede ser menor que cero.",
+  "errors.settings_scoring.not_finite": "Un peso tiene que ser un número.",
+  "errors.settings_scoring.empty_axis": "Cada lado necesita al menos un peso mayor que cero.",
+  "errors.settings_scoring.no_axis_weight": "Encaje y calidad no pueden ser ambos cero."
+}

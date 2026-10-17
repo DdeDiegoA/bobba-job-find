@@ -49,6 +49,8 @@ use boba_domain::application::Application;
 use boba_domain::apply::outbox::OutboxState;
 use boba_domain::apply::policy::{self, PolicyCandidate, RuleChannel};
 use boba_domain::posting::Offer;
+use boba_domain::scoring::factors::MarketData;
+use boba_domain::scoring::fraud;
 use boba_domain::scoring::gates::{Confidence, Verdict as GateVerdict};
 use boba_domain::scoring::rank::Verdict;
 use tauri::Manager;
@@ -584,6 +586,13 @@ pub fn apply_rules_explain(
 /// The facts about one application the policy reads (S9.6 AC2). Both the preview
 /// and the Outbox release use it, so what the user sees and what enforcement
 /// does cannot drift.
+/// FR-60 (S6.8): whether the Offer carries a fraud badge. A true here is the
+/// `PolicyCandidate.fraud_badge` every `decide()` call reads, and the policy
+/// refuses Auto on it — no rule, threshold or override gets past it.
+fn fraud_badge(offer: &Offer, now: &str) -> bool {
+    fraud::detect(offer, &MarketData::default(), now).blocks_auto()
+}
+
 fn candidate_for<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     application_id: &str,
@@ -626,11 +635,11 @@ fn candidate_for<R: tauri::Runtime>(
             .as_ref()
             .map(|card| card.gates.verdict())
             .unwrap_or(GateVerdict::Pass),
-        // The owning slices supply these when they land: the fraud badge (E6),
-        // the duplicate guard (S9.5) and the agent runtime's lockdown verdict.
-        // Until then no badge and no duplicate is known, and the package was
-        // not produced by an agent on this path.
-        fraud_badge: false,
+        // FR-60 (S6.8): a scam posting's badge blocks Auto here, which every
+        // decide() caller (apply start, ATS/session and Outbox release) runs
+        // through. The duplicate guard (S9.5) is the remaining placeholder: no
+        // duplicate is known on this path until that slice lands.
+        fraud_badge: fraud_badge(&offer, &ClockPort::now_rfc3339(&SystemClock)),
         documents_verified: !package.is_empty()
             && package.iter().all(|item| item.verified_at.is_some()),
         language_variant_confirmed: documents
@@ -1262,5 +1271,48 @@ mod tests {
         ));
         assert_eq!(sent.unwrap(), 7);
         assert_eq!(cleaned.get(), 1, "a successful send cleans nothing");
+    }
+
+    /// The Offer every candidate is built from (FR-60's fields included).
+    fn fraud_offer(description: &str) -> Offer {
+        Offer {
+            id: "pst_01".to_string(),
+            source_id: "remotive".to_string(),
+            external_id: "r-1".to_string(),
+            title: "Senior Data Engineer".to_string(),
+            company: "Acme".to_string(),
+            locations: vec!["Remote".to_string()],
+            work_mode: boba_domain::posting::WorkMode::Remote,
+            money: Some(boba_domain::posting::Money {
+                amount_minor: 6_000_000,
+                currency: "EUR".to_string(),
+                period: boba_domain::posting::PayPeriod::Year,
+            }),
+            posted_at: Some("2026-10-10T00:00:00Z".to_string()),
+            deadline: None,
+            first_seen: "2026-10-10T00:00:00Z".to_string(),
+            last_seen: "2026-10-17T00:00:00Z".to_string(),
+            lang: "en".to_string(),
+            description_html: String::new(),
+            description_text: description.to_string(),
+            requirements: vec!["Python".to_string()],
+            apply: boba_domain::posting::ApplyHints {
+                url: "https://example.com/job".to_string(),
+                email: None,
+            },
+        }
+    }
+
+    // S6.8 (AC2): the candidate every decide() caller builds carries the fraud
+    // badge, and the policy blocks Auto on it (decide.rs's own test proves the
+    // block; this proves the wiring).
+    #[test]
+    fn a_scam_posting_sets_the_fraud_badge_that_blocks_auto() {
+        let scam = fraud_offer(
+            "Remote data entry. A 200 USD application fee is required before the interview.",
+        );
+        assert!(fraud_badge(&scam, "2026-10-17T00:00:00Z"));
+        let clean = fraud_offer("We need a senior data engineer with Python and SQL.");
+        assert!(!fraud_badge(&clean, "2026-10-17T00:00:00Z"));
     }
 }
