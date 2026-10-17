@@ -2,5 +2,6 @@
   "errors.sources.invalid_url": "That feed URL isn't valid. Use an https address, like https://example.com/feed.xml.",
   "errors.sources.fetch": "Boba couldn't fetch that feed. Check the address, or try again later.",
   "errors.sources.store": "Your sources could not be read or saved.",
-  "errors.sources.invalid": "The saved feed list is damaged. Remove the custom feeds and add them again."
+  "errors.sources.invalid": "The saved feed list is damaged. Remove the custom feeds and add them again.",
+  "errors.sources.private_host": "That feed address points inside your own machine or network, so Boba won't fetch it. Use the public address of the feed."
 }

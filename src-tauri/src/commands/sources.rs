@@ -327,8 +327,13 @@ impl FeedFailure {
 
 fn source_error(error: SourceError) -> AppError {
     let failure = FeedFailure(error);
-    AppError::new(failure.code(), failure.message_key())
-        .with_detail("reason", failure.0.to_string())
+    let reason = failure.0.to_string();
+    // F2: a host that resolves inside the network has its own explanation.
+    if matches!(&failure.0, SourceError::InvalidValue { field, .. } if field == "feed host") {
+        return AppError::invalid_input("errors.sources.private_host")
+            .with_detail("reason", reason);
+    }
+    AppError::new(failure.code(), failure.message_key()).with_detail("reason", reason)
 }
 
 fn store_error<E: std::fmt::Display>(error: E) -> AppError {
@@ -502,6 +507,14 @@ mod tests {
         });
         assert_eq!(unavailable.code, ErrorCode::Unavailable);
         assert_eq!(unavailable.message_key, "errors.sources.fetch");
+
+        // F2: a name that resolves inside the network has its own copy.
+        let private = source_error(SourceError::InvalidValue {
+            field: "feed host".into(),
+            value: "127.0.0.1".into(),
+        });
+        assert_eq!(private.code, ErrorCode::InvalidInput);
+        assert_eq!(private.message_key, "errors.sources.private_host");
     }
 
     #[test]

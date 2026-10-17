@@ -74,6 +74,61 @@ fn ctx(http: &HttpClient) -> SourceCtx<'_> {
 }
 
 #[test]
+fn only_public_addresses_are_allowed_at_connect_time() {
+    for private in [
+        "127.0.0.1",
+        "127.9.9.9",
+        "10.0.0.1",
+        "172.16.0.1",
+        "172.31.255.255",
+        "192.168.1.10",
+        "169.254.169.254",
+        "0.0.0.0",
+        "255.255.255.255",
+        "224.0.0.1",
+        "100.64.0.1",
+        "192.0.2.5",
+        "::1",
+        "::",
+        "fe80::1",
+        "fc00::1",
+        "fd12:3456::1",
+        "::ffff:127.0.0.1",
+        "::ffff:10.0.0.1",
+    ] {
+        let ip: IpAddr = private.parse().unwrap();
+        assert!(!public_address(ip), "{private} must be refused");
+    }
+    for public in [
+        "8.8.8.8",
+        "1.1.1.1",
+        "93.184.216.34",
+        "2606:4700:4700::1111",
+        "::ffff:8.8.8.8",
+    ] {
+        let ip: IpAddr = public.parse().unwrap();
+        assert!(public_address(ip), "{public} must be allowed");
+    }
+}
+
+#[test]
+fn a_host_that_resolves_inside_the_network_is_refused() {
+    let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+    assert!(check_resolved(&[loopback]).is_err(), "loopback resolution");
+    let private: IpAddr = "192.168.1.5".parse().unwrap();
+    assert!(check_resolved(&[private]).is_err(), "private resolution");
+    // One bad answer poisons the set: DNS may return several.
+    let public: IpAddr = "93.184.216.34".parse().unwrap();
+    assert!(
+        check_resolved(&[public, loopback]).is_err(),
+        "a mixed answer is refused"
+    );
+    // No answer at all is a failed fetch, never an allow.
+    assert!(check_resolved(&[]).is_err(), "unresolved is refused");
+    assert!(check_resolved(&[public]).is_ok());
+}
+
+#[test]
 fn only_https_urls_with_a_host_are_accepted() {
     assert_eq!(
         validate_url(" https://jobs.example.com/feed.xml ").unwrap(),
