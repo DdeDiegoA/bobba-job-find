@@ -1,0 +1,33 @@
+[
+  {
+    "legal": "RemoteOK API terms: a dofollow backlink to remoteok.com is required. Attribution: https://remoteok.com"
+  },
+  {
+    "id": "1130001",
+    "epoch": 1790812800,
+    "company": "Boba Labs",
+    "position": "Staff Platform Engineer",
+    "tags": ["rust", "kubernetes"],
+    "description": "<p>Own our <b>platform</b> in Rust.</p>",
+    "location": "Worldwide",
+    "salary_min": 150000,
+    "salary_max": 190000,
+    "url": "https://remoteok.com/remote-jobs/staff-platform-engineer-1130001",
+    "apply_url": "https://bobalabs.example/apply/1130001",
+    "date": "2026-10-01T00:00:00+00:00"
+  },
+  {
+    "id": "1130002",
+    "epoch": 1790726400,
+    "company": "Tapioca Studio",
+    "position": "Technical Writer",
+    "tags": ["docs"],
+    "description": "<p>Write the manual we wish we had.</p>",
+    "location": "Europe",
+    "salary_min": 0,
+    "salary_max": 0,
+    "url": "http://remoteok.com/remote-jobs/technical-writer-1130002",
+    "apply_url": "javascript:alert(1)",
+    "date": "2026-09-30T00:00:00+00:00"
+  }
+]

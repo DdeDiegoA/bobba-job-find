@@ -1,0 +1,34 @@
+{
+  "0-legal-notice": "Copyright (c) 2026 Remotive, Inc. All rights reserved.",
+  "job-count": 2,
+  "jobs": [
+    {
+      "id": 1974000,
+      "url": "https://remotive.com/remote/jobs/software-dev/senior-backend-engineer-1974000",
+      "title": "Senior Backend Engineer",
+      "company_name": "Boba Labs",
+      "company_logo": "https://remotive.com/images/logo.png",
+      "category": "Software Development",
+      "tags": ["rust", "backend"],
+      "job_type": "full_time",
+      "publication_date": "2026-09-12T10:00:00",
+      "candidate_required_location": "Worldwide",
+      "salary": "$120,000 - $160,000",
+      "description": "<p>We are hiring a <b>payments</b> engineer to build systems in Rust.</p>"
+    },
+    {
+      "id": 1974001,
+      "url": "http://remotive.com/remote/jobs/design/product-designer-1974001",
+      "title": "Product Designer",
+      "company_name": "Tapioca Studio",
+      "company_logo": "https://remotive.com/images/tapioca.png",
+      "category": "Design",
+      "tags": ["figma"],
+      "job_type": "contract",
+      "publication_date": "not a date",
+      "candidate_required_location": "USA Only",
+      "salary": "",
+      "description": "<p>Design calm, warm interfaces.</p>"
+    }
+  ]
+}

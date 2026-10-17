@@ -1,0 +1,29 @@
+{
+  "totalCount": 2,
+  "jobs": [
+    {
+      "id": 4410999,
+      "title": "Backend Engineer (Rust)",
+      "location": "Ciudad de México",
+      "snippet": "<b>Rust</b> backend role building payments.",
+      "salary": "MXN 60,000 - 80,000",
+      "source": "Boba Labs",
+      "type": "Full-time",
+      "link": "https://jooble.org/jdp/4410999",
+      "company": "Boba Labs",
+      "updated": "2026-09-28T00:00:00"
+    },
+    {
+      "id": "4411000",
+      "title": "Product Designer",
+      "location": "Remote",
+      "snippet": "Design calm, warm interfaces.",
+      "salary": "",
+      "source": "Tapioca Studio",
+      "type": "Full-time",
+      "link": "http://jooble.org/jdp/4411000",
+      "company": "Tapioca Studio",
+      "updated": "2026-09-27"
+    }
+  ]
+}

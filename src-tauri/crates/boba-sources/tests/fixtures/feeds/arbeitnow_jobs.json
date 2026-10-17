@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "slug": "senior-rust-engineer-berlin",
+      "company_name": "Boba Labs GmbH",
+      "title": "Senior Rust Engineer",
+      "description": "<p>Build <b>payments</b> in Berlin.</p>",
+      "remote": true,
+      "url": "https://www.arbeitnow.com/view/senior-rust-engineer-berlin",
+      "tags": ["rust"],
+      "job_types": ["full-time"],
+      "location": "Berlin",
+      "created_at": 1790985600
+    },
+    {
+      "slug": "office-manager-munich",
+      "company_name": "Tapioca GmbH",
+      "title": "Office Manager",
+      "description": "<p>Keep the tea warm.</p>",
+      "remote": false,
+      "url": "javascript:alert(1)",
+      "tags": ["operations"],
+      "job_types": ["full-time"],
+      "location": "Munich",
+      "created_at": "not a number"
+    }
+  ],
+  "links": { "next": null },
+  "meta": { "current_page": 1 }
+}

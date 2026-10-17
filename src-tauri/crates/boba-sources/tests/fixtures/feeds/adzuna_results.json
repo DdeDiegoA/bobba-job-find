@@ -1,0 +1,26 @@
+{
+  "count": 2,
+  "results": [
+    {
+      "id": "3963446509",
+      "title": "Senior Backend Engineer",
+      "company": { "display_name": "Boba Labs" },
+      "location": { "display_name": "Mexico City, Mexico", "area": ["Mexico"] },
+      "description": "<p>Build <b>payments</b> systems.</p>",
+      "redirect_url": "https://www.adzuna.com/land/ad/3963446509",
+      "created": "2026-09-30T08:00:00Z",
+      "salary_min": 900000,
+      "salary_max": 1200000,
+      "category": { "label": "IT Jobs" }
+    },
+    {
+      "id": "3963446510",
+      "title": "Product Designer",
+      "company": { "display_name": "Tapioca Studio" },
+      "location": { "display_name": "Remote" },
+      "description": "<p>Design calm, warm interfaces.</p>",
+      "redirect_url": "javascript:alert(1)",
+      "created": "2026-09-29T08:00:00Z"
+    }
+  ]
+}

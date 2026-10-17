@@ -1,0 +1,32 @@
+{
+  "id": 45123456,
+  "created_at": "2026-10-01T15:00:00.000Z",
+  "text": "Please state the location, whether remote work is allowed, and the technologies you use.",
+  "children": [
+    {
+      "id": 45123500,
+      "created_at": "2026-10-01T15:10:00.000Z",
+      "text": "<p>Company: Boba Labs | Role: Senior Rust Engineer | Location: Remote (EU) | <a href=\"https://bobalabs.example/jobs/1\">Apply</a><p>We build payments systems in Rust.",
+      "children": [
+        {
+          "id": 45123600,
+          "created_at": "2026-10-01T16:00:00.000Z",
+          "text": "<p>Do you sponsor visas?",
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": 45123501,
+      "created_at": "2026-10-01T15:20:00.000Z",
+      "text": "<p>Acme Corp | Product Designer | Berlin, on-site<p>We make calmer apps.",
+      "children": []
+    },
+    {
+      "id": 45123502,
+      "created_at": "2026-10-01T15:30:00.000Z",
+      "text": null,
+      "children": []
+    }
+  ]
+}

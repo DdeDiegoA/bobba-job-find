@@ -58,6 +58,17 @@ pub struct FetchRequest<'a> {
     pub budget_key: Option<&'a str>,
 }
 
+/// One POST through the shared client (S4.6: Jooble is POST-only).
+#[derive(Debug, Clone)]
+pub struct PostRequest<'a> {
+    pub url: &'a str,
+    pub limits: RateLimits,
+    /// Stable key for the manifest's daily budget (normally the source id).
+    pub budget_key: Option<&'a str>,
+    pub body: &'a str,
+    pub content_type: &'a str,
+}
+
 /// A response body plus enough metadata for adapters to parse it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpResponse {
@@ -179,6 +190,19 @@ impl HttpClient {
             request.budget_key,
         )
         .await
+    }
+
+    /// POST through the shared client (S4.6). The same per-origin bucket, daily
+    /// budget, timeout, body cap and no-redirect policy as [`Self::get`]; a POST
+    /// is replayed only when doing so cannot double a side effect (S4.6 ruling:
+    /// connect errors and 429/503 that carry `Retry-After`).
+    pub async fn post(&self, request: PostRequest<'_>) -> Result<HttpResponse, SourceError> {
+        if let (Some(key), Some(cap)) = (request.budget_key, request.limits.daily_cap) {
+            self.check_budget(key, cap)?;
+        }
+        self.acquire_slot(request.url, &request.limits).await;
+        self.send_post_with_retry(request.url, request.body, request.content_type)
+            .await
     }
 
     async fn fetch(
@@ -361,7 +385,7 @@ impl HttpClient {
                 Err(error) => {
                     return Err(SourceError::Http {
                         url: url.to_string(),
-                        message: error.to_string(),
+                        message: transport_message(error),
                     });
                 }
             };
@@ -374,7 +398,56 @@ impl HttpClient {
                 tokio::time::sleep(delay).await;
                 continue;
             }
-            return self.to_response(url, response).await;
+            return self.to_response(url, response, true).await;
+        }
+    }
+
+    async fn send_post_with_retry(
+        &self,
+        url: &str,
+        body: &str,
+        content_type: &str,
+    ) -> Result<HttpResponse, SourceError> {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let response = match self
+                .client
+                .post(url)
+                .header(CONTENT_TYPE, content_type)
+                .body(body.to_string())
+                .send()
+                .await
+            {
+                Ok(response) => response,
+                // A request that never connected cannot have been processed.
+                Err(error) if attempt < self.config.max_attempts && error.is_connect() => {
+                    tokio::time::sleep(self.backoff(attempt)).await;
+                    continue;
+                }
+                Err(error) => {
+                    return Err(SourceError::Http {
+                        url: url.to_string(),
+                        message: transport_message(error),
+                    });
+                }
+            };
+
+            // A POST is never replayed on a bare 5xx: the server may have acted
+            // on it. Only a rate-limited 429/503 that says how long to wait is
+            // safe (and required) to retry.
+            let status = response.status();
+            let safe_to_retry = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE;
+            if safe_to_retry
+                && attempt < self.config.max_attempts
+                && let Some(delay) = retry_after(&response)
+            {
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            // A POST's response is never fed to the conditional cache.
+            return self.to_response(url, response, false).await;
         }
     }
 
@@ -382,6 +455,7 @@ impl HttpClient {
         &self,
         url: &str,
         response: reqwest::Response,
+        store: bool,
     ) -> Result<HttpResponse, SourceError> {
         let status = response.status().as_u16();
         let content_type = header_str(&response, CONTENT_TYPE);
@@ -421,9 +495,9 @@ impl HttpClient {
         let body = response
             .bytes()
             .await
-            .map_err(|e| SourceError::Http {
+            .map_err(|error| SourceError::Http {
                 url: url.to_string(),
-                message: e.to_string(),
+                message: transport_message(error),
             })?
             .to_vec();
         if body.len() > self.config.max_body_bytes {
@@ -433,7 +507,7 @@ impl HttpClient {
             });
         }
 
-        if status == 200 {
+        if status == 200 && store {
             self.cache.lock().unwrap().insert(
                 url.to_string(),
                 ConditionalEntry {
@@ -456,6 +530,16 @@ impl HttpClient {
     fn backoff(&self, attempt: u32) -> Duration {
         self.config.retry_base_delay * 2u32.pow(attempt.min(6))
     }
+}
+
+/// A transport error's text, **without its URL**.
+///
+/// reqwest's `Display` appends ` for url (<full url>)`, and a source URL can
+/// carry a secret in its path (Jooble's key) or query (Adzuna's). The URL is
+/// already reported — redacted by the caller — so the message must not repeat
+/// it (S4.6 review F1).
+fn transport_message(error: reqwest::Error) -> String {
+    error.without_url().to_string()
 }
 
 /// Sanitise untrusted posting HTML before any UI use (AD-7).
@@ -543,7 +627,7 @@ fn today_index() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{body_string_contains, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn client(interval: Duration) -> HttpClient {
@@ -945,6 +1029,178 @@ mod tests {
             .expect("fetch");
         assert_eq!(response.status, 200);
         assert_eq!(response.text(), "recovered");
+    }
+
+    fn post_request<'a>(url: &'a str, body: &'a str) -> PostRequest<'a> {
+        PostRequest {
+            url,
+            limits: RateLimits {
+                min_interval_ms: 0,
+                daily_cap: None,
+            },
+            budget_key: None,
+            body,
+            content_type: "application/json",
+        }
+    }
+
+    #[tokio::test]
+    async fn post_sends_the_json_body_and_returns_the_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .and(header("content-type", "application/json"))
+            .and(body_string_contains("\"keywords\":\"rust\""))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{\"jobs\":[]}"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(Duration::from_millis(1))
+            .post(post_request(
+                &format!("{}/api/key", server.uri()),
+                "{\"keywords\":\"rust\"}",
+            ))
+            .await
+            .expect("post");
+        assert_eq!(response.status, 200);
+        assert_eq!(response.text(), "{\"jobs\":[]}");
+    }
+
+    #[tokio::test]
+    async fn post_never_follows_a_redirect() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", "https://elsewhere.test/collect"),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/collect"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let response = client(Duration::from_millis(1))
+            .post(post_request(&format!("{}/api/key", server.uri()), "{}"))
+            .await
+            .expect("post");
+        assert_eq!(response.status, 302);
+        assert_eq!(
+            response.location.as_deref(),
+            Some("https://elsewhere.test/collect")
+        );
+    }
+
+    #[tokio::test]
+    async fn post_retries_a_429_only_when_the_server_says_when() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(Duration::from_millis(1))
+            .post(post_request(&format!("{}/api/key", server.uri()), "{}"))
+            .await
+            .expect("post");
+        assert_eq!(response.status, 200);
+    }
+
+    #[tokio::test]
+    async fn post_does_not_retry_a_5xx_without_retry_after() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let response = client(Duration::from_millis(1))
+            .post(post_request(&format!("{}/api/key", server.uri()), "{}"))
+            .await
+            .expect("post");
+        assert_eq!(response.status, 500, "a POST is not replayed blindly");
+    }
+
+    #[tokio::test]
+    async fn post_counts_against_the_daily_budget() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let http = client(Duration::from_millis(1));
+        let url = format!("{}/api/key", server.uri());
+        for _ in 0..2 {
+            let mut request = post_request(&url, "{}");
+            request.limits.daily_cap = Some(2);
+            request.budget_key = Some("jooble");
+            http.post(request).await.expect("within budget");
+        }
+        let mut request = post_request(&url, "{}");
+        request.limits.daily_cap = Some(2);
+        request.budget_key = Some("jooble");
+        let error = http.post(request).await.expect_err("budget spent");
+        assert!(matches!(
+            error,
+            SourceError::DailyCapExceeded { ref budget_key } if budget_key == "jooble"
+        ));
+    }
+
+    #[tokio::test]
+    async fn post_response_over_the_cap_is_rejected() {
+        let server = MockServer::start().await;
+        let body = "x".repeat(HttpClientConfig::default().max_body_bytes + 1);
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+
+        let error = client(Duration::from_millis(1))
+            .post(post_request(&format!("{}/api/key", server.uri()), "{}"))
+            .await
+            .expect_err("too large");
+        assert!(matches!(error, SourceError::ResponseTooLarge { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_post_response_is_not_cached() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("first"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("second"))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let http = client(Duration::from_millis(1));
+        let url = format!("{}/api/key", server.uri());
+        http.post(post_request(&url, "{}")).await.expect("post");
+        let response = http.get(request(&url, FetchKind::Json)).await.expect("get");
+        assert_eq!(response.text(), "second");
+        assert!(!response.from_cache);
     }
 
     #[tokio::test]

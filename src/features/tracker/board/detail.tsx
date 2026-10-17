@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { ApplicationDetail } from "@/lib/ipc/bindings";
+import { isHttpsUrl } from "@/lib/url";
 
 /**
  * The card detail (AC3, FR-94): the Offer snapshot, the Package the
@@ -52,14 +53,20 @@ export function Detail({
               </p>
             ) : null}
             {detail.apply_url ? (
-              <a
-                className="text-xs text-primary underline"
-                href={detail.apply_url}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {t("detail.open")}
-              </a>
+              // Only an absolute https URL becomes a link; anything else
+              // (javascript:, data:, http:) is shown as inert text.
+              isHttpsUrl(detail.apply_url) ? (
+                <a
+                  className="text-xs text-primary underline"
+                  href={detail.apply_url.trim()}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {t("detail.open")}
+                </a>
+              ) : (
+                <p className="text-xs break-all text-fg-muted">{detail.apply_url}</p>
+              )
             ) : null}
           </section>
 

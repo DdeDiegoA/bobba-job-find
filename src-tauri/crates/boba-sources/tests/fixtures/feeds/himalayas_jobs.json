@@ -1,0 +1,32 @@
+{
+  "jobs": [
+    {
+      "title": "Staff Site Reliability Engineer",
+      "excerpt": "Keep the boba flowing at scale.",
+      "companyName": "Boba Labs",
+      "companyLogo": "https://himalayas.app/logos/boba.png",
+      "employmentType": "Full Time",
+      "minSalary": 140000,
+      "maxSalary": 180000,
+      "currency": "USD",
+      "locationRestrictions": ["United States", "Canada"],
+      "pubDate": 1790899200,
+      "guid": "https://himalayas.app/companies/boba/jobs/staff-sre",
+      "applicationLink": "https://himalayas.app/companies/boba/jobs/staff-sre",
+      "description": "<p>Own reliability for our <b>payments</b> platform.</p>"
+    },
+    {
+      "title": "Product Designer",
+      "excerpt": "Calm, warm interfaces.",
+      "companyName": "Tapioca Studio",
+      "companyLogo": "https://himalayas.app/logos/tapioca.png",
+      "employmentType": "Contract",
+      "locationRestrictions": ["Worldwide"],
+      "pubDate": 1790812800,
+      "guid": "himalayas-abc-123",
+      "applicationLink": "http://himalayas.app/insecure/abc-123",
+      "description": "<p>Design the calm.</p>"
+    }
+  ],
+  "totalCount": 2
+}
