@@ -337,6 +337,37 @@ export const commands = {
     typedError<SessionBoardView, AppError_Serialize>(
       __TAURI_INVOKE("session_resume", { sourceId }),
     ),
+  /**
+   *  Read the user's picked files, cap the size, and hand the text to one
+   *  `profile_import` run (FR-5, AC1). Returns the proposals now waiting for
+   *  review; nothing has been saved to the profile.
+   */
+  profileImportStart: (files: string[], pastedText: string | null, language: string) =>
+    typedError<ImportOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("profile_import_start", { files, pastedText, language }),
+    ),
+  /**  Every proposal still waiting for the user's decision (AC1). */
+  profileImportProposals: () =>
+    typedError<ProposalView[], AppError_Serialize>(__TAURI_INVOKE("profile_import_proposals")),
+  /**
+   *  Confirm a proposal — exactly as proposed, or with the user's edit — and
+   *  save it as a profile fact (AC1/AC3).
+   */
+  profileImportConfirm: (
+    id: string,
+    edit: {
+      text_en: string | null;
+      text_es: string | null;
+      evidence: string | null;
+      detail_json: string | null;
+    } | null,
+  ) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("profile_import_confirm", { id, edit }),
+    ),
+  /**  Delete a proposal: it never becomes a fact (AC1). */
+  profileImportDiscard: (id: string) =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_import_discard", { id })),
 };
 
 /** Events */
@@ -827,6 +858,19 @@ export type ExportedFile = {
   version: number;
 };
 
+/**
+ *  What the user changed in the review card before confirming (AC1). The three
+ *  text fields are the **new values**; `None` clears that field, so an edit
+ *  never keeps a variant the user deleted. `detail_json` is different: the card
+ *  does not edit it, so `None` keeps the proposed detail.
+ */
+export type FactEdit = {
+  text_en: string | null;
+  text_es: string | null;
+  evidence: string | null;
+  detail_json: string | null;
+};
+
 /**  What the editor sends when the user saves a fact (AC1/AC3). */
 export type FactRevisionInput = {
   /**  `None` creates a new item; `Some(item_id)` edits that item (AC3). */
@@ -966,6 +1010,18 @@ export type Handoff = {
 
 /**  Why automation stopped and the user took over (AC2). */
 export type HandoffKind = "captcha" | "login_wall" | "unknown_required" | "missing_document";
+
+/**
+ *  What one import did: the proposals now waiting for review, and how many
+ *  facts the core stored or dropped (an excerpt not in the CV is dropped, AD-5).
+ */
+export type ImportOutcome = {
+  proposals: ProposalView[];
+  accepted: number;
+  dropped: number;
+  /**  The files the run read, in merge order. */
+  files: string[];
+};
 
 /**  One screening answer the user approved, ready to copy (S7.8). */
 export type KitAnswerView = {
@@ -1249,6 +1305,26 @@ export type ProfileSnapshot = {
   facts: FactView[];
   /**  Facts an agent proposed that the user has not confirmed yet (S3.5). */
   pending_proposals: number;
+};
+
+/**
+ *  One proposal as the review UI shows it. Every text field is the stored
+ *  string verbatim: the UI renders it as plain text, never truncated and never
+ *  interpreted as markup (AC3, AD-7, AD-15).
+ */
+export type ProposalView = {
+  id: string;
+  /**  Section id, as `profile:sections.<kind>` labels it. */
+  kind: string;
+  text_en: string | null;
+  text_es: string | null;
+  evidence: string | null;
+  detail_json: string;
+  /**  The CV words the fact was read from (AC1). */
+  source_excerpt: string | null;
+  /**  Always `false` for a CV import (AC4): the user's own input. */
+  untrusted_origin: boolean;
+  created_at: string;
 };
 
 /**  One requirement of the Offer with what the Profile backs of it (FR-75). */

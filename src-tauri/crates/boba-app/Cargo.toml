@@ -23,6 +23,17 @@ ammonia = { workspace = true }
 lingua = { workspace = true, default-features = false, features = ["english", "spanish"] }
 time = { workspace = true }
 fastembed = { workspace = true, optional = true }
+# Master CV import (S3.5): the user's own PDF, DOCX and LinkedIn export ZIP are
+# read here (never written), so the use case owns its extraction.
+pdf-extract = { workspace = true }
+# `deflate` only, the same set docx-rs asks for: DEFLATE is all a DOCX or a
+# LinkedIn export uses. The default features would add bzip2/lzma/zstd/aes,
+# whose licenses (and decoders) this slice has no use for.
+zip = { workspace = true, default-features = false, features = ["deflate"] }
+quick-xml = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+# Fixtures the extraction tests build in memory (a real PDF, a real DOCX ZIP).
+lopdf = { workspace = true }
+tempfile = { workspace = true }

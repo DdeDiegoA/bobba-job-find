@@ -62,6 +62,10 @@ macro_rules! boba_commands {
             crate::commands::session::session_opt_out,
             crate::commands::session::session_sign_out,
             crate::commands::session::session_resume,
+            crate::commands::profile_import::profile_import_start,
+            crate::commands::profile_import::profile_import_proposals,
+            crate::commands::profile_import::profile_import_confirm,
+            crate::commands::profile_import::profile_import_discard,
             // slices append ONE line above this comment; never reorder/remove
         ]
     };
