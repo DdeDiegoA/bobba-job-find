@@ -1,0 +1,42 @@
+{
+  "name": "Boba Labs",
+  "description": "Drinks for engineers.",
+  "jobs": [
+    {
+      "id": "9c1f2a3b",
+      "shortcode": "A1B2C3D4E5",
+      "title": "Data Engineer",
+      "url": "https://apply.workable.com/bobalabs/j/A1B2C3D4E5/",
+      "application_url": "https://apply.workable.com/bobalabs/j/A1B2C3D4E5/apply/",
+      "location": {
+        "city": "Berlin",
+        "region": "Berlin",
+        "country": "Germany"
+      },
+      "telecommuting": true,
+      "department": "Data",
+      "employment_type": "Full-time",
+      "published_on": "2026-09-29",
+      "created_at": "2026-09-29T07:45:00Z",
+      "description": "&lt;p&gt;Own our pipelines and &lt;strong&gt;warehouse&lt;/strong&gt;.&lt;/p&gt;"
+    },
+    {
+      "id": "7d8e9f0a",
+      "shortcode": "F6G7H8I9J0",
+      "title": "Office Manager",
+      "url": "https://apply.workable.com/bobalabs/j/F6G7H8I9J0/",
+      "application_url": "https://apply.workable.com/bobalabs/j/F6G7H8I9J0/apply/",
+      "location": {
+        "city": "Lisbon",
+        "region": "Lisbon",
+        "country": "Portugal"
+      },
+      "telecommuting": false,
+      "department": "Operations",
+      "employment_type": "Full-time",
+      "published_on": "2026-09-18",
+      "created_at": "2026-09-18T11:00:00Z",
+      "description": "&lt;p&gt;Keep the office running.&lt;/p&gt;"
+    }
+  ]
+}

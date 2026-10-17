@@ -1,0 +1,28 @@
+{
+  "id": 4512345,
+  "internal_job_id": 2211334,
+  "title": "Senior Backend Engineer",
+  "updated_at": "2026-09-30T18:25:11-04:00",
+  "first_published": "2026-09-12T10:00:00-04:00",
+  "requisition_id": "ENG-114",
+  "location": { "name": "Remote - Europe" },
+  "absolute_url": "https://boards.greenhouse.io/bobaboard/jobs/4512345",
+  "content": "&lt;h2&gt;About the role&lt;/h2&gt;&lt;p&gt;We are hiring a &lt;b&gt;Senior Backend Engineer&lt;/b&gt; for our &lt;em&gt;payments&lt;/em&gt; platform.&lt;/p&gt;",
+  "company_name": "Boba Labs",
+  "metadata": [
+    {
+      "id": 1,
+      "name": "Employment Type",
+      "value": "Full-time",
+      "value_type": "single_select"
+    }
+  ],
+  "pay_input_ranges": [
+    {
+      "min_cents": 9000000,
+      "max_cents": 12000000,
+      "currency_type": "EUR",
+      "interval": "yearly"
+    }
+  ]
+}

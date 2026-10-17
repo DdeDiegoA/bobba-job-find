@@ -1,0 +1,38 @@
+{
+  "id": "7440000123456789",
+  "name": "Security Engineer",
+  "uuid": "8a7b6c5d-4e3f-2a1b-0c9d-8e7f6a5b4c3d",
+  "refNumber": "SEC-42",
+  "company": {
+    "identifier": "Boba",
+    "name": "Boba Labs"
+  },
+  "location": {
+    "city": "Madrid",
+    "region": "Comunidad de Madrid",
+    "country": "es",
+    "remote": true
+  },
+  "releasedDate": "2026-09-26T08:00:00.000Z",
+  "typeOfEmployment": { "label": "Full-time" },
+  "jobAd": {
+    "sections": {
+      "companyDescription": {
+        "title": "Company Description",
+        "text": "<p>Boba Labs makes job search calm.</p>"
+      },
+      "jobDescription": {
+        "title": "Job Description",
+        "text": "<p>Keep our data and infrastructure safe.</p>"
+      },
+      "qualifications": {
+        "title": "Qualifications",
+        "text": "<ul><li>Rust</li><li>Threat modelling</li></ul>"
+      },
+      "additionalInformation": {
+        "title": "Additional Information",
+        "text": "<p>Remote within Spain.</p>"
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "title": "Full-stack Engineer",
+      "location": "Berlin",
+      "secondaryLocations": [{ "location": "Remote - Europe" }],
+      "department": "Engineering",
+      "team": "Product",
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "descriptionHtml": "<h2>About Boba</h2><p>Build the search experience end to end.</p>",
+      "publishedAt": "2026-09-27T08:30:00.000+00:00",
+      "employmentType": "FullTime",
+      "applyUrl": "https://jobs.ashbyhq.com/bobalabs/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b/application",
+      "jobUrl": "https://jobs.ashbyhq.com/bobalabs/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "compensation": {
+        "compensationTierSummary": "€85K – €110K",
+        "compensationTiers": []
+      }
+    },
+    {
+      "id": "9a8b7c6d-5e4f-3021-4c5d-6e7f8a9b0c1d",
+      "title": "Marketing Lead",
+      "location": "London",
+      "secondaryLocations": [],
+      "department": "Marketing",
+      "isRemote": false,
+      "workplaceType": "OnSite",
+      "descriptionHtml": "<p>Tell the Boba story.</p>",
+      "publishedAt": "2026-09-21T14:00:00.000+00:00",
+      "employmentType": "FullTime",
+      "applyUrl": "https://jobs.ashbyhq.com/bobalabs/9a8b7c6d-5e4f-3021-4c5d-6e7f8a9b0c1d/application",
+      "jobUrl": "https://jobs.ashbyhq.com/bobalabs/9a8b7c6d-5e4f-3021-4c5d-6e7f8a9b0c1d"
+    }
+  ]
+}

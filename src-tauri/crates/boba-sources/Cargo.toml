@@ -11,6 +11,9 @@ publish = false
 boba-domain = { path = "../boba-domain" }
 boba-app = { path = "../boba-app" }
 serde = { workspace = true, features = ["derive"] }
+# ATS payloads (S4.5) are parsed by field, never into a serde struct, so a
+# source adding a field never breaks a board.
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 # The shared outbound client (AD-10):
 reqwest = { workspace = true }

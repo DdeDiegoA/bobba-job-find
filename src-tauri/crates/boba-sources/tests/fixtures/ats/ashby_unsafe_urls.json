@@ -1,0 +1,24 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {
+      "id": "aaaa1111-bbbb-2222-cccc-3333dddd4444",
+      "title": "Script Job",
+      "location": "Remote",
+      "isRemote": true,
+      "jobUrl": "javascript:alert(1)",
+      "applyUrl": "javascript:alert(2)",
+      "descriptionHtml": "<p>Hi</p>",
+      "publishedAt": "2026-09-27T08:30:00.000+00:00"
+    },
+    {
+      "id": "eeee5555-ffff-6666-0000-111122223333",
+      "title": "Plaintext Job",
+      "location": "Berlin",
+      "isRemote": false,
+      "jobUrl": "http://jobs.ashbyhq.com/bobalabs/eeee5555-ffff-6666-0000-111122223333",
+      "descriptionHtml": "<p>Hi</p>",
+      "publishedAt": "2026-09-21T14:00:00.000+00:00"
+    }
+  ]
+}

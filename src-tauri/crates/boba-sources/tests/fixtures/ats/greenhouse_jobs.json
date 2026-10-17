@@ -1,0 +1,37 @@
+{
+  "jobs": [
+    {
+      "id": 4512345,
+      "internal_job_id": 2211334,
+      "title": "Senior Backend Engineer",
+      "updated_at": "2026-09-30T18:25:11-04:00",
+      "requisition_id": "ENG-114",
+      "location": { "name": "Remote - Europe" },
+      "absolute_url": "https://boards.greenhouse.io/bobaboard/jobs/4512345",
+      "content": "&lt;p&gt;We are hiring a &lt;b&gt;Senior Backend Engineer&lt;/b&gt; for our &lt;em&gt;payments&lt;/em&gt; platform.&lt;/p&gt;",
+      "company_name": "Boba Labs",
+      "metadata": [],
+      "pay_input_ranges": [
+        {
+          "min_cents": 9000000,
+          "max_cents": 12000000,
+          "currency_type": "EUR",
+          "interval": "yearly"
+        }
+      ]
+    },
+    {
+      "id": 4512346,
+      "internal_job_id": 2211335,
+      "title": "Product Designer",
+      "updated_at": "2026-09-28T09:10:00-04:00",
+      "requisition_id": "DSN-008",
+      "location": { "name": "Lisbon, Portugal" },
+      "absolute_url": "https://boards.greenhouse.io/bobaboard/jobs/4512346",
+      "content": "&lt;p&gt;Design calm, friendly interfaces.&lt;/p&gt;",
+      "company_name": "Boba Labs",
+      "metadata": []
+    }
+  ],
+  "meta": { "total": 2 }
+}
