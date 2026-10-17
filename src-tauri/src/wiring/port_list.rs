@@ -177,6 +177,11 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // Backup, restore and Reset everything (S10.2): the open store is the
     // adapter, because a restore swaps its pages and a reset erases it.
     mount_port::<dyn boba_app::ports::backup::BackupPort>(app, store.clone());
+    // The matched-mail sink (S8.3): the email area writes `email_message`.
+    mount_port::<dyn boba_mail::sync::MessageSink>(app, store.clone());
+    // The scoped mail sync (S8.3): registers the scheduler's `email_sync`
+    // handler, which reads the read+send connections into the sink above.
+    crate::commands::email::mount(app);
     // slices append ONE line above this comment; never reorder/remove
 }
 

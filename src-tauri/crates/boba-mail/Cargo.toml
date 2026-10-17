@@ -33,6 +33,13 @@ async-imap = { workspace = true, default-features = false, features = [
 # lettre uses by default, so there is one TLS backend per connection.
 native-tls = { workspace = true }
 tokio-native-tls = { workspace = true }
+# --- Scoped sync + .eml import (S8.3) ---
+# mail-parser reads an RFC 5322 / MIME file (manual import) and decodes its
+# headers (encoded words, addresses, references); already in the lock via the
+# architect's pin.
+mail-parser = { workspace = true }
+# The IMAP fetch drains async-imap's fetch stream (S8.3).
+futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

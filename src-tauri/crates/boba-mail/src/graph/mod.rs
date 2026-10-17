@@ -11,11 +11,14 @@ use std::sync::Arc;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use boba_app::ports::mail::{Attachment, MailError, MailFuture, MailPort, OutgoingMessage};
-use boba_app::ports::repo::email::{EmailAccount, EmailRepo, MailProvider};
+use boba_app::ports::repo::email::{EmailAccount, EmailMode, EmailRepo, MailProvider};
 use boba_app::ports::secret::SecretPort;
+use mail_parser::DateTime;
 use serde_json::{Value, json};
 
+use crate::eml;
 use crate::oauth::{self, OAuthError, ProviderEndpoints, TokenSet};
+use crate::sync::{RawMessage, normalize_message_id};
 
 /// Renew this long before the token stops working, so a slow request cannot
 /// start with a token that expires mid-flight.
@@ -168,6 +171,218 @@ impl MailPort for GraphMail {
             }
         })
     }
+}
+
+/// How many messages one read pass may return. Graph caps a page at 1000;
+/// reading a recruiter reply needs a handful, so the smaller cap is the one
+/// that keeps a run bounded.
+pub const READ_PAGE_SIZE: usize = 100;
+
+/// The largest inbox answer that is accepted. The page is buffered before it
+/// is mapped, so a provider sending an oversized body is refused before a run
+/// can hold it all in memory.
+const MAX_READ_BYTES: u64 = 25 * 1024 * 1024;
+
+impl GraphMail {
+    /// Read the inbox messages received since `since` (Unix seconds), for an
+    /// account the user connected in **read+send** mode (FR-38). The account
+    /// already holds `Mail.Read`; no scope is requested here.
+    ///
+    /// Only headers and a bounded body are read: no attachment is fetched, and
+    /// nothing is marked, moved or sent. A token near expiry is renewed through
+    /// the S8.1 store and never appears in an error (AD-13).
+    pub async fn fetch_inbox(
+        &self,
+        account_id: &str,
+        since: i64,
+        now: i64,
+        limit: usize,
+    ) -> Result<Vec<RawMessage>, MailError> {
+        let account = self
+            .accounts
+            .get_account(account_id)
+            .map_err(|_| MailError::UnknownAccount)?
+            .ok_or(MailError::UnknownAccount)?;
+        if account.provider != MailProvider::MicrosoftGraph {
+            return Err(MailError::UnknownAccount);
+        }
+        // Reading is a read+send permission: a send-only connection never had
+        // `Mail.Read` granted, and asking would be a scope change.
+        if !account.covers(EmailMode::ReadSend) {
+            return Err(MailError::Reauthorize);
+        }
+
+        let token = self.access_token(&account).await?;
+        let since = DateTime::from_timestamp(since).to_rfc3339();
+        // `reqwest`'s `query` feature is off in this workspace, so the URL is
+        // built with `url`, which percent-encodes the OData parameters.
+        let mut url = url::Url::parse(&format!(
+            "{}/me/mailFolders/inbox/messages",
+            self.endpoints.api_base
+        ))
+        .map_err(|_| MailError::Transport("the provider URL is not valid".to_string()))?;
+        url.query_pairs_mut()
+            .append_pair(
+                "$select",
+                "id,internetMessageId,internetMessageHeaders,subject,from,toRecipients,\
+                 receivedDateTime,body,hasAttachments",
+            )
+            .append_pair("$filter", &format!("receivedDateTime ge {since}"))
+            .append_pair("$orderby", "receivedDateTime asc")
+            .append_pair("$top", &limit.min(READ_PAGE_SIZE).to_string());
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(&token)
+            .send()
+            .await
+            .map_err(|_| {
+                MailError::Transport("the mail provider could not be reached".to_string())
+            })?;
+        if !response.status().is_success() {
+            return Err(MailError::Rejected(format!(
+                "the provider answered HTTP {}",
+                response.status().as_u16()
+            )));
+        }
+        // A provider may omit (or lie about) Content-Length, so the body is
+        // read in chunks under a running cap instead of buffered blindly.
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_READ_BYTES)
+        {
+            return Err(MailError::Rejected(
+                "the inbox answer is too large".to_string(),
+            ));
+        }
+        let mut response = response;
+        let mut body: Vec<u8> = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| MailError::Transport("the inbox answer was cut off".to_string()))?
+        {
+            if body.len() as u64 + chunk.len() as u64 > MAX_READ_BYTES {
+                return Err(MailError::Rejected(
+                    "the inbox answer is too large".to_string(),
+                ));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        let body: Value = serde_json::from_slice(&body)
+            .map_err(|_| MailError::Rejected("the inbox answer could not be read".to_string()))?;
+        Ok(read_messages(&body, now, limit.min(READ_PAGE_SIZE)))
+    }
+}
+
+/// Map Graph's message list onto the pipeline's shape. A message without an id
+/// or sender is skipped rather than failing the whole read.
+fn read_messages(body: &Value, now: i64, limit: usize) -> Vec<RawMessage> {
+    body.get("value")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| read_message(item, now))
+                .take(limit)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn read_message(item: &Value, now: i64) -> Option<RawMessage> {
+    let provider_id = item.get("id")?.as_str()?.to_string();
+    let sender = item.get("from").and_then(|from| from.get("emailAddress"));
+    let from_address = sender
+        .and_then(|address| address.get("address"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let from_name = sender
+        .and_then(|address| address.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string);
+
+    let message_id = item
+        .get("internetMessageId")
+        .and_then(Value::as_str)
+        .map(normalize_message_id)
+        .filter(|id| !id.is_empty());
+    let body = item.get("body");
+    let content_type = body
+        .and_then(|body| body.get("contentType"))
+        .and_then(Value::as_str)
+        .unwrap_or("text");
+    let content = body
+        .and_then(|body| body.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let received_at = item
+        .get("receivedDateTime")
+        .and_then(Value::as_str)
+        .and_then(DateTime::parse_rfc3339)
+        .map(|date| date.to_timestamp())
+        .filter(|timestamp| *timestamp > 0)
+        .unwrap_or(now);
+
+    Some(RawMessage {
+        provider_id,
+        message_id,
+        in_reply_to: header_ids(item, "In-Reply-To"),
+        references: header_ids(item, "References"),
+        from_address,
+        from_name,
+        to_addresses: item
+            .get("toRecipients")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|to| to.get("emailAddress"))
+                    .filter_map(|address| address.get("address"))
+                    .filter_map(Value::as_str)
+                    .map(|address| address.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        subject: item
+            .get("subject")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        received_at,
+        body_text: eml::body_from(content_type, content),
+        has_attachments: item
+            .get("hasAttachments")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// `internetMessageHeaders` is only returned when selected; a missing header
+/// list simply means no thread evidence.
+fn header_ids(item: &Value, name: &str) -> Vec<String> {
+    item.get("internetMessageHeaders")
+        .and_then(Value::as_array)
+        .map(|headers| {
+            headers
+                .iter()
+                .filter(|header| {
+                    header
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|value| value.eq_ignore_ascii_case(name))
+                })
+                .filter_map(|header| header.get("value").and_then(Value::as_str))
+                .flat_map(str::split_whitespace)
+                .map(normalize_message_id)
+                .filter(|id| !id.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -497,6 +712,122 @@ mod tests {
         assert_eq!(
             mail.send("01ACC", &message()).await,
             Err(MailError::UnknownAccount)
+        );
+    }
+
+    // --- Scoped read (S8.3, FR-38) ---
+
+    #[tokio::test]
+    async fn fetch_inbox_maps_a_graph_page_into_the_pipeline_shape() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/me/mailFolders/inbox/messages"))
+            .and(header("authorization", "Bearer at-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": [{
+                    "id": "AAMk-1",
+                    "internetMessageId": "<ABC@acme.example>",
+                    "internetMessageHeaders": [
+                        {"name": "In-Reply-To", "value": "<sent-1@boba.local>"},
+                        {"name": "References", "value": "<x@y.example> <sent-1@boba.local>"}
+                    ],
+                    "subject": "Your application",
+                    "from": {"emailAddress": {"name": "Ana", "address": "ana@acme.example"}},
+                    "toRecipients": [{"emailAddress": {"address": "me@example.com"}}],
+                    "receivedDateTime": "2024-01-01T10:00:00Z",
+                    "body": {"contentType": "html", "content": "<p>Hi &amp; welcome</p><script>x()</script>"},
+                    "hasAttachments": true
+                }]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mail = adapter(
+            &server,
+            FakeSecrets::with(REF, tokens(Some(3600))),
+            Arc::new(FakeAccounts(Some(account()))),
+        );
+        let messages = mail
+            .fetch_inbox("01ACC", 1_704_000_000, 1_760_000_000, 50)
+            .await
+            .expect("read");
+        assert_eq!(messages.len(), 1);
+        let message = &messages[0];
+        assert_eq!(message.provider_id, "AAMk-1");
+        assert_eq!(message.message_id.as_deref(), Some("abc@acme.example"));
+        assert_eq!(message.in_reply_to, vec!["sent-1@boba.local".to_string()]);
+        assert_eq!(
+            message.references,
+            vec!["x@y.example".to_string(), "sent-1@boba.local".to_string()]
+        );
+        assert_eq!(message.from_address, "ana@acme.example");
+        assert_eq!(message.from_name.as_deref(), Some("Ana"));
+        assert_eq!(message.to_addresses, vec!["me@example.com".to_string()]);
+        assert_eq!(message.subject, "Your application");
+        assert_eq!(message.received_at, 1_704_103_200);
+        assert!(message.has_attachments);
+        assert!(!message.body_text.contains('<'), "{}", message.body_text);
+        assert!(
+            message.body_text.contains("Hi & welcome"),
+            "{}",
+            message.body_text
+        );
+        assert!(!message.body_text.contains("x()"), "{}", message.body_text);
+    }
+
+    #[tokio::test]
+    async fn a_page_never_exceeds_the_read_cap() {
+        let server = MockServer::start().await;
+        let item = |id: &str| {
+            json!({
+                "id": id,
+                "internetMessageId": format!("<{id}@acme.example>"),
+                "subject": "reply",
+                "from": {"emailAddress": {"address": "ana@acme.example"}},
+                "receivedDateTime": "2024-01-01T10:00:00Z",
+                "body": {"contentType": "text", "content": "hello"},
+                "hasAttachments": false
+            })
+        };
+        Mock::given(method("GET"))
+            .and(path("/me/mailFolders/inbox/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "value": [item("m1"), item("m2"), item("m3")]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mail = adapter(
+            &server,
+            FakeSecrets::with(REF, tokens(Some(3600))),
+            Arc::new(FakeAccounts(Some(account()))),
+        );
+        let messages = mail
+            .fetch_inbox("01ACC", 0, 1_760_000_000, 2)
+            .await
+            .expect("read");
+        assert_eq!(messages.len(), 2, "the cap is enforced on the mapped page");
+        assert_eq!(messages[0].provider_id, "m1");
+        assert_eq!(messages[1].provider_id, "m2");
+    }
+
+    #[tokio::test]
+    async fn a_send_only_connection_is_never_read() {
+        let server = MockServer::start().await;
+        let mut send_only = account();
+        send_only.mode = EmailMode::SendOnly;
+        send_only.scopes = vec!["Mail.Send".into()];
+        let mail = adapter(
+            &server,
+            FakeSecrets::with(REF, tokens(Some(3600))),
+            Arc::new(FakeAccounts(Some(send_only))),
+        );
+        assert_eq!(
+            mail.fetch_inbox("01ACC", 0, 1_760_000_000, 10).await,
+            Err(MailError::Reauthorize),
+            "no Mail.Read was granted, so no request is made"
         );
     }
 }
