@@ -377,6 +377,51 @@ export const commands = {
   /**  Delete a proposal: it never becomes a fact (AC1). */
   profileImportDiscard: (id: string) =>
     typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_import_discard", { id })),
+  /**  The rules and the global Auto settings (AC1). */
+  applyRulesSnapshot: () =>
+    typedError<RulesSnapshot, AppError_Serialize>(__TAURI_INVOKE("apply_rules_snapshot")),
+  /**  Create or edit one Auto Rule; core validates every bound (AC1, AD-11). */
+  applyRuleSave: (input: RuleInput) =>
+    typedError<RuleView, AppError_Serialize>(__TAURI_INVOKE("apply_rule_save", { input })),
+  /**  Remove one Auto Rule. Returns whether a row went. */
+  applyRuleDelete: (ruleId: string) =>
+    typedError<boolean, AppError_Serialize>(__TAURI_INVOKE("apply_rule_delete", { ruleId })),
+  /**  Turn Auto on (only after the consequences dialog, AC3) or off. */
+  applyRulesSetEnabled: (enabled: boolean, confirmed: boolean) =>
+    typedError<RulesSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("apply_rules_set_enabled", { enabled, confirmed }),
+    ),
+  /**  Set the cap across every rule (FR-83); core validates the range. */
+  applyRulesSetGlobalCap: (cap: number) =>
+    typedError<RulesSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("apply_rules_set_global_cap", { cap }),
+    ),
+  /**  FR-108: turn Auto off and restore the default caps (AC4). */
+  applyRulesReset: () =>
+    typedError<RulesSnapshot, AppError_Serialize>(__TAURI_INVOKE("apply_rules_reset")),
+  /**
+   *  Why Auto would or would not send one application (AC2). This is the reason
+   *  list the screen shows verbatim; the send paths call the same use case
+   *  in-process, so the preview and enforcement cannot drift.
+   *
+   *  `local_minute` is the user's minute of day and `utc_offset_minutes` their
+   *  offset from UTC, sent by the UI because the active hours and the daily caps
+   *  are local (FR-83, S9.6 review F1); `None` reads the OS offset here.
+   */
+  applyRulesExplain: (
+    applicationId: string,
+    channel: string,
+    localMinute: number | null,
+    utcOffsetMinutes: number | null,
+  ) =>
+    typedError<DecisionView, AppError_Serialize>(
+      __TAURI_INVOKE("apply_rules_explain", {
+        applicationId,
+        channel,
+        localMinute,
+        utcOffsetMinutes,
+      }),
+    ),
 };
 
 /** Events */
@@ -687,6 +732,15 @@ export type CutView = {
   section: string | null;
   text: string;
   score: number | null;
+};
+
+/**  One decision, in the form the UI renders verbatim (AC2). */
+export type DecisionView = {
+  /**  `auto`, `review` or `block`. */
+  kind: string;
+  /**  The rule that would send, when `kind` is `auto`. */
+  rule_id: string | null;
+  reasons: ReasonView[];
 };
 
 /**  One change between the previous draft and the current one (AC1). */
@@ -1336,6 +1390,15 @@ export type ProposalView = {
   created_at: string;
 };
 
+/**
+ *  One reason the UI shows word for word (AC2): the i18n leaf is
+ *  `applying:reason.<code>` and `params` interpolate into it.
+ */
+export type ReasonView = {
+  code: string;
+  params: { [key in string]: string };
+};
+
 /**  One requirement of the Offer with what the Profile backs of it (FR-75). */
 export type RequirementView = {
   requirement: string;
@@ -1360,6 +1423,61 @@ export type ReviewView_Serialize = {
   document_id: string;
   document_version: number;
   findings: Finding_Serialize[];
+};
+
+/**
+ *  What the screen submits to create or edit a rule (AC1). `id` is `None` for a
+ *  new rule; an unknown id is refused rather than silently created.
+ */
+export type RuleInput = {
+  id: string | null;
+  name: string;
+  enabled: boolean;
+  source_ids: string[];
+  channels: string[];
+  min_rank: number | null;
+  min_fit: number | null;
+  min_confidence: string;
+  allow_flags: boolean;
+  min_verdict: string;
+  daily_cap: number;
+  per_company_cap: number;
+  per_company_days: number;
+  active_start_minute: number;
+  active_end_minute: number;
+};
+
+/**  One Auto Rule as the screen shows it (AC1). */
+export type RuleView = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  source_ids: string[];
+  /**  Stored channel ids: `email`, `ats_form`, `sanctioned_api`, `session_board`. */
+  channels: string[];
+  min_rank: number | null;
+  min_fit: number | null;
+  /**  `low`, `medium` or `high`. */
+  min_confidence: string;
+  allow_flags: boolean;
+  /**  `strong`, `good`, `moderate`, `weak` or `poor`. */
+  min_verdict: string;
+  daily_cap: number;
+  per_company_cap: number;
+  per_company_days: number;
+  active_start_minute: number;
+  active_end_minute: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**  Everything Settings → Applying shows. */
+export type RulesSnapshot = {
+  auto_enabled: boolean;
+  /**  Whether the consequences dialog was ever accepted (AC3). */
+  auto_confirmed: boolean;
+  global_daily_cap: number;
+  rules: RuleView[];
 };
 
 /**  The `job_run` a manual "Run now" started or joined (AC3). */
