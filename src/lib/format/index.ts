@@ -33,11 +33,20 @@ export interface FxRates {
   rates: Record<string, number | null>;
 }
 
-/** Format an amount in its own currency for `locale`. */
+/**
+ * Format an amount in its own currency for `locale`.
+ *
+ * The digit count is pinned to the two minor-unit decimals AD-17 stores, never
+ * left to the runtime's CLDR data: ICU 77 renders COP with two decimals and
+ * ICU 78 with none, so the same salary showed `1.234,00` on macOS and `1.234`
+ * on the Linux CI runner (and would likewise differ across user OS webviews).
+ */
 export function formatMoney(amountMinor: number, currency: string, locale: string): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: currency.toUpperCase(),
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(amountMinor / 100);
 }
 
