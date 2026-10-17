@@ -88,5 +88,8 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     let verify: Arc<dyn VerifyPort> = Arc::new(TypstRenderer);
     mount_port::<dyn VerifyPort>(app, verify);
     mount_port::<dyn CliInstallsPort>(app, store.clone());
+    // The detection seam (S3.2): the engine step's probe refreshes the
+    // `cli_install` evidence ADR-010's gate reads (the step owns the choice).
+    mount_port(app, Arc::new(agent::EngineProbe::new(store.clone())));
     // slices append ONE line above this comment; never reorder/remove
 }

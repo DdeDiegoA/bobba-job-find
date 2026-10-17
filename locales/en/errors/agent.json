@@ -7,5 +7,8 @@
   "errors.agent.cancelled": "The AI task was cancelled.",
   "errors.agent.unsupported": "This task needs an AI tool with a verified tool lockdown, because it reads content from the web. Pick a Full CLI to enable it; other work continues.",
   "errors.agent.crashed": "The AI tool stopped unexpectedly. Other work continues.",
-  "errors.agent.invalid_output": "The AI tool kept answering in a shape Boba can't use, so the task was stopped. Try again."
+  "errors.agent.invalid_output": "The AI tool kept answering in a shape Boba can't use, so the task was stopped. Try again.",
+  "errors.agent.unknown_cli": "Boba does not know that AI tool. Pick one from the list.",
+  "errors.agent.store": "Boba could not read or save the AI engine setting.",
+  "errors.agent.probe": "Boba could not look for AI tools on this computer."
 }

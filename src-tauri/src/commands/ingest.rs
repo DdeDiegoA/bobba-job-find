@@ -16,8 +16,11 @@ use std::sync::Arc;
 
 use boba_app::error::{AppError, AppResult, ErrorCode};
 use boba_app::ingest::manual::{ManualError, ManualIntake, ManualOffer};
+use boba_app::ports::agent::{AgentPort, RunBudget};
 use boba_app::ports::repo::ingestion::IngestionRepo;
+use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
+use boba_app::posting_features::{ExtractFeatures, ExtractRequest};
 use boba_app::system::SystemClock;
 use boba_sources::http::{FetchKind, FetchRequest, HttpClient};
 use boba_sources::sdk::{RateLimits, SourceError};
@@ -71,14 +74,65 @@ pub async fn ingest_manual_url(app: tauri::AppHandle, url: String) -> AppResult<
     let html = fetch_page(&http, &url)
         .await
         .map_err(|error| to_app(ManualError::FetchFailed(error.to_string())))?;
-    intake(&app)?.from_page(&html, &url).map_err(to_app)
+    let offer = intake(&app)?.from_page(&html, &url).map_err(to_app)?;
+    trigger_extraction(&app, &offer.id);
+    Ok(offer)
 }
 
 /// Add an Offer from pasted text (AC2).
 #[tauri::command]
 #[specta::specta]
 pub fn ingest_manual_text(app: tauri::AppHandle, text: String) -> AppResult<ManualOffer> {
-    intake(&app)?.from_text(&text).map_err(to_app)
+    let offer = intake(&app)?.from_text(&text).map_err(to_app)?;
+    trigger_extraction(&app, &offer.id);
+    Ok(offer)
+}
+
+/// Extract one manually-added Offer through the stored engine, in the
+/// background: pasted postings get the agent pass once an engine is chosen
+/// (S3.2's seam; the intake screen answers the user before it runs).
+///
+/// Nothing happens without a stored choice — the deterministic features are
+/// still stored by the normal read path — without mounted ports, or on a CLI
+/// ADR-010's gate refuses: the runtime refuses untrusted runs on an unverified
+/// CLI before it starts, and that refusal is logged here, never retried.
+///
+/// The background thread re-probes first: the pre-run gate reads the stored
+/// `cli_install` evidence, and a CLI upgraded since the engine step must lose a
+/// lockdown it no longer has before this untrusted run is dispatched.
+fn trigger_extraction(app: &tauri::AppHandle, offer_id: &str) {
+    let Some(choice) = crate::commands::agent::stored_choice(app) else {
+        return;
+    };
+    let (Ok(ingestion), Ok(profile), Ok(agents), Ok(probe)) = (
+        wiring::port::<dyn IngestionRepo>(app),
+        wiring::port::<dyn ProfileRepo>(app),
+        wiring::port::<dyn AgentPort>(app),
+        wiring::port::<crate::wiring::agent::EngineProbe>(app),
+    ) else {
+        return;
+    };
+    let features = ExtractFeatures::new(ingestion, profile, agents, Arc::new(SystemClock));
+    let offer_id = offer_id.to_string();
+    std::thread::spawn(move || {
+        probe.detect_and_store();
+        let request = ExtractRequest {
+            cli: choice.cli,
+            model: choice.model,
+            // A background run still needs a cap: a CLI that never answers must
+            // not keep a thread (and a provider call) alive forever.
+            budget: RunBudget {
+                wall_clock: Some(std::time::Duration::from_secs(300)),
+                ..RunBudget::default()
+            },
+        };
+        match features.run(&offer_id, request) {
+            Ok(_) => tracing::info!(offer = %offer_id, "manual intake extraction finished"),
+            Err(error) => {
+                tracing::warn!(offer = %offer_id, %error, "manual intake extraction failed")
+            }
+        }
+    });
 }
 
 /// The pasted URL, validated: this app only fetches http(s), and the pasted link

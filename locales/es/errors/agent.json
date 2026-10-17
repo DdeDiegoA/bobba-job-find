@@ -7,5 +7,8 @@
   "errors.agent.cancelled": "La tarea de IA se canceló.",
   "errors.agent.unsupported": "Esta tarea necesita una herramienta de IA con bloqueo de herramientas verificado, porque lee contenido de la web. Elige un CLI Full para activarla; el resto del trabajo continúa.",
   "errors.agent.crashed": "La herramienta de IA se detuvo inesperadamente. El resto del trabajo continúa.",
-  "errors.agent.invalid_output": "La herramienta de IA respondía en un formato que Boba no puede usar, así que la tarea se detuvo. Inténtalo de nuevo."
+  "errors.agent.invalid_output": "La herramienta de IA respondía en un formato que Boba no puede usar, así que la tarea se detuvo. Inténtalo de nuevo.",
+  "errors.agent.unknown_cli": "Boba no conoce esa herramienta de IA. Elige una de la lista.",
+  "errors.agent.store": "Boba no pudo leer o guardar la configuración del motor de IA.",
+  "errors.agent.probe": "Boba no pudo buscar herramientas de IA en este ordenador."
 }
