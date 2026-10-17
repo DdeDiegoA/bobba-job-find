@@ -121,6 +121,16 @@ export const commands = {
   /**  One page of Offer cards, newest first (AC1/AC2). */
   offersInbox: () =>
     typedError<OfferCardView[], AppError_Serialize>(__TAURI_INVOKE("offers_inbox")),
+  /**
+   *  One Offer in full (S6.5, FR-65): the sanitised posting, its Gates and their
+   *  quotes, the factor breakdown, its Sources and the copies dedup merged, its
+   *  Apply Channels and — when one was written — the Explanation in `lang`, the
+   *  UI language the screen is drawing in.
+   */
+  offerDetail: (postingId: string, lang: string) =>
+    typedError<OfferDetailView, AppError_Serialize>(
+      __TAURI_INVOKE("offer_detail", { postingId, lang }),
+    ),
   /**  Whether the store is open or the unlock screen must act (AC2). */
   unlockStatus: () =>
     typedError<UnlockStatus_Serialize, AppError_Serialize>(__TAURI_INVOKE("unlock_status")),
@@ -547,6 +557,17 @@ export type DraftText = {
   paragraphs: ClaimView[];
 };
 
+/**
+ *  Another place the same Offer was seen: one provenance row dedup merged into
+ *  the posting (AD-19). It is shown, never deleted.
+ */
+export type DuplicateView = {
+  source: string;
+  external_id: string;
+  url: string;
+  fetched_at: string;
+};
+
 /**  One inline edit the user made (AC1). */
 export type EditInput = {
   application_id: string;
@@ -659,6 +680,14 @@ export type ErrorCode =
   /**  The capability is not supported on this build/host. */
   | "unsupported";
 
+/**  One piece of evidence (FR-53): a quoted span or a structured field name. */
+export type EvidenceView = {
+  /**  `quote` | `field`. */
+  kind: string;
+  /**  The quote's text, or the field's name. */
+  text: string;
+};
+
 /**
  *  Why an Offer sits in Excluded (FR-54, EXPERIENCE §9.11): the Gate that vetoed
  *  it, its reason, and the posting's own words when the Gate found any.
@@ -730,6 +759,25 @@ export type FactView = {
 };
 
 /**
+ *  One factor of the breakdown (FR-55/FR-56, EXPERIENCE §9.4): its score, its
+ *  share, what it found for and against, and where it read it.
+ */
+export type FactorView = {
+  /**  The factor id (`skills` … `alignment`). */
+  factor: string;
+  /**  `fit` | `quality` — which group the axis scrolls to (AC3). */
+  axis: string;
+  score: number | null;
+  weight: number | null;
+  effective_weight: number | null;
+  matched: string[];
+  missing: string[];
+  evidence: EvidenceView[];
+  /**  `low` | `medium` | `high`. */
+  confidence: string;
+};
+
+/**
  *  One thing the fresh-context reviewer wants changed. `message` says what is
  *  wrong, `suggestion` what to do instead; both are the reviewer's words and are
  *  shown as data only (ADR-010). A finding is not a claim: it never adds a fact
@@ -767,6 +815,25 @@ export type Finding_Serialize = {
   target: FindingTarget;
   message: string;
   suggestion?: string | null;
+};
+
+/**
+ *  One Gate as the detail shows it (FR-65, EXPERIENCE §9.4): the verdict in
+ *  words and icons, and the posting's own quote when the Gate read one.
+ */
+export type GateView = {
+  /**  `eligibility` … `deadline`. */
+  gate: string;
+  /**  `pass` | `flag` | `veto`. */
+  verdict: string;
+  /**  The reason id, e.g. `requirement_not_met`, `below_floor`. */
+  reason: string;
+  /**  `low` | `medium` | `high`. */
+  confidence: string;
+  /**  The posting's own words, rendered as text (AD-7). */
+  quote: string | null;
+  /**  The structured field the Gate read, when it read one instead of words. */
+  field: string | null;
 };
 
 /**  One screening answer the user approved, ready to copy (S7.8). */
@@ -874,6 +941,19 @@ export type ManualView = {
 /**  Salary period (AD-17). */
 export type MoneyPeriod = "year" | "month" | "hour";
 
+/**  The narration as the Offer detail shows it. */
+export type NarrationView = {
+  /**  The plain text the run wrote. Untrusted (ADR-010): render as text. */
+  text: string;
+  /**  BCP-47 UI language the text is written in. */
+  lang: string;
+  /**
+   *  ADR-010: always `true` for agent-written text. Travels over IPC so the
+   *  screen can mark it as the agent's words, not the core's.
+   */
+  untrusted_origin: boolean;
+};
+
 /**  One Offer as the Inbox lists it (FR-63/FR-64). */
 export type OfferCardView = {
   posting_id: string;
@@ -933,6 +1013,55 @@ export type OfferCardView = {
    *  belongs in the Closing soon section as well as in its band.
    */
   closing_soon: boolean;
+};
+
+/**
+ *  One Offer in full (FR-65). Everything here is the core's; the screen decides
+ *  only how to draw it.
+ */
+export type OfferDetailView = {
+  posting_id: string;
+  title: string;
+  company: string;
+  locations: string[];
+  work_mode: string;
+  /**  BCP-47 content language of the posting. */
+  lang: string;
+  amount_minor: number | null;
+  currency: string | null;
+  pay_period: string | null;
+  first_seen: string;
+  posted_at: string | null;
+  deadline: string | null;
+  /**
+   *  Sanitised HTML (AD-7) — the only form the detail may render, and it is
+   *  rendered without loading anything remote.
+   */
+  description_html: string;
+  requirements: string[];
+  /**  The posting's own URL (https-only since S4.5/S4.6). */
+  apply_url: string;
+  apply_email: string | null;
+  sources: string[];
+  /**  The other places this Offer was seen (AD-19: dedup merges, never drops). */
+  duplicates: DuplicateView[];
+  /**  The Apply Channels the posting allows (FR-81), in the apply bar's order. */
+  channels: ChannelView[];
+  fit: number | null;
+  quality: number | null;
+  rank: number | null;
+  verdict: string | null;
+  confidence: string | null;
+  lead: boolean;
+  /**  The five Gates in report order (FR-53), empty when the Offer has no card. */
+  gates: GateView[];
+  /**  The eleven factors, Fit then Quality (FR-55/FR-56). */
+  factors: FactorView[];
+  /**
+   *  FR-59's Explanation in the requested UI language, `None` when the agent
+   *  has not written one.
+   */
+  narration: NarrationView | null;
 };
 
 /**  One document of the Package the application carries (AC3). */

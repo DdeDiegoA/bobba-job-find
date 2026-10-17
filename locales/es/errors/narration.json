@@ -1,0 +1,6 @@
+{
+  "errors.narration.store": "Boba no pudo leer ni guardar la Explicación. Inténtalo de nuevo en un momento.",
+  "errors.narration.no_card": "Todavía no hay una puntuación que explicar para esta Oferta.",
+  "errors.narration.ungrounded": "La Explicación nombró algo que la puntuación no contiene, así que no se guardó.",
+  "errors.narration.language": "La Explicación se pidió para un idioma que Boba no habla."
+}

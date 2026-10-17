@@ -1,3 +1,4 @@
 {
-  "errors.offers.inbox": "Boba could not read your Offers. Try again in a moment."
+  "errors.offers.inbox": "Boba could not read your Offers. Try again in a moment.",
+  "errors.offers.not_found": "Boba could not open this Offer. It may have been removed."
 }

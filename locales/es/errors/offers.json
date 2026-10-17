@@ -1,3 +1,4 @@
 {
-  "errors.offers.inbox": "Boba no pudo leer tus Ofertas. Inténtalo de nuevo en un momento."
+  "errors.offers.inbox": "Boba no pudo leer tus Ofertas. Inténtalo de nuevo en un momento.",
+  "errors.offers.not_found": "Boba no pudo abrir esta Oferta. Puede que se haya eliminado."
 }

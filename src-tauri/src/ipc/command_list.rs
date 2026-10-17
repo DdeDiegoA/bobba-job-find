@@ -31,6 +31,7 @@ macro_rules! boba_commands {
             crate::commands::ingest::ingest_manual_url,
             crate::commands::ingest::ingest_manual_text,
             crate::commands::offers::offers_inbox,
+            crate::commands::offers::offer_detail,
             crate::commands::unlock::unlock_status,
             crate::commands::unlock::unlock_retry_keychain,
             crate::commands::unlock::unlock_with_passphrase,
