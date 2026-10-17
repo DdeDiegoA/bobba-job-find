@@ -11,6 +11,7 @@ pub mod documents;
 pub mod email;
 pub mod ingestion;
 pub mod outbox;
+pub mod outbox_hold;
 pub mod profile;
 pub mod scoring;
 pub mod sources;

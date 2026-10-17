@@ -27,5 +27,13 @@
   "errors.apply.rule_unconfirmed": "Turn Auto on through the confirmation dialog first.",
   "errors.apply.rule_missing": "Add at least one enabled rule before turning Auto on.",
   "errors.apply.unknown_rule": "That rule no longer exists.",
-  "errors.apply.rule_clock": "Boba cannot read its own clock, so it cannot decide this now."
+  "errors.apply.rule_clock": "Boba cannot read its own clock, so it cannot decide this now.",
+  "errors.apply.outbox_hold": "The Outbox hold must be between 5 minutes and 24 hours.",
+  "errors.apply.outbox_dry_run": "A dry run reports between 1 and 10 matches.",
+  "errors.apply.outbox_not_found": "That item is no longer in the Outbox.",
+  "errors.apply.outbox_not_live": "That item already left the Outbox, so it cannot be changed.",
+  "errors.apply.outbox_edit": "That edit cannot be saved. Keep it short and non-empty.",
+  "errors.apply.outbox_clock": "Boba cannot read its own clock, so it cannot time this hold.",
+  "errors.apply.outbox_queued": "This application is already waiting in the Outbox.",
+  "errors.apply.outbox_kill_switch": "The Kill Switch is on, so Boba is not sending anything automatically."
 }

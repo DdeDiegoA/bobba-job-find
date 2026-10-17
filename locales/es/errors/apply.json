@@ -27,5 +27,13 @@
   "errors.apply.rule_unconfirmed": "Activa el modo automático con el diálogo de confirmación primero.",
   "errors.apply.rule_missing": "Agrega al menos una regla activa antes de activar el modo automático.",
   "errors.apply.unknown_rule": "Esa regla ya no existe.",
-  "errors.apply.rule_clock": "Boba no puede leer su propio reloj, así que no puede decidir esto ahora."
+  "errors.apply.rule_clock": "Boba no puede leer su propio reloj, así que no puede decidir esto ahora.",
+  "errors.apply.outbox_hold": "La espera de la bandeja de salida debe estar entre 5 minutos y 24 horas.",
+  "errors.apply.outbox_dry_run": "Una prueba en seco informa entre 1 y 10 coincidencias.",
+  "errors.apply.outbox_not_found": "Ese elemento ya no está en la bandeja de salida.",
+  "errors.apply.outbox_not_live": "Ese elemento ya salió de la bandeja de salida, así que no se puede cambiar.",
+  "errors.apply.outbox_edit": "Esa edición no se puede guardar. Déjala corta y no vacía.",
+  "errors.apply.outbox_clock": "Boba no puede leer su propio reloj, así que no puede medir esta espera.",
+  "errors.apply.outbox_queued": "Esta postulación ya espera en la bandeja de salida.",
+  "errors.apply.outbox_kill_switch": "El interruptor de emergencia está activo, así que Boba no envía nada de forma automática."
 }

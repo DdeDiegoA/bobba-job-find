@@ -73,6 +73,24 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AutoRule> {
     })
 }
 
+/// The newest automatic send to one Source, `None` when there is none.
+pub fn last_attempt_at_for_source(
+    conn: &Connection,
+    source_id: &str,
+) -> Result<Option<String>, AutoRulesRepoError> {
+    conn.query_row(
+        "SELECT created_at FROM auto_rule_attempt WHERE source_id = ?1 \
+         ORDER BY created_at DESC LIMIT 1",
+        params![source_id],
+        |r| r.get(0),
+    )
+    .map(Some)
+    .or_else(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+        other => Err(repo(other)),
+    })
+}
+
 /// Every rule, oldest first.
 pub fn list_rules(conn: &Connection) -> Result<Vec<AutoRule>, AutoRulesRepoError> {
     let mut stmt = conn
@@ -269,6 +287,15 @@ impl AutoRulesRepo for Store {
         self.read(|conn| Ok(last_attempt_at(conn)))
             .map_err(|e| AutoRulesRepoError::new(e.to_string()))?
     }
+
+    fn ledger_last_at_for_source(
+        &self,
+        source_id: &str,
+    ) -> Result<Option<String>, AutoRulesRepoError> {
+        let source_id = source_id.to_string();
+        self.read(move |conn| Ok(last_attempt_at_for_source(conn, &source_id)))
+            .map_err(|e| AutoRulesRepoError::new(e.to_string()))?
+    }
 }
 
 #[cfg(test)]
@@ -418,5 +445,37 @@ mod tests {
             count_global_since(&conn, "2026-10-17T00:00:00Z").unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn the_newest_auto_send_to_one_source_is_the_spacing_anchor() {
+        let conn = connection();
+        // The ledger row names its rule (FK), so the rule exists first.
+        upsert_rule(&conn, &rule("rule_1")).unwrap();
+        for (id, source, at) in [
+            ("aut_1", "remotive", "2026-10-17T09:00:00Z"),
+            ("aut_2", "remotive", "2026-10-17T09:20:00Z"),
+            ("aut_3", "company_site", "2026-10-17T09:30:00Z"),
+        ] {
+            let row = AutoAttemptEntry {
+                source_id: source.into(),
+                ..entry(id, "rule_1", "acme", at)
+            };
+            insert_attempt(&conn, &row).unwrap();
+        }
+
+        assert_eq!(
+            last_attempt_at_for_source(&conn, "remotive")
+                .unwrap()
+                .as_deref(),
+            Some("2026-10-17T09:20:00Z")
+        );
+        assert_eq!(
+            last_attempt_at_for_source(&conn, "company_site")
+                .unwrap()
+                .as_deref(),
+            Some("2026-10-17T09:30:00Z")
+        );
+        assert_eq!(last_attempt_at_for_source(&conn, "never").unwrap(), None);
     }
 }

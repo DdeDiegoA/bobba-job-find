@@ -23,6 +23,7 @@ use boba_app::ports::repo::documents::DocumentsRepo;
 use boba_app::ports::repo::email::EmailRepo;
 use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::outbox::OutboxRepo;
+use boba_app::ports::repo::outbox_hold::OutboxHoldRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::ports::repo::sources::SourcesRepo;
@@ -78,6 +79,9 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // The apply outbox owns `apply_attempt` (S9.3): the evidence an Email Apply
     // retry reads before it sends again.
     mount_port::<dyn OutboxRepo>(app, store.clone());
+    // The Outbox hold owns `apply_outbox` and `apply_rule_dry_run` (S9.7): the
+    // queued automatic sends and each rule's dry-run progress.
+    mount_port::<dyn OutboxHoldRepo>(app, store.clone());
     // The scoring owner reads `score_card` (S6.4 is its first reader: the Inbox
     // shows the newest card per Offer; the run slices write them).
     mount_port::<dyn ScoringRepo>(app, store.clone());
@@ -107,6 +111,10 @@ pub fn mount_ports<R: Runtime>(app: &AppHandle<R>, store: &Arc<Store>) {
     // startup pass turns it `uncertain` — which the user's confirmation can
     // clear — and closes its audit intent as AD-12 prescribes.
     recover_interrupted_sends(app);
+    // An item a crash left mid-release (S9.7, FR-85): the ledger entry exists,
+    // the send's result does not, so the item goes to the review queue instead
+    // of being released a second time.
+    recover_outbox(app);
     // The ATS Form browser (S9.4, AD-10): the user's own Chrome over CDP, on
     // the Boba profile, launched only when an apply session starts.
     match app.path().app_data_dir() {
@@ -139,6 +147,19 @@ fn recovery_engine<R: Runtime>(app: &AppHandle<R>) -> boba_app::error::AppResult
         super::port::<dyn MailPort>(app)?,
         Arc::new(boba_app::system::SystemClock),
     ))
+}
+
+/// Close the Outbox items a crash left mid-release (S9.7, FR-85).
+fn recover_outbox<R: Runtime>(app: &AppHandle<R>) {
+    let Ok(items) = super::port::<dyn OutboxHoldRepo>(app) else {
+        return;
+    };
+    let now = boba_app::ports::clock::ClockPort::now_rfc3339(&boba_app::system::SystemClock);
+    match boba_app::apply::outbox::reconcile_stuck(items.as_ref(), &now) {
+        Ok(0) => {}
+        Ok(recovered) => tracing::info!(recovered, "outbox: interrupted releases reconciled"),
+        Err(error) => tracing::warn!(%error, "outbox: reconcile failed"),
+    }
 }
 
 /// Reconcile the sends a crash interrupted; a launch that cannot do it leaves

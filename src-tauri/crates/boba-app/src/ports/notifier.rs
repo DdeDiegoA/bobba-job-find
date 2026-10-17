@@ -19,6 +19,9 @@ pub enum Notification {
     /// A Source failed its third run in a row (S4.8 AC3, FR-31). One per
     /// streak: the fourth and later failures stay quiet until a run succeeds.
     SourceFailing,
+    /// An automatic send entered the Outbox hold (S9.7, FR-85). One per item,
+    /// and only for a held send: a dry-run "would send" is not a notification.
+    OutboxHold,
 }
 
 /// A notification the OS refused to show.
