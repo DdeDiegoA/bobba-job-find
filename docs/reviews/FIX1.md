@@ -86,3 +86,18 @@ Commit reviewed: `31d04c1` (branch `hermad/FIX1`), on top of `db1f22f`.
 1. Fix B1 and add the bounded-join test.
 2. Re-run the full CI gate in the worktree and re-emit `HERMAD:DONE`/review with a
    new commit SHA.
+
+## Re-review: `388878d` (B1 fix)
+
+**Verdict: APPROVED.**
+
+- B1 fixed: `run_capture_with` no longer joins the pipe readers. Both drain into a
+  shared buffer; after the child exits, one 500 ms grace window (`READER_JOIN_GRACE`)
+  bounds the wait, and the buffer keeps what the shell already printed.
+- New test `login_shell_path_does_not_wait_for_a_background_child_holding_stdout`
+  (background `sleep 5` holding stdout) asserts the PATH is returned in under 2 s.
+- Gate on `388878d`: `cargo fmt --all --check` pass; `cargo clippy --workspace
+  --all-targets --locked -- -D warnings` pass; `cargo test --workspace --locked`
+  pass, 2147 passed, 0 failed. Web half unchanged since `31d04c1` (green there).
+- R1–R4 still stand as non-blocking residuals; R1 (Windows `.cmd` argv) needs a
+  Windows run before release.
