@@ -138,6 +138,14 @@ jobs:
             bundles: appimage,deb,rpm
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    # REL4: this matrix spans macOS, Linux and Windows, and windows-latest
+    # defaults to pwsh, where `$TAG` is an (empty) PowerShell variable rather
+    # than the env var. Every run step here is POSIX shell; the MSI step below
+    # failed on that (run 39091506560, job 117570923420). One default keeps the
+    # whole job on bash (Git Bash on Windows) so no future step can regress.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0

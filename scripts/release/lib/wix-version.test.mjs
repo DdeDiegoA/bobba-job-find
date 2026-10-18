@@ -1,7 +1,10 @@
+// @vitest-environment node
 // S10.5 AC1 / REL2: WiX (MSI) accepts only a numeric version, but the app
 // version is semver and a beta carries `1.0.0-beta.1` (tauri-utils 2.10 and
 // above reject the pre-release suffix for the msi target). The mapping below
 // is what release.yml feeds to `bundle.windows.wix.version`.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { wixConfig, wixVersion } from "./wix-version.mjs";
 
@@ -61,5 +64,26 @@ describe("wixConfig", () => {
     expect(wixConfig("1.0.0.1")).toEqual({
       bundle: { windows: { wix: { version: "1.0.0.1" } } },
     });
+  });
+});
+
+// REL4: release.yml passes the tag through an env var. When the shell did not
+// expand it (pwsh on Windows), the script got no argument and printed only the
+// usage line, which reads like a help request. It must name the problem.
+describe("wix-version CLI", () => {
+  const script = fileURLToPath(new URL("../wix-version.mjs", import.meta.url));
+
+  it("fails with a clear error when the tag is missing", () => {
+    const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("missing tag argument");
+  });
+
+  it("prints the MSI version for a tag", () => {
+    const run = spawnSync(process.execPath, [script, "v1.0.0-beta.1"], {
+      encoding: "utf8",
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout.trim()).toBe("1.0.0.1");
   });
 });
