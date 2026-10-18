@@ -38,6 +38,9 @@ export const commands = {
   /**  Every connected mailbox, oldest first. */
   emailAccounts: () =>
     typedError<ConnectionView[], AppError_Serialize>(__TAURI_INVOKE("email_accounts")),
+  /**  Whether this build has a bundled client for each one-click provider (FX5b). */
+  emailBundledClients: () =>
+    typedError<BundledClients, AppError_Serialize>(__TAURI_INVOKE("email_bundled_clients")),
   /**
    *  Connect Outlook with delegated OAuth (AC1, AC2).
    *
@@ -1158,6 +1161,19 @@ export type BudgetSnapshot = {
   max_offers_per_run: number;
   /**  Every task's default per-task limits. */
   limits: TaskLimitView[];
+};
+
+/**
+ *  Which one-click providers this build carries (FX5b, AC1).
+ *
+ *  Two booleans and nothing else: the UI decides what to offer before the user
+ *  clicks, and neither a client id nor the Gmail secret ever crosses IPC.
+ */
+export type BundledClients = {
+  /**  A Microsoft Graph client id is compiled into this build. */
+  outlook: boolean;
+  /**  A Gmail client id **and** its public client secret are compiled in. */
+  gmail: boolean;
 };
 
 /**  One Application a proposal may move (AC2). Only what the picker shows. */

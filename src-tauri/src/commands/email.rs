@@ -213,6 +213,47 @@ impl From<EmailFailure> for AppError {
     }
 }
 
+/// Which one-click providers this build carries (FX5b, AC1).
+///
+/// Two booleans and nothing else: the UI decides what to offer before the user
+/// clicks, and neither a client id nor the Gmail secret ever crosses IPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct BundledClients {
+    /// A Microsoft Graph client id is compiled into this build.
+    pub outlook: bool,
+    /// A Gmail client id **and** its public client secret are compiled in.
+    pub gmail: bool,
+}
+
+/// Whether this build has a bundled client for each one-click provider (FX5b).
+#[tauri::command]
+#[specta::specta]
+pub fn email_bundled_clients() -> AppResult<BundledClients> {
+    Ok(bundled_clients(
+        BUNDLED_GRAPH_CLIENT_ID,
+        BUNDLED_GMAIL_CLIENT_ID,
+        BUNDLED_GMAIL_CLIENT_SECRET,
+    ))
+}
+
+/// The probe's rule, as a value so a test can choose the build (FX5b, AC1).
+///
+/// Gmail needs both halves: Google's token endpoint rejects an installed-app
+/// client without its public secret, so an id alone would light up a button
+/// that cannot complete. A blank value is what an unset CI secret produces, so
+/// it counts as absent.
+fn bundled_clients(
+    graph: Option<&str>,
+    gmail_id: Option<&str>,
+    gmail_secret: Option<&str>,
+) -> BundledClients {
+    let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    BundledClients {
+        outlook: present(graph),
+        gmail: present(gmail_id) && present(gmail_secret),
+    }
+}
+
 /// Every connected mailbox, oldest first.
 #[tauri::command]
 #[specta::specta]
@@ -1575,6 +1616,84 @@ mod tests {
             gmail_client(None, None, None, None),
             Err(EmailFailure::NoBundledClient)
         ));
+    }
+
+    // --- FX5b: which one-click providers this build can offer ---
+
+    /// No build values at all: neither one-click flow exists, and the UI must
+    /// send the user to their own client instead (FX5b, AC1/AC2).
+    #[test]
+    fn a_build_without_clients_offers_no_one_click_sign_in() {
+        assert_eq!(
+            bundled_clients(None, None, None),
+            BundledClients {
+                outlook: false,
+                gmail: false
+            }
+        );
+    }
+
+    /// The Graph flow needs only its client id (FX5b, AC1).
+    #[test]
+    fn the_graph_client_alone_is_enough_for_outlook() {
+        assert_eq!(
+            bundled_clients(Some("graph-client"), None, None),
+            BundledClients {
+                outlook: true,
+                gmail: false
+            }
+        );
+    }
+
+    /// Gmail's token endpoint needs the public installed-app secret too, so an
+    /// id without one must not light up the one-click button (FX5b, AC1).
+    #[test]
+    fn the_gmail_flow_needs_its_client_and_its_public_secret() {
+        assert_eq!(
+            bundled_clients(None, Some("gmail-client"), None),
+            BundledClients {
+                outlook: false,
+                gmail: false
+            },
+            "a client id without its secret cannot complete the flow"
+        );
+        assert_eq!(
+            bundled_clients(None, Some("gmail-client"), Some("public-secret")),
+            BundledClients {
+                outlook: false,
+                gmail: true
+            }
+        );
+    }
+
+    /// Blank values are what an empty CI secret produces, so they count as
+    /// absent, not as a client (FX5b, AC1).
+    #[test]
+    fn blank_build_values_offer_nothing() {
+        assert_eq!(
+            bundled_clients(Some("  "), Some(""), Some("\t")),
+            BundledClients {
+                outlook: false,
+                gmail: false
+            }
+        );
+    }
+
+    /// The probe crosses IPC as booleans only: no client id and no secret, ever
+    /// (FX5b, AC1).
+    #[test]
+    fn the_probe_never_exposes_the_client_id_or_the_secret() {
+        let value = serde_json::to_value(bundled_clients(
+            Some("graph-client"),
+            Some("gmail-client"),
+            Some("public-secret"),
+        ))
+        .expect("serialisable");
+        assert_eq!(value, serde_json::json!({ "outlook": true, "gmail": true }));
+        let text = value.to_string();
+        for secret in ["graph-client", "gmail-client", "public-secret"] {
+            assert!(!text.contains(secret), "{text}");
+        }
     }
 
     // --- Gmail read+send (S8.5, AC1) ---

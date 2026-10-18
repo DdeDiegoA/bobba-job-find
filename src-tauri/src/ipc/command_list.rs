@@ -20,6 +20,7 @@ macro_rules! boba_commands {
             crate::commands::preferences::preferences_snapshot,
             crate::commands::preferences::preferences_save,
             crate::commands::email::email_accounts,
+            crate::commands::email::email_bundled_clients,
             crate::commands::email::email_connect_outlook,
             crate::commands::email::email_connect_gmail,
             crate::commands::email::email_connect_imap_smtp,

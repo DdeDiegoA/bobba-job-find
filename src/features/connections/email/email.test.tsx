@@ -1,10 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import "@testing-library/jest-dom/vitest";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppError, ConnectionView } from "@/lib/ipc/bindings";
 import { commands } from "@/lib/ipc/bindings";
 import "@/lib/i18n";
 import ConnectionsEmail from "./index";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
 
 vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
@@ -14,6 +18,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
     emailConnectImapSmtp: vi.fn(),
     emailSetMode: vi.fn(),
     emailDisconnect: vi.fn(),
+    emailBundledClients: vi.fn(),
   },
 }));
 
@@ -57,6 +62,40 @@ beforeEach(() => {
   vi.mocked(commands.emailConnectImapSmtp).mockReset();
   vi.mocked(commands.emailSetMode).mockReset();
   vi.mocked(commands.emailDisconnect).mockReset();
+  // Both providers bundled by default, so the existing tests keep their path.
+  vi.mocked(commands.emailBundledClients)
+    .mockReset()
+    .mockReturnValue(ok({ outlook: true, gmail: true }));
+  vi.mocked(openUrl).mockClear();
+});
+
+describe("a build with no bundled clients (FX5b)", () => {
+  it("makes your own client ID the main path, with the guide one click away (AC4)", async () => {
+    vi.mocked(commands.emailBundledClients).mockReturnValue(ok({ outlook: false, gmail: false }));
+    renderScreen();
+
+    const outlook = await outlookForm();
+    // No "Advanced": with nothing bundled, this is how the form works.
+    expect(await within(outlook).findByLabelText(/^Your own client ID/)).toBeRequired();
+    expect(within(outlook).queryByText(/Advanced/)).toBeNull();
+
+    fireEvent.click(within(outlook).getByRole("button", { name: /read the guide/i }));
+    expect(openUrl).toHaveBeenCalledWith(expect.stringMatching(/email-own-client\.md$/));
+
+    const gmail = await gmailForm();
+    expect(await within(gmail).findByLabelText(/^Your own client ID/)).toBeRequired();
+    expect(within(gmail).getByLabelText(/^Your client secret/)).toBeRequired();
+    expect(within(gmail).queryByText(/Advanced/)).toBeNull();
+  });
+
+  it("keeps the advanced wording and optional fields when a client is bundled (AC3)", async () => {
+    renderScreen();
+
+    const outlook = await outlookForm();
+    const clientId = await within(outlook).findByLabelText(/Advanced: your own client ID/);
+    expect(clientId).not.toBeRequired();
+    expect(within(outlook).queryByRole("button", { name: /read the guide/i })).toBeNull();
+  });
 });
 
 describe("connecting Outlook (AC1)", () => {

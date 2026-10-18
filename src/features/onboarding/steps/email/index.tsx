@@ -1,8 +1,11 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
+  EMAIL_OWN_CLIENT_GUIDE_URL,
+  useBundledEmailClients,
   useConnectGmail,
   useConnectOutlook,
   useEmailAccounts,
@@ -27,10 +30,22 @@ export default function EmailStep(_props: StepProps) {
   const { t } = useTranslation("onboarding_finish");
   const { t: tError } = useTranslation();
   const accounts = useEmailAccounts();
+  const bundled = useBundledEmailClients();
   const outlook = useConnectOutlook();
   const gmail = useConnectGmail();
   const [address, setAddress] = useState("");
   const addressHintId = useId();
+
+  // FX5b: a provider this build has no client for can never complete the
+  // one-click flow, so its button is hidden and "add your own client" becomes
+  // the next action instead of an error after the click. While the probe is
+  // loading (or fails) the step keeps its old behaviour.
+  const noOutlook = bundled.data?.outlook === false;
+  const noGmail = bundled.data?.gmail === false;
+  const missingProviders = [
+    ...(noOutlook ? [t("email.provider.microsoft_graph")] : []),
+    ...(noGmail ? [t("email.provider.gmail")] : []),
+  ];
 
   const failure = outlook.error ?? gmail.error ?? null;
   // FX5: a build with no bundled client can never do one-click sign-in. That is
@@ -73,54 +88,83 @@ export default function EmailStep(_props: StepProps) {
         </ul>
       </section>
 
-      <label className="flex flex-col gap-1 text-sm text-fg">
-        {t("email.addressLabel")}
-        <input
-          type="email"
-          className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
-          placeholder={t("email.addressPlaceholder")}
-          value={address}
-          onChange={(event) => setAddress(event.target.value)}
-        />
-      </label>
-      {addressEmpty ? (
-        <p id={addressHintId} className="text-xs text-fg-subtle">
-          {t("email.addressHint")}
-        </p>
-      ) : null}
+      {/* No one-click provider at all: the address has nothing to feed. */}
+      {missingProviders.length === 2 ? null : (
+        <>
+          <label className="flex flex-col gap-1 text-sm text-fg">
+            {t("email.addressLabel")}
+            <input
+              type="email"
+              className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
+              placeholder={t("email.addressPlaceholder")}
+              value={address}
+              onChange={(event) => setAddress(event.target.value)}
+            />
+          </label>
+          {addressEmpty ? (
+            <p id={addressHintId} className="text-xs text-fg-subtle">
+              {t("email.addressHint")}
+            </p>
+          ) : null}
+        </>
+      )}
 
       <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={!canConnect}
-          aria-describedby={addressEmpty ? addressHintId : undefined}
-          onClick={() =>
-            outlook.mutate({
-              address: address.trim(),
-              mode: "send_only",
-              client_id: null,
-            })
-          }
-        >
-          {outlook.isPending ? t("email.connecting") : t("email.action.outlook")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          disabled={!canConnect}
-          aria-describedby={addressEmpty ? addressHintId : undefined}
-          onClick={() =>
-            gmail.mutate({
-              address: address.trim(),
-              client_id: null,
-              client_secret: null,
-            })
-          }
-        >
-          {gmail.isPending ? t("email.connecting") : t("email.action.gmail")}
-        </Button>
+        {noOutlook ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canConnect}
+            aria-describedby={addressEmpty ? addressHintId : undefined}
+            onClick={() =>
+              outlook.mutate({
+                address: address.trim(),
+                mode: "send_only",
+                client_id: null,
+              })
+            }
+          >
+            {outlook.isPending ? t("email.connecting") : t("email.action.outlook")}
+          </Button>
+        )}
+        {noGmail ? null : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!canConnect}
+            aria-describedby={addressEmpty ? addressHintId : undefined}
+            onClick={() =>
+              gmail.mutate({
+                address: address.trim(),
+                client_id: null,
+                client_secret: null,
+              })
+            }
+          >
+            {gmail.isPending ? t("email.connecting") : t("email.action.gmail")}
+          </Button>
+        )}
       </div>
+
+      {missingProviders.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted p-3 text-sm text-fg">
+          <p className="font-medium">{t("email.addYourOwn.title")}</p>
+          <p>{t("email.addYourOwn.body", { providers: missingProviders.join(", ") })}</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to="/connections" className="text-fg underline underline-offset-2">
+              {t("email.addYourOwn.action")}
+            </Link>
+            <button
+              type="button"
+              className="text-fg underline underline-offset-2"
+              onClick={() => void openUrl(EMAIL_OWN_CLIENT_GUIDE_URL).catch(() => undefined)}
+            >
+              {t("email.addYourOwn.guide")}
+            </button>
+          </div>
+          <p className="text-xs text-fg-subtle">{t("email.addYourOwn.skip")}</p>
+        </div>
+      ) : null}
 
       {pending ? (
         <p role="status" className="text-sm text-fg-muted">
