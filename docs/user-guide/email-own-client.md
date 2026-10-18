@@ -26,7 +26,8 @@ password, and needs no client at all.
 | Gmail | `gmail.send` | `gmail.send`, `gmail.readonly` |
 
 No admin consent and no access without you. Reading is always opt-in: when it is on, the
-sync narrows the mailbox to the company domains your applications were sent to and the
+sync narrows the mailbox to the company domains your applications went to, the
+applicant-tracking systems that mail about them (Greenhouse, Lever, Workday…), and the
 threads Boba started, and keeps what matches on this device.
 
 ## Microsoft (Outlook / Microsoft 365)
