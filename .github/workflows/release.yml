@@ -35,7 +35,8 @@ env:
 jobs:
   guard:
     name: Release guard
-    runs-on: ubuntu-latest
+    # Pinned like ci.yml: `ubuntu-latest` moves to 26.04 on 2026-10-19 (CH16).
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -118,6 +119,10 @@ jobs:
           toolchain: 1.99.0
           targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Same Tauri v2 prerequisite list as ci.yml's LINUX_APT_PACKAGES, plus
+      # `rpm` for the .rpm bundle. libxdo-dev is required by
+      # tauri-plugin-global-shortcut; curl/wget/file are used by the AppImage
+      # bundler (CH16).
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -127,10 +132,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
+            libxdo-dev \
             rpm \
             build-essential \
             pkg-config \
-            libssl-dev
+            libssl-dev \
+            curl \
+            wget \
+            file
       - name: Install (frozen lockfile, dependency scripts disabled)
         run: pnpm install --frozen-lockfile --ignore-scripts
       # AD-007: boba-mcp ships inside the bundle, so it is signed with the app.
