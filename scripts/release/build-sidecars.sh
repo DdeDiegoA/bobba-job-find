@@ -29,7 +29,9 @@ build() {
   cargo build --locked --release -p boba-mcp --target "$triple" >&2
   local exe=""
   case "$triple" in *windows*) exe=".exe" ;; esac
-  local built="$TARGET_DIR/$triple/release/boba-mcp$exe"
+  # The bin target is `boba-mcp-shim` (see crates/boba-mcp/Cargo.toml); the
+  # sidecar it ships as is `boba-mcp` (AD-6, FX20).
+  local built="$TARGET_DIR/$triple/release/boba-mcp-shim$exe"
   if [ ! -f "$built" ]; then
     echo "cargo did not produce $built" >&2
     exit 1
