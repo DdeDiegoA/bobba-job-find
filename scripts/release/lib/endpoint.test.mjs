@@ -1,7 +1,7 @@
 // S10.5 review F5: the updater endpoint must point at the repository that
 // publishes the releases, or installed apps poll a 404 forever.
 import { describe, expect, it } from "vitest";
-import { checkEndpoint, endpointRepo } from "./endpoint.mjs";
+import { checkEndpoint, endpointRepo, repoFromRemote } from "./endpoint.mjs";
 
 const URL_OK = "https://github.com/acme/boba-job-find/releases/latest/download/latest.json";
 
@@ -19,6 +19,21 @@ describe("endpointRepo", () => {
   });
 });
 
+describe("repoFromRemote", () => {
+  it("reads owner/repo from every GitHub remote form", () => {
+    expect(repoFromRemote("git@github.com:acme/boba-job-find.git")).toBe("acme/boba-job-find");
+    expect(repoFromRemote("ssh://git@github.com/acme/boba-job-find.git")).toBe(
+      "acme/boba-job-find",
+    );
+    expect(repoFromRemote("https://github.com/acme/boba-job-find")).toBe("acme/boba-job-find");
+  });
+
+  it("rejects a remote that is not GitHub", () => {
+    expect(repoFromRemote("git@gitlab.com:acme/boba-job-find.git")).toBeNull();
+    expect(repoFromRemote("")).toBeNull();
+  });
+});
+
 describe("checkEndpoint", () => {
   it("passes when the endpoint matches the publishing repository", () => {
     expect(checkEndpoint(URL_OK, "acme/boba-job-find")).toEqual({ ok: true, errors: [] });
@@ -29,10 +44,10 @@ describe("checkEndpoint", () => {
   });
 
   it("fails when the endpoint names another repository", () => {
-    const result = checkEndpoint(URL_OK, "diegoarenas/boba-job-find");
+    const result = checkEndpoint(URL_OK, "someone-else/boba-job-find");
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toContain("acme/boba-job-find");
-    expect(result.errors[0]).toContain("diegoarenas/boba-job-find");
+    expect(result.errors[0]).toContain("someone-else/boba-job-find");
   });
 
   it("fails on a missing or malformed endpoint", () => {

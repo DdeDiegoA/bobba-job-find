@@ -3,7 +3,7 @@
 ## Install
 
 1. Download `Boba Job Find_<version>_universal.dmg` from the
-   [latest release](https://github.com/diegoarenas/boba-job-find/releases/latest).
+   [latest release](https://github.com/DdeDiegoA/bobba-job-find/releases/latest).
 2. Open the DMG and drag **Boba Job Find** to **Applications**.
 3. The app is **signed with the project's persistent self-signed identity, but
    not notarised** (there is no Apple Developer ID at MVP). Gatekeeper will stop

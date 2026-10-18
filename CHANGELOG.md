@@ -4,10 +4,12 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
-## [Unreleased] - targeting 1.0.0
+## [1.0.0-beta.1] - 2026-10-18
 
-Planned first release (not yet tagged). Boba Job Find is a local-first, free and open-source desktop app (Windows,
-macOS, Linux) that searches, ranks, tailors and applies, with you in control. Grouped by epic.
+First release (pre-release; the tag is `v1.0.0-beta.1`, so it never becomes
+`/releases/latest`). Boba Job Find is a local-first, free and open-source
+desktop app (Windows, macOS, Linux) that searches, ranks, tailors and applies,
+with you in control. Grouped by epic.
 
 ### Foundations
 - Tauri v2 shell with a hexagonal Rust core and a React 19 + TypeScript UI.
@@ -95,8 +97,27 @@ macOS, Linux) that searches, ranks, tailors and applies, with you in control. Gr
   minutes apart, Outbox hold of at least 60 minutes, paused 7 days after any challenge, and
   re-confirmed every 30 days.
 
+### Fixes after v1
+
+- CI: install the Tauri Linux prerequisites in the Rust gate so the GitHub
+  Actions runners are green (CH15), and give the web job the same deps while
+  pinning `ubuntu-24.04` (CH16).
+- Money: scale amounts by each currency's ISO-4217 minor-unit exponent, and pin
+  fraction digits to it, so KWD/BHD/CLP and other zero/three-decimal currencies
+  display correctly (CH15); salary display now goes through `formatMoney`
+  (CH17).
+- Windows: gate the Unix-only process group so the Windows build compiles, and
+  prove the tree kill on Windows too (CH18).
+
 ### Known limitations
-- Installers are not signed by Apple or Microsoft; the first launch needs a one-time approval
-  (see [docs/install/](docs/install/README.md)).
+- macOS builds are **self-signed**, not notarised: Gatekeeper stops the first
+  launch and needs a one-time approval
+  ([docs/install/macos.md](docs/install/macos.md)).
+- Windows builds are **unsigned** until SignPath is accepted: SmartScreen shows
+  "Windows protected your PC" on first launch
+  ([docs/install/windows.md](docs/install/windows.md)).
+- The bundled Microsoft Graph and Google OAuth clients are **not registered
+  yet**, so connecting email needs your own OAuth client ID (bring your own) or
+  IMAP/SMTP ([docs/install/RELEASING.md](docs/install/RELEASING.md)).
 - InfoJobs and further sources, and coaching extras, are planned for v1.1.
 

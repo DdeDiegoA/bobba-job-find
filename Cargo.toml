@@ -19,11 +19,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0-beta.1"
 edition = "2024"
 license = "MIT"
 rust-version = "1.92"
-repository = "https://github.com/diegoarenas/boba-job-find"
+repository = "https://github.com/DdeDiegoA/bobba-job-find"
 
 # Workspace lints (CH13). Every member opts in with `[lints] workspace = true`;
 # CI runs `cargo clippy -- -D warnings`, so a `warn` here fails the build.

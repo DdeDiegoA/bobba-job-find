@@ -40,7 +40,7 @@ installer then runs in passive mode (a progress bar, no wizard).
 ## If you suspect an update
 
 The only update endpoint is
-`https://github.com/diegoarenas/boba-job-find/releases/latest/download/latest.json`.
+`https://github.com/DdeDiegoA/bobba-job-find/releases/latest/download/latest.json`.
 If you see a prompt that did not follow a change you made to the setting, cancel
 it, check Network activity, and compare the release against this repository.
 You can always update by hand: download the installer from the releases page and
