@@ -156,3 +156,13 @@ that test (see below).
   earlier. It is pre-existing and load-sensitive, and it can fail the CI gate
   intermittently. Fixing it belongs in its own slice (for example, a
   generous bound or a relative check), not in REL7.
+
+## Approval at 69ef412
+
+Approved at `69ef412` (`docs(release): add FX4 to the beta.2 changelog`), per the
+orquestador's ruling: the boba-mail timing flake is pre-existing and does not
+block REL7, and FX19 will make that test robust. FX4 is now in the beta.2
+CHANGELOG. FX13 was not in the branch at approval time. Verified:
+`git diff abdc454 HEAD -- src` is empty, so the code is `main` plus the release
+files; `check-version v1.0.0-beta.2` and `check-conventions` pass; shell tests
+21/21.
