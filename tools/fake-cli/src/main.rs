@@ -17,7 +17,11 @@
 //!                   `BOBA_FAKE_READY` is written once that grandchild exists
 //!                   and `BOBA_FAKE_GRANDCHILD_PID` receives its pid, so a test
 //!                   can sync on it and then prove it is gone without waiting
-//!                   out the delay (CH12)
+//!                   out the delay (CH12). The grandchild is this same binary in
+//!                   `sleep-then-touch`, so the tree test also runs on Windows
+//!                   (no `sh` dependency)
+//!   sleep-then-touch — sleep `BOBA_FAKE_DELAY_MS`, then write
+//!                   `BOBA_FAKE_MARKER`; the `spawn-child` grandchild
 //!   emit-lines    — alias of replay, kept for readability in fixtures
 //!   fail-auth     — write an auth error to stderr, exit 1. `BOBA_FAKE_STDERR_HOLD_MS`
 //!                   or `BOBA_FAKE_STDOUT_HOLD_MS` also leaves a grandchild
@@ -47,6 +51,7 @@ fn main() {
         "replay" | "emit-lines" => replay(),
         "claude-stream" => claude_stream(),
         "spawn-child" => spawn_child(),
+        "sleep-then-touch" => sleep_then_touch(),
         "fail-auth" => fail_auth(),
         "mcp-run" => mcp_run(),
         other => {
@@ -108,24 +113,25 @@ fn spawn_child() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(400);
 
-    // A grandchild that keeps running until after the parent is killed. Its
-    // process group is the fake CLI's, so a group kill must take it down too.
-    // It writes its pid first: a test kills it and then checks it is gone,
-    // instead of sleeping past the delay and hoping (CH12).
-    let script = match std::env::var("BOBA_FAKE_GRANDCHILD_PID") {
-        Ok(pid_file) => format!(
-            "echo $$ > \"{pid_file}\"; sleep {}; : > \"{marker}\"",
-            delay_ms as f64 / 1000.0
-        ),
-        Err(_) => format!("sleep {}; : > \"{marker}\"", delay_ms as f64 / 1000.0),
-    };
-    let _ = Command::new("sh")
-        .arg("-c")
-        .arg(&script)
+    // A grandchild that keeps running until after the parent is killed. It
+    // lives in the parent's process group (Unix) or Job Object (Windows), so a
+    // tree kill must take it down too. It is this same binary, not a shell, so
+    // the test is cross-platform. The parent reports its pid: a test kills the
+    // tree and then checks the grandchild is gone, instead of sleeping past the
+    // delay and hoping (CH12).
+    let child = Command::new(std::env::current_exe().expect("current exe"))
+        .env("BOBA_FAKE_MODE", "sleep-then-touch")
+        .env("BOBA_FAKE_MARKER", &marker)
+        .env("BOBA_FAKE_DELAY_MS", delay_ms.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()
+        .ok();
+
+    if let (Some(child), Ok(path)) = (child.as_ref(), std::env::var("BOBA_FAKE_GRANDCHILD_PID")) {
+        let _ = std::fs::write(path, child.id().to_string());
+    }
 
     // Tell a test the grandchild is up, rather than making it sleep and hope.
     if let Ok(path) = std::env::var("BOBA_FAKE_READY") {
@@ -135,6 +141,18 @@ fn spawn_child() {
     // Keep the parent alive long enough for the test to kill the group.
     std::thread::sleep(Duration::from_millis(delay_ms + 2_000));
     println!(r#"{{"type":"finished","exit_code":0}}"#);
+}
+
+/// The `spawn-child` grandchild: sleep, then leave the marker a tree kill must
+/// prevent. Cross-platform on purpose (no `sh`, no `cmd`).
+fn sleep_then_touch() {
+    let marker = std::env::var("BOBA_FAKE_MARKER").unwrap_or_else(|_| "boba-marker".to_string());
+    let delay_ms: u64 = std::env::var("BOBA_FAKE_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(400);
+    std::thread::sleep(Duration::from_millis(delay_ms));
+    let _ = std::fs::write(marker, "ran");
 }
 
 fn fail_auth() {

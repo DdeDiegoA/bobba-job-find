@@ -266,8 +266,10 @@ fn login_shell_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs;
 
+    #[cfg(unix)]
     fn tmp_dir(tag: &str) -> PathBuf {
         let dir = env::temp_dir().join(format!("boba-detect-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
