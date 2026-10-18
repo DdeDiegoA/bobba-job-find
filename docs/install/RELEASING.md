@@ -127,9 +127,11 @@ SignPath steps to the Windows matrix entry and remove that section from
    - **publish** — downloads the draft, rewrites `latest.json` so every
      platform url is the public download URL of its asset (a draft carries
      asset API ids), re-uploads it, verifies every installer and `latest.json`
-     against the release's asset list, re-checks the signature of the `.app`
-     inside the DMG, then publishes (`--latest` for a stable tag, plain publish
-     for a `-beta` tag).
+     against the release's asset list **as a draft** (asset names and url form;
+     a draft's assets are not downloadable yet), re-checks the signature of the
+     `.app` inside the DMG, then publishes (`--latest` for a stable tag, plain
+     publish for a `-beta` tag) and verifies the **published** release: not a
+     draft any more, and every public url the updater fetches resolves.
 
    At most one release run per tag: a second run queues behind the first.
 
@@ -230,10 +232,11 @@ Include, every time:
   The script keeps every signature untouched and fails, naming the platform,
   when a url's asset is not attached to the release. It rewrites the file in
   place. Then re-run the failed **publish** job from the run page: it
-  re-downloads the draft, fixes `latest.json` again (idempotent) and publishes.
-  Never publish a draft by hand before that: `verify-release.mjs` rejects the
-  asset-id form and, by design, a draft (its assets are not publicly
-  downloadable yet, so only url form and asset names are checked).
+  re-downloads the draft, fixes `latest.json` again (idempotent), verifies the
+  draft, publishes, and verifies the published release. Let the job publish:
+  the last pass still runs if the release was already public — it re-reads the
+  attached `latest.json` and fetches every public url — but there is no reason
+  to do that step by hand.
 - **A bad release is already public:** publish a fixed patch version. Do not
   delete the latest release: `latest.json` is resolved by URL, and installed
   apps may already be mid-update.
