@@ -12,11 +12,11 @@ import {
 } from ".";
 
 /**
- * ICU renders the spaces around a currency symbol either as NBSP or as narrow
- * NBSP depending on its version, so assertions compare with them normalised.
- * The digits and separators themselves do not change.
+ * ICU renders the space around a currency symbol as NBSP, narrow NBSP or
+ * nothing depending on its version, so exact assertions drop whitespace. The
+ * digits and separators themselves are pinned by the currency's exponent.
  */
-const spaced = (value: string): string => value.replace(/[\s  ]/g, " ");
+const noSpace = (value: string): string => value.replace(/\s/g, "");
 
 describe("money's ISO-4217 minor units (AD-17)", () => {
   it("uses the currency's own exponent, never 100 for everything", () => {
@@ -32,9 +32,7 @@ describe("money's ISO-4217 minor units (AD-17)", () => {
   });
 
   it("formats CLP with no centavos and USD with cents", () => {
-    // Symbol spacing is ICU's (es-CL uses neither a space nor a decimal comma).
-    expect(spaced(formatMoney(1234, "CLP", "es-CL"))).toContain("1.234");
-    expect(spaced(formatMoney(1234, "CLP", "es-CL"))).not.toContain(",");
+    expect(noSpace(formatMoney(1234, "CLP", "es-CL"))).toBe("$1.234");
     expect(formatMoney(123_400, "USD", "en-US")).toBe("$1,234.00");
   });
 });
@@ -42,17 +40,14 @@ describe("money's ISO-4217 minor units (AD-17)", () => {
 describe("salary formatting (FR-115)", () => {
   it("shows the amount in its original currency", () => {
     expect(formatMoney(123_400, "USD", "en-US")).toBe("$1,234.00");
-    // A different locale formats the same amount its own way. Grouping is
-    // asserted instead of the exact string: ICU 77 gives COP two decimals and
-    // ICU 78 none, so the digit count belongs to the runtime's CLDR data.
-    expect(spaced(formatMoney(123_400, "COP", "es-CO"))).toContain("1.234");
-    expect(formatMoney(123_400, "COP", "es-CO")).not.toContain("1234");
+    // COP has two minor units per ISO-4217; ICU 77 and ICU 78 disagree on its
+    // CLDR digits, so the formatter pins the count instead of trusting them.
+    expect(noSpace(formatMoney(123_400, "COP", "es-CO"))).toBe("$1.234,00");
   });
 
   it("shows a no-decimal currency without centavos and a yen without decimals", () => {
-    expect(spaced(formatMoney(1_234_567, "CLP", "es-CL"))).toContain("1.234.567");
-    expect(spaced(formatMoney(8_000_000, "JPY", "ja-JP"))).toContain("8,000,000");
-    expect(spaced(formatMoney(8_000_000, "JPY", "ja-JP"))).not.toContain(".");
+    expect(noSpace(formatMoney(1_234_567, "CLP", "es-CL"))).toBe("$1.234.567");
+    expect(noSpace(formatMoney(8_000_000, "JPY", "ja-JP"))).toBe("￥8,000,000");
   });
 
   it("never converts without a rate", () => {

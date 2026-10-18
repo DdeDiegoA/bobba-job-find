@@ -83,11 +83,21 @@ export function majorUnits(amountMinor: number, currency: string): number {
   return amountMinor / minorUnitScale(currency);
 }
 
-/** Format an amount in its own currency for `locale`. */
+/**
+ * Format an amount in its own currency for `locale`.
+ *
+ * The digit count is the currency's own exponent, never the runtime's CLDR
+ * data: ICU 77 gives COP two decimals and ICU 78 none, which would drop the
+ * cents on newer webviews. CLP and JPY still show none; only the exponent comes
+ * from the table, so nothing is forced to two.
+ */
 export function formatMoney(amountMinor: number, currency: string, locale: string): string {
+  const exponent = minorUnitExponent(currency);
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: currency.toUpperCase(),
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
   }).format(majorUnits(amountMinor, currency));
 }
 

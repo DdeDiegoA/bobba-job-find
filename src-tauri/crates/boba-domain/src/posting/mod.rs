@@ -58,6 +58,8 @@ pub struct Money {
 /// never with a hard-coded 100: CLP, JPY and KRW have none, and the Gulf
 /// currencies have three. A code the table does not name falls back to two,
 /// which is the ISO default (and covers USD, EUR and COP).
+///
+/// Mirrored in `src/lib/format` (`minorUnitExponent`); keep the two in sync.
 pub fn minor_unit_exponent(currency: &str) -> u32 {
     match currency.trim().to_ascii_uppercase().as_str() {
         // ISO-4217 currencies with no minor unit.
