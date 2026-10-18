@@ -1,0 +1,9 @@
+{
+  "title": "Connections",
+  "subtitle": "Where Boba looks for offers, and how it sends your applications.",
+  "session.title": "Session boards",
+  "session.hint": "Turning on a session board lets Boba use your own signed-in session. Read the warning first: some platforms restrict or ban automated accounts.",
+  "session.empty.title": "No session boards yet",
+  "session.empty.hint": "A Source that supports session boards appears here once it is registered.",
+  "session.toggle": "Session settings for {source}"
+}

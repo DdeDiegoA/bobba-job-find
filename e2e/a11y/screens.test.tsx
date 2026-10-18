@@ -15,6 +15,7 @@ import {
   events,
 } from "@/lib/ipc/bindings";
 import KillSwitch from "@/app/header/kill-switch";
+import ConnectionsIndex from "@/features/connections";
 import OfferDetail from "@/features/offer";
 import SettingsApplyingRules from "@/features/settings/applying/rules";
 import StudioIndex from "@/features/studio";
@@ -61,6 +62,21 @@ vi.mock("@/lib/ipc/bindings", () => ({
     runReportLatest: vi.fn(),
     runReportRetry: vi.fn(),
     statsFunnel: vi.fn(() => new Promise(() => undefined)),
+    sourcesCatalogue: vi.fn(),
+    sourcesTestRss: vi.fn(),
+    sourcesAddRss: vi.fn(),
+    sourcesRemoveRss: vi.fn(),
+    emailAccounts: vi.fn(),
+    emailConnectOutlook: vi.fn(),
+    emailConnectGmail: vi.fn(),
+    emailConnectImapSmtp: vi.fn(),
+    emailSetMode: vi.fn(),
+    emailDisconnect: vi.fn(),
+    sessionSnapshot: vi.fn(),
+    sessionOptIn: vi.fn(),
+    sessionOptOut: vi.fn(),
+    sessionSignOut: vi.fn(),
+    sessionResume: vi.fn(),
   },
   events: {
     runReportProgressed: { listen: vi.fn(() => Promise.resolve(() => undefined)) },
@@ -318,6 +334,51 @@ function wireFixtures() {
     ok({ settings: { hold_minutes: 30 }, items: [], rules: [] }) as never,
   );
   vi.mocked(commands.runReportLatest).mockReturnValue(ok(null) as never);
+  vi.mocked(commands.sourcesCatalogue).mockReturnValue(
+    ok([
+      {
+        id: "remotive",
+        name: "Remotive",
+        source_type: "feed",
+        markets: ["remote"],
+        risk_tier: "safe",
+        custom: false,
+        enabled: true,
+        status: "ok",
+        last_run: null,
+        offers_found: 0,
+        last_error: null,
+        consecutive_failures: 0,
+        attribution: null,
+        auto_opt_in: false,
+      },
+      {
+        id: "linkedin",
+        name: "LinkedIn",
+        source_type: "session_board",
+        markets: ["global"],
+        risk_tier: "prohibited_automation",
+        custom: false,
+        enabled: false,
+        status: "ok",
+        last_run: null,
+        offers_found: 0,
+        last_error: null,
+        consecutive_failures: 0,
+        attribution: null,
+        auto_opt_in: false,
+      },
+    ]) as never,
+  );
+  vi.mocked(commands.emailAccounts).mockReturnValue(ok([]));
+  vi.mocked(commands.sessionSnapshot).mockReturnValue(
+    ok({
+      warning_version: "v1",
+      cookie_protection: "macos_keychain",
+      requires_extra_ack: false,
+      boards: [],
+    }) as never,
+  );
 }
 
 function providers(children: ReactNode, path = "/") {
@@ -569,6 +630,25 @@ describe("Applying (AC1)", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(enable);
+  });
+});
+
+describe("Connections (AC1)", () => {
+  it("renders no accessibility violations", async () => {
+    expectClean(
+      await audit(<ConnectionsIndex />, "/connections", () =>
+        screen.findByRole("heading", { name: "Remotive" }),
+      ),
+    );
+  });
+
+  it("keeps one page heading and one heading per section", async () => {
+    render(providers(<ConnectionsIndex />, "/connections"));
+    await screen.findByRole("heading", { name: "Sources", level: 2 });
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Sources", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /^Email/, level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Session boards", level: 2 })).toBeTruthy();
   });
 });
 

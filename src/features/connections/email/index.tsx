@@ -617,7 +617,7 @@ export default function ConnectionsEmail() {
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
       <div className="flex flex-col gap-1">
-        <h1 className="font-display text-2xl text-fg">{t("title")}</h1>
+        <h2 className="font-display text-2xl text-fg">{t("title")}</h2>
         <p className="text-sm text-fg-muted">{t("subtitle")}</p>
       </div>
 
