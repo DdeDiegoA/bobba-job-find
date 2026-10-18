@@ -17,6 +17,7 @@ import {
 import KillSwitch from "@/app/header/kill-switch";
 import ConnectionsIndex from "@/features/connections";
 import OfferDetail from "@/features/offer";
+import SettingsAiEngine from "@/features/settings/ai-engine";
 import SettingsApplyingRules from "@/features/settings/applying/rules";
 import SettingsNotifications from "@/features/settings/notifications";
 import StudioIndex from "@/features/studio";
@@ -50,6 +51,12 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyView: vi.fn(),
     applyExportPdfs: vi.fn(),
     applyRulesSnapshot: vi.fn(),
+    agentBudgetSnapshot: vi.fn(),
+    agentBudgetSave: vi.fn(),
+    agentEngineSnapshot: vi.fn(),
+    agentEngineChoose: vi.fn(),
+    agentModels: vi.fn(),
+    agentTestCall: vi.fn(),
     notificationsSnapshot: vi.fn(),
     notificationsSave: vi.fn(),
     autostartStatus: vi.fn(),
@@ -333,6 +340,38 @@ function wireFixtures() {
     }),
   );
   vi.mocked(commands.applyRulesSnapshot).mockReturnValue(ok(rulesSnapshot()));
+  vi.mocked(commands.agentBudgetSnapshot).mockReturnValue(
+    ok({
+      offers_per_run: 30,
+      max_offers_per_run: 500,
+      limits: [
+        { task: "extract_postings", max_turns: 30, max_tool_calls: 60, wall_clock_secs: 600 },
+      ],
+    }) as never,
+  );
+  vi.mocked(commands.agentBudgetSave).mockImplementation((value) => ok(value) as never);
+  vi.mocked(commands.agentEngineSnapshot).mockReturnValue(
+    ok({
+      engines: [
+        {
+          cli: "claude_code",
+          name: "Claude Code",
+          installed: true,
+          version: "2.1.301",
+          path: "/usr/local/bin/claude",
+          health: "healthy",
+          install_url: "https://example.test/claude",
+          unsupported_tasks: [],
+        },
+      ],
+      chosen: null,
+    }) as never,
+  );
+  vi.mocked(commands.agentEngineChoose).mockImplementation(
+    (cli, model) => ok({ cli, model }) as never,
+  );
+  vi.mocked(commands.agentModels).mockReturnValue(ok(["sonnet"]) as never);
+  vi.mocked(commands.agentTestCall).mockImplementation(() => new Promise(() => undefined) as never);
   vi.mocked(commands.notificationsSnapshot).mockReturnValue(
     ok({
       events: { digest: true, outbox: true, errors: true },
@@ -695,6 +734,27 @@ describe("Kill Switch (AC1)", () => {
     const { container } = render(providers(<KillSwitch />));
     await screen.findByRole("status");
     expectClean(auditTree(container));
+  });
+});
+
+describe("Settings → AI engine (FX7 AC1)", () => {
+  it("renders no accessibility violations, the engine picker included", async () => {
+    expectClean(
+      await audit(<SettingsAiEngine />, "/settings/ai-engine", () =>
+        screen.findByRole("button", { name: "Save engine" }),
+      ),
+    );
+  });
+
+  it("labels the CLI choice, the model field, Test and Save", async () => {
+    render(providers(<SettingsAiEngine />, "/settings/ai-engine"));
+
+    expect(await screen.findByRole("radio", { name: /Claude Code/ })).toBeTruthy();
+    const model = await screen.findByLabelText("Model");
+    expect(model.tagName).toBe("INPUT");
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeTruthy();
+    // Save is the one write, and it starts off until a test passes (AC3).
+    expect(screen.getByRole("button", { name: "Save engine" })).toHaveProperty("disabled", true);
   });
 });
 
