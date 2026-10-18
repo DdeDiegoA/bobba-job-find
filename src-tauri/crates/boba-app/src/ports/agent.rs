@@ -34,13 +34,17 @@ pub enum AgentTaskKind {
     AnswerQuestions,
     ClassifyEmails,
     TranslateProfile,
+    /// One existing fact rewritten as a suggestion (FX10a). The input is the
+    /// user's own fact, but the output is agent text that rewrites it: the run
+    /// takes the lockdown gate like untrusted work (ADR-010).
+    ImproveFact,
 }
 
 impl AgentTaskKind {
     /// Every kind, in the order the UI lists them. Mirrors
     /// `boba_mcp_proto::tool::ALL_TASKS`: a task the catalog does not know is a
     /// task the core cannot run.
-    pub const ALL: [AgentTaskKind; 9] = [
+    pub const ALL: [AgentTaskKind; 10] = [
         AgentTaskKind::ProfileImport,
         AgentTaskKind::ProfileGaps,
         AgentTaskKind::ExtractPostings,
@@ -50,6 +54,7 @@ impl AgentTaskKind {
         AgentTaskKind::AnswerQuestions,
         AgentTaskKind::ClassifyEmails,
         AgentTaskKind::TranslateProfile,
+        AgentTaskKind::ImproveFact,
     ];
 
     /// Stable id used in the DB (`agent_run.task_kind`) and diagnostics.
@@ -64,6 +69,7 @@ impl AgentTaskKind {
             AgentTaskKind::AnswerQuestions => "answer_questions",
             AgentTaskKind::ClassifyEmails => "classify_emails",
             AgentTaskKind::TranslateProfile => "translate_profile",
+            AgentTaskKind::ImproveFact => "improve_fact",
         }
     }
 
@@ -71,6 +77,9 @@ impl AgentTaskKind {
     /// only on a CLI with verified `tool_lockdown`; that gate is enforced where
     /// the task is dispatched, not here.
     pub const fn reads_untrusted(self) -> bool {
+        // FX10a: `ImproveFact` is deliberately outside this allowlist. Its
+        // input is the user's own fact, but its output rewrites that fact as
+        // agent text, so the run must prove its tool lockdown first.
         !matches!(
             self,
             AgentTaskKind::ProfileImport

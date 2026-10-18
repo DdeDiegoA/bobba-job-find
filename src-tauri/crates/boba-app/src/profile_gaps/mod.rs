@@ -30,6 +30,9 @@ pub enum ProfileGapsError {
     /// The proposal was already confirmed or deleted (another window).
     #[error("unknown proposal: {0}")]
     UnknownProposal(String),
+    /// The fact moved past the revision a draft was written against (FX10a).
+    #[error("stale proposal: {0}")]
+    Stale(String),
     /// The question is not one the Profile is missing (a stale step, a newer
     /// build's key).
     #[error("unknown question: {0}")]
@@ -49,6 +52,7 @@ impl ProfileGapsError {
             Self::Profile(error) => error.message_key(),
             Self::Run(_) => "errors.profile_gaps.run",
             Self::UnknownProposal(_) => "errors.profile_gaps.unknown_proposal",
+            Self::Stale(_) => "errors.profile_gaps.stale",
             Self::UnknownGap(_) => "errors.profile_gaps.unknown_gap",
             Self::UnknownItem(_) => "errors.profile_gaps.unknown_item",
         }

@@ -196,8 +196,8 @@ pub fn facts_current(conn: &Connection) -> rusqlite::Result<Vec<ProfileFact>> {
 pub fn proposal_append(conn: &Connection, proposal: &FactProposal) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO profile_fact_proposal (id, item_id, kind, text_en, text_es, evidence, \
-         detail_json, source_excerpt, untrusted_origin, agent_run_id, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         detail_json, source_excerpt, base_revision, untrusted_origin, agent_run_id, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             proposal.id,
             proposal.item_id,
@@ -207,6 +207,7 @@ pub fn proposal_append(conn: &Connection, proposal: &FactProposal) -> rusqlite::
             proposal.draft.evidence,
             proposal.draft.detail_json,
             proposal.source_excerpt,
+            proposal.base_revision,
             proposal.untrusted_origin_flag(),
             proposal.agent_run_id,
             proposal.created_at,
@@ -219,7 +220,7 @@ pub fn proposal_append(conn: &Connection, proposal: &FactProposal) -> rusqlite::
 pub fn proposals_pending(conn: &Connection) -> rusqlite::Result<Vec<FactProposal>> {
     let mut stmt = conn.prepare(
         "SELECT id, item_id, kind, text_en, text_es, evidence, detail_json, source_excerpt, \
-         untrusted_origin, agent_run_id, created_at \
+         base_revision, untrusted_origin, agent_run_id, created_at \
          FROM profile_fact_proposal ORDER BY rowid DESC",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -236,9 +237,10 @@ pub fn proposals_pending(conn: &Connection) -> rusqlite::Result<Vec<FactProposal
                 detail_json: row.get(6)?,
             },
             source_excerpt: row.get(7)?,
-            untrusted_origin: row.get::<_, i64>(8)? != 0,
-            agent_run_id: row.get(9)?,
-            created_at: row.get(10)?,
+            base_revision: row.get(8)?,
+            untrusted_origin: row.get::<_, i64>(9)? != 0,
+            agent_run_id: row.get(10)?,
+            created_at: row.get(11)?,
         })
     })?;
     rows.collect()
@@ -338,6 +340,8 @@ mod tests {
         let conn = Connection::open_in_memory().expect("open");
         conn.execute_batch(include_str!("../../migrations/0007_profile.sql"))
             .expect("apply 0007");
+        conn.execute_batch(include_str!("../../migrations/0029_profile_improve.sql"))
+            .expect("apply 0029");
         conn
     }
 
@@ -502,6 +506,7 @@ mod tests {
                 ..FactDraft::new(FactKind::Certification)
             },
             source_excerpt: Some("AWS Certified".to_string()),
+            base_revision: Some("01REV1".to_string()),
             untrusted_origin: untrusted,
             agent_run_id: "run_01".to_string(),
             created_at: "2026-10-15T12:00:00.000Z".to_string(),
@@ -512,6 +517,8 @@ mod tests {
         let pending = proposals_pending(&conn).unwrap();
         assert_eq!(pending.len(), 2);
         assert_eq!(pending[0].id, "01P2", "newest first");
+        // FX10a: the revision an improvement was written against round-trips.
+        assert_eq!(pending[0].base_revision.as_deref(), Some("01REV1"));
         assert!(
             pending[1].untrusted_origin,
             "a posting-sourced proposal is untrusted"
@@ -608,6 +615,7 @@ mod tests {
                 ..FactDraft::new(FactKind::Eligibility)
             },
             source_excerpt: None,
+            base_revision: None,
             untrusted_origin: true,
             agent_run_id: "run_01".to_string(),
             created_at: created.created_at.clone(),

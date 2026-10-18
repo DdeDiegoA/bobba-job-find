@@ -29,6 +29,7 @@ const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   evidence: null,
   detail_json: "{}",
   source_excerpt: "Backend Engineer — Nimbus, 2020–present",
+  base_revision: null,
   untrusted_origin: false,
   created_at: "2026-10-17T09:00:00.000Z",
   ...over,

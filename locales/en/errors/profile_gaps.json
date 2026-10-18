@@ -6,5 +6,6 @@
   "errors.profile_gaps.unknown_proposal": "That suggestion is no longer waiting for review.",
   "errors.profile_gaps.unknown_gap": "That question is no longer open. Refresh the step.",
   "errors.profile_gaps.unknown_item": "That profile fact no longer exists.",
-  "errors.profile_gaps.no_engine": "Choose an AI engine in the previous step before asking Boba."
+  "errors.profile_gaps.no_engine": "Choose an AI engine in the previous step before asking Boba.",
+  "errors.profile_gaps.stale": "That suggestion is out of date after your last edit. Ask for a fresh one."
 }

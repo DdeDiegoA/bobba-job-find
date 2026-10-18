@@ -6,5 +6,6 @@
   "errors.profile_gaps.unknown_proposal": "Esa sugerencia ya no está esperando revisión.",
   "errors.profile_gaps.unknown_gap": "Esa pregunta ya no está abierta. Actualiza el paso.",
   "errors.profile_gaps.unknown_item": "Ese dato del perfil ya no existe.",
-  "errors.profile_gaps.no_engine": "Elige un motor de IA en el paso anterior antes de pedir ayuda a Boba."
+  "errors.profile_gaps.no_engine": "Elige un motor de IA en el paso anterior antes de pedir ayuda a Boba.",
+  "errors.profile_gaps.stale": "Esa sugerencia está desactualizada tras tu última edición. Pide una nueva."
 }

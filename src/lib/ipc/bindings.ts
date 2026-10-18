@@ -542,6 +542,33 @@ export const commands = {
   /**  Delete a drafted variant: it never becomes a fact (AC3). */
   profileGapsDiscard: (id: string) =>
     typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_gaps_discard", { id })),
+  /**
+   *  Run one `improve_fact` pass for a fact (AC1, AC2). Runs off the UI thread:
+   *  the run waits on an agent CLI and can take minutes (S3.5 review F1).
+   */
+  profileImproveStart: (itemId: string, language: string) =>
+    typedError<ImproveOutcome, AppError_Serialize>(
+      __TAURI_INVOKE("profile_improve_start", { itemId, language }),
+    ),
+  /**
+   *  Confirm one suggestion — as proposed, or with the user's edit (AC2). A
+   *  stale suggestion is refused with nothing written (AC3).
+   */
+  profileImproveConfirm: (
+    id: string,
+    edit: {
+      text_en: string | null;
+      text_es: string | null;
+      evidence: string | null;
+      detail_json: string | null;
+    } | null,
+  ) =>
+    typedError<ProfileSnapshot, AppError_Serialize>(
+      __TAURI_INVOKE("profile_improve_confirm", { id, edit }),
+    ),
+  /**  Reject one suggestion: it never becomes a fact (FX10b's Reject). */
+  profileImproveDiscard: (id: string) =>
+    typedError<null, AppError_Serialize>(__TAURI_INVOKE("profile_improve_discard", { id })),
   /**  The rules and the global Auto settings (AC1). */
   applyRulesSnapshot: () =>
     typedError<RulesSnapshot, AppError_Serialize>(__TAURI_INVOKE("apply_rules_snapshot")),
@@ -1909,6 +1936,15 @@ export type ImportOutcome = {
 };
 
 /**
+ *  What one improvement run did: the suggestions waiting for review. Nothing
+ *  was saved to the profile.
+ */
+export type ImproveOutcome = {
+  run_id: string;
+  proposals: ProposalView[];
+};
+
+/**
  *  What one interview did: the questions to ask and the fact proposals the
  *  run made from the context it was given (nothing is saved to the profile).
  */
@@ -2350,6 +2386,11 @@ export type ProposalView = {
   detail_json: string;
   /**  The CV words the fact was read from (AC1). */
   source_excerpt: string | null;
+  /**
+   *  The revision an improvement was written against (FX10a), `None` when
+   *  the proposal does not revise existing text.
+   */
+  base_revision: string | null;
   /**  Always `false` for a CV import (AC4): the user's own input. */
   untrusted_origin: boolean;
   created_at: string;

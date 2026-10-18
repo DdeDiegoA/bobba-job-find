@@ -13,6 +13,8 @@
 //! * a **restore** is also an edit: it appends the earlier text as the newest
 //!   revision, so nothing a document cited is ever rewritten.
 
+pub mod improve;
+
 use std::sync::Arc;
 
 use boba_domain::profile::{
@@ -479,6 +481,7 @@ mod tests {
             item_id: None,
             draft: FactDraft::new(FactKind::Skill),
             source_excerpt: Some("Rust".to_string()),
+            base_revision: None,
             untrusted_origin: false,
             agent_run_id: "run_01".to_string(),
             created_at: "2026-10-15T11:00:00.000Z".to_string(),

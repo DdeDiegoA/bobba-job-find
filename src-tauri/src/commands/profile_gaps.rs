@@ -78,6 +78,7 @@ fn to_app(error: ProfileGapsError) -> AppError {
         ProfileGapsError::UnknownGap(_)
         | ProfileGapsError::UnknownItem(_)
         | ProfileGapsError::UnknownProposal(_) => ErrorCode::NotFound,
+        ProfileGapsError::Stale(_) => ErrorCode::Conflict,
         ProfileGapsError::Profile(
             ProfileError::UnknownItem(_) | ProfileError::UnknownRevision(_),
         ) => ErrorCode::NotFound,

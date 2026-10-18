@@ -459,6 +459,9 @@ mod tests {
                 AgentTaskKind::ClassifyEmails,
                 Some(Fallback::DeterministicRules),
             ),
+            // FX10a: agent text rewrites the user's fact, so the run must
+            // prove its lockdown even though the input is the user's own.
+            (AgentTaskKind::ImproveFact, None),
         ] {
             assert_eq!(
                 support(kind, CliKind::Aider, "1.0.0", &Capabilities::default()),
@@ -528,6 +531,7 @@ mod tests {
             AgentTaskKind::ReviewApplication,
             AgentTaskKind::ClassifyEmails,
             AgentTaskKind::TranslateProfile,
+            AgentTaskKind::ImproveFact,
         ] {
             assert_eq!(
                 support(kind, CliKind::ClaudeCode, "2.1.289", &claude_caps()),

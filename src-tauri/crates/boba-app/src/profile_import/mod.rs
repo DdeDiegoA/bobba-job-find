@@ -166,6 +166,9 @@ pub struct ProposalView {
     pub detail_json: String,
     /// The CV words the fact was read from (AC1).
     pub source_excerpt: Option<String>,
+    /// The revision an improvement was written against (FX10a), `None` when
+    /// the proposal does not revise existing text.
+    pub base_revision: Option<String>,
     /// Always `false` for a CV import (AC4): the user's own input.
     pub untrusted_origin: bool,
     pub created_at: String,
@@ -182,6 +185,7 @@ impl From<&FactProposal> for ProposalView {
             evidence: proposal.draft.evidence.clone(),
             detail_json: proposal.draft.detail_json.clone(),
             source_excerpt: proposal.source_excerpt.clone(),
+            base_revision: proposal.base_revision.clone(),
             untrusted_origin: proposal.untrusted_origin,
             created_at: proposal.created_at.clone(),
         }
@@ -215,6 +219,10 @@ pub enum ImportError {
     /// list).
     #[error("unknown proposal: {0}")]
     UnknownProposal(String),
+    /// The item moved past the revision an improvement was written against
+    /// (FX10a): the newer edit wins and nothing is written.
+    #[error("stale improvement proposal: {0}")]
+    Stale(String),
     /// The run ended without proposing (FR-21): auth, quota, timeout, crash.
     #[error("the import run failed: {0:?}")]
     Run(FailureReason),
@@ -229,6 +237,7 @@ impl ImportError {
             Self::Text(error) => error.message_key(),
             Self::Contract(_) => "errors.profile_import.contract",
             Self::UnknownProposal(_) => "errors.profile_import.unknown_proposal",
+            Self::Stale(_) => "errors.profile_import.stale",
             Self::Run(_) => "errors.profile_import.run",
         }
     }
@@ -351,6 +360,18 @@ impl ImportService {
             .into_iter()
             .find(|proposal| proposal.id == proposal_id)
             .ok_or_else(|| ImportError::UnknownProposal(proposal_id.to_string()))?;
+        // FX10a: an improvement is tied to the revision the run read. Once the
+        // item has moved past it the suggestion is stale — the newer edit wins
+        // and nothing is written.
+        if let Some(base) = proposal.base_revision.as_deref() {
+            let current = match proposal.item_id.as_deref() {
+                Some(item_id) => self.repo.fact_latest(item_id)?,
+                None => None,
+            };
+            if current.as_ref().map(|fact| fact.id.as_str()) != Some(base) {
+                return Err(ImportError::Stale(proposal_id.to_string()));
+            }
+        }
         let draft = proposal.draft;
         let (text_en, text_es, evidence, detail_json) = match edit {
             None => (
@@ -417,6 +438,8 @@ impl ImportService {
                     .unwrap_or_else(|| "{}".to_string()),
             },
             source_excerpt: Some(excerpt.to_string()),
+            // A CV import creates a new item: there is no revision to tie to.
+            base_revision: None,
             untrusted_origin: untrusted,
             agent_run_id: run_id.to_string(),
             created_at: self.clock.now_rfc3339(),
@@ -585,6 +608,7 @@ mod tests {
                 detail_json: "{}".to_string(),
             },
             source_excerpt: None,
+            base_revision: None,
             untrusted_origin: false,
             agent_run_id: "run_translate".to_string(),
             created_at: "2026-10-18T09:00:00.000Z".to_string(),
@@ -609,6 +633,7 @@ mod tests {
                 detail_json: "{}".to_string(),
             },
             source_excerpt: Some("Skills: Rust".to_string()),
+            base_revision: None,
             untrusted_origin: false,
             agent_run_id: "run_import".to_string(),
             created_at: "2026-10-18T09:00:00.000Z".to_string(),
@@ -911,6 +936,111 @@ mod tests {
         assert_eq!(error.message_key(), "errors.profile.no_variant");
         // The proposal is still there for the user to fix.
         assert_eq!(profile.proposals_pending().unwrap().len(), 1);
+    }
+
+    // FX10a AC3: an improvement suggestion tied to a revision is refused once
+    // the item has moved past it — nothing is written and the proposal stays
+    // for the user to discard.
+    #[test]
+    fn a_stale_improvement_proposal_is_refused_and_writes_nothing() {
+        let agents = Arc::new(FakeAgent::scripted(vec![
+            proposal(json!([an_experience()])),
+            AgentEvent::Finished { exit_code: 0 },
+        ]));
+        let (service, profile) = service(agents);
+        let id = service.start(request()).expect("import").proposals[0]
+            .id
+            .clone();
+        service
+            .confirm(&id, None)
+            .expect("confirm the base revision");
+        let base = profile.revisions()[0].id.clone();
+        let item = profile.revisions()[0].item_id.clone();
+
+        // The agent read revision `base`; then the user edited the same item.
+        profile.seed_proposal(FactProposal {
+            id: "01STALE".to_string(),
+            item_id: Some(item.clone()),
+            draft: FactDraft {
+                kind: FactKind::Experience,
+                text_en: Some("Backend engineer, lead".to_string()),
+                text_es: None,
+                evidence: None,
+                detail_json: "{}".to_string(),
+            },
+            source_excerpt: None,
+            base_revision: Some(base),
+            untrusted_origin: true,
+            agent_run_id: "run_improve".to_string(),
+            created_at: "2026-10-18T09:00:00.000Z".to_string(),
+        });
+        ProfileService::new(
+            profile.clone(),
+            Arc::new(crate::system::FixedClock::new("2026-10-18T10:00:00.000Z")),
+        )
+        .save(FactRevisionInput {
+            item_id: Some(item),
+            kind: "experience".to_string(),
+            text_en: Some("Backend engineer, staff".to_string()),
+            text_es: None,
+            evidence: None,
+            detail_json: None,
+        })
+        .expect("edit the item past the suggestion");
+
+        let before = profile.revisions().len();
+        let error = service.confirm("01STALE", None).unwrap_err();
+        assert_eq!(error.message_key(), "errors.profile_import.stale");
+        assert_eq!(
+            profile.revisions().len(),
+            before,
+            "a stale confirm must write nothing"
+        );
+        assert_eq!(
+            profile.proposals_pending().unwrap().len(),
+            1,
+            "the proposal stays for the user to discard"
+        );
+    }
+
+    // A suggestion whose base is still current confirms normally.
+    #[test]
+    fn an_improvement_proposal_against_the_current_revision_confirms() {
+        let agents = Arc::new(FakeAgent::scripted(vec![
+            proposal(json!([an_experience()])),
+            AgentEvent::Finished { exit_code: 0 },
+        ]));
+        let (service, profile) = service(agents);
+        let id = service.start(request()).expect("import").proposals[0]
+            .id
+            .clone();
+        service
+            .confirm(&id, None)
+            .expect("confirm the base revision");
+        let base = profile.revisions()[0].id.clone();
+        let item = profile.revisions()[0].item_id.clone();
+
+        profile.seed_proposal(FactProposal {
+            id: "01FRESH".to_string(),
+            item_id: Some(item),
+            draft: FactDraft {
+                kind: FactKind::Experience,
+                text_en: Some("Backend engineer, lead".to_string()),
+                text_es: None,
+                evidence: None,
+                detail_json: "{}".to_string(),
+            },
+            source_excerpt: None,
+            base_revision: Some(base),
+            untrusted_origin: true,
+            agent_run_id: "run_improve".to_string(),
+            created_at: "2026-10-18T09:00:00.000Z".to_string(),
+        });
+
+        let snapshot = service.confirm("01FRESH", None).expect("confirm");
+        assert_eq!(snapshot.profile_version, 2);
+        let latest = profile.revisions().last().cloned().expect("revision");
+        assert_eq!(latest.text_en.as_deref(), Some("Backend engineer, lead"));
     }
 
     #[test]

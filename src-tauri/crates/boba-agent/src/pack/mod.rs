@@ -27,7 +27,7 @@ const SYSTEM_MD: &str = include_str!(concat!(
 /// Every skill the pack ships, by directory name and embedded source. Adding a
 /// skill is adding a line here; [`version`] hashes them all, so adding one is
 /// also a new pack version.
-const SKILLS: [(&str, &str); 9] = [
+const SKILLS: [(&str, &str); 10] = [
     (
         "answer_questions",
         include_str!(concat!(
@@ -47,6 +47,13 @@ const SKILLS: [(&str, &str); 9] = [
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../agent-pack/skills/extract_postings/SKILL.md"
+        )),
+    ),
+    (
+        "improve_fact",
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../agent-pack/skills/improve_fact/SKILL.md"
         )),
     ),
     (

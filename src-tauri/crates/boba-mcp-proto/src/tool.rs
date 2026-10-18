@@ -24,9 +24,10 @@ pub const REVIEW_APPLICATION: &str = "review_application";
 pub const ANSWER_QUESTIONS: &str = "answer_questions";
 pub const CLASSIFY_EMAILS: &str = "classify_emails";
 pub const TRANSLATE_PROFILE: &str = "translate_profile";
+pub const IMPROVE_FACT: &str = "improve_fact";
 
 /// Every task kind, in the order the UI lists them.
-pub const ALL_TASKS: [&str; 9] = [
+pub const ALL_TASKS: [&str; 10] = [
     PROFILE_IMPORT,
     PROFILE_GAPS,
     EXTRACT_POSTINGS,
@@ -36,6 +37,7 @@ pub const ALL_TASKS: [&str; 9] = [
     ANSWER_QUESTIONS,
     CLASSIFY_EMAILS,
     TRANSLATE_PROFILE,
+    IMPROVE_FACT,
 ];
 
 /// How a tool writes, if it writes at all. Every write is a proposal or a
@@ -93,6 +95,7 @@ pub const TOOLS: &[ToolSpec] = &[
             REVIEW_APPLICATION,
             ANSWER_QUESTIONS,
             TRANSLATE_PROFILE,
+            IMPROVE_FACT,
         ],
         untrusted: false,
         about: "The user's confirmed profile facts, with their stable fact ids.",
@@ -176,6 +179,14 @@ pub const TOOLS: &[ToolSpec] = &[
         untrusted: false,
         about: "Propose ES/EN variants of profile facts for the user to confirm.",
         input_schema: r#"{"type":"object","properties":{"translations":{"type":"array","items":{"type":"object"}}},"required":["translations"],"additionalProperties":false}"#,
+    },
+    ToolSpec {
+        name: "propose_fact_improvements",
+        kind: ToolKind::WriteProposal,
+        tasks: &[IMPROVE_FACT],
+        untrusted: false,
+        about: "Propose a rewritten version of one profile fact for the user to confirm.",
+        input_schema: r#"{"type":"object","properties":{"improvements":{"type":"array","items":{"type":"object"}}},"required":["improvements"],"additionalProperties":false}"#,
     },
     ToolSpec {
         name: "propose_posting_features",
@@ -347,8 +358,9 @@ mod tests {
         }
         let writes = TOOLS.iter().filter(|tool| tool.kind.is_write()).count();
         let reads = TOOLS.len() - writes;
-        // S3.6 added `propose_gap_questions`, so the catalog holds nine writes.
-        assert_eq!((reads, writes), (8, 9));
+        // S3.6 added `propose_gap_questions` and FX10a `propose_fact_improvements`,
+        // so the catalog holds ten writes.
+        assert_eq!((reads, writes), (8, 10));
     }
 
     #[test]

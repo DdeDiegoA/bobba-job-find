@@ -8,5 +8,6 @@
   "errors.profile_import.unknown_proposal": "Esa sugerencia ya no está esperando revisión.",
   "errors.profile_import.run": "La importación no terminó. Puede que el motor de IA no tenga sesión o cuota.",
   "errors.profile_import.no_engine": "Elige un motor de IA en el paso anterior antes de importar tu CV.",
-  "errors.profile_import.nothing": "Elige un archivo de CV o pega el texto de tu CV primero."
+  "errors.profile_import.nothing": "Elige un archivo de CV o pega el texto de tu CV primero.",
+  "errors.profile_import.stale": "Esa sugerencia es anterior a tu última edición. Pide una nueva y revísala otra vez."
 }

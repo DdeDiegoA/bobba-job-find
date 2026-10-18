@@ -1,0 +1,9 @@
+{
+  "errors.profile_improve.store": "Your profile could not be read or saved.",
+  "errors.profile_improve.unknown_item": "That profile fact no longer exists.",
+  "errors.profile_improve.unknown_proposal": "That suggestion is no longer waiting for review.",
+  "errors.profile_improve.stale": "That suggestion was made before your last edit. Ask for a fresh one and review it again.",
+  "errors.profile_improve.contract": "The agent sent a suggestion Boba couldn't read. Ask again.",
+  "errors.profile_improve.run": "The suggestion didn't finish. The AI engine may be signed out or out of quota.",
+  "errors.profile_improve.no_engine": "Choose an AI engine before asking Boba to improve a fact."
+}
