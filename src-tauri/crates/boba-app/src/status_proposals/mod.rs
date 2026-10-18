@@ -922,7 +922,7 @@ fn prompt(messages: &[(StoredMessage, Vec<CandidateView>)]) -> String {
          implies and call `propose_status_change` with: the message's `email_id`; an \
          `app_id` from that message's listed applications; a `status` of `applied`, \
          `interview`, `offer` or `rejected`; and as `quote` the exact line of the message \
-         that shows it, copied verbatim (at least 12 characters). Propose nothing when the \
+         that shows it, copied verbatim (at least 8 characters). Propose nothing when the \
          message does not clearly imply one of those statuses.\n",
     );
     for (message, candidates) in messages {
@@ -999,11 +999,12 @@ fn is_proposal(name: &str) -> bool {
 /// prefix.
 const MCP_SERVER_PREFIX: &str = "mcp__boba__";
 
-/// The shortest quote that can be evidence (FX22, L-3). A snippet such as `ok`
-/// or `chat` matches most lines of a message and shows the user nothing, so a
-/// shorter quote is refused however it was spelled. Counted in characters
-/// after trimming.
-const MIN_QUOTE_CHARS: usize = 12;
+/// The shortest quote that can be evidence (FX22, L-3; the floor was ruled by
+/// the orquestador on 2026-10-18). Eight characters keeps a real short
+/// rejection line — `We're sorry` — as the user's evidence, while still
+/// refusing a snippet such as `ok` or `chat` that matches most lines of a
+/// message and shows nothing. Counted in characters after trimming.
+const MIN_QUOTE_CHARS: usize = 8;
 
 /// The failure a run reported, if it reported one (FR-21).
 fn failure(events: &[AgentEvent]) -> Option<FailureReason> {

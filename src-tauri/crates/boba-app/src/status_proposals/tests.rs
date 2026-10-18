@@ -593,16 +593,36 @@ fn a_quote_shorter_than_the_minimum_is_refused() {
         "Hello",
         "We would love to set up a chat about the role.",
     );
+    // Eight characters is the floor: the shortest quote that still names
+    // something.
     assert_eq!(
-        verified_quote(&stored, "would love t").as_deref(),
+        verified_quote(&stored, "would lo").as_deref(),
         Some("We would love to set up a chat about the role.")
     );
-    for short in ["chat", "would love", "ok"] {
+    for short in ["would l", "chat", "ok"] {
         assert!(
             verified_quote(&stored, short).is_none(),
             "`{short}` must be too short to be evidence"
         );
     }
+}
+
+/// FX22 (orquestador ruling): the floor is 8, not 12, so a real short
+/// rejection line still verifies. `We're sorry` is 11 characters and is what
+/// a recruiter writes; `We're s` is 7 and is a snippet.
+#[test]
+fn a_real_short_rejection_line_still_verifies() {
+    let stored = message(
+        "msg_2",
+        "recruiting@acme.com",
+        "Update on your application",
+        "We're sorry, but the position has been filled.",
+    );
+    assert_eq!(
+        verified_quote(&stored, "We're sorry").as_deref(),
+        Some("We're sorry, but the position has been filled.")
+    );
+    assert!(verified_quote(&stored, "We're s").is_none());
 }
 
 /// FX22 (L-3): and the run's proposal is dropped, not stored, on a short
