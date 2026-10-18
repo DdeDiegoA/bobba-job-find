@@ -294,12 +294,19 @@ fn command_builder(
         };
 
         CommandSpec {
-            program: PathBuf::from(kind.binary_names()[0]),
+            // FIX1: the absolute path detection resolved. A GUI launch inherits
+            // `/usr/bin:/bin:…`, so a bare `claude`/`opencode` never spawned.
+            program: boba_agent::detect::resolve_program(kind),
+            // The pinned flags come **after** the prompt: Claude Code 2.1.302
+            // reads every word that follows `--allowedTools`/`--tools` as
+            // another value, so a pin placed before the positional prompt
+            // swallowed it. Same flags, same values — only the order moved, so
+            // ADR-010's lockdown is unchanged.
             args: wiring
                 .into_iter()
-                .chain(pinned.unwrap_or_default())
                 .chain(argv)
                 .chain(model)
+                .chain(pinned.unwrap_or_default())
                 .collect(),
             // The runtime sets `cwd` to the run's workspace and adds the endpoint
             // and token to the environment; argv never carries secrets.
@@ -1958,7 +1965,9 @@ mod tests {
 
             let spec = builder(&trusted, &sandbox);
             let kind = CliKind::ALL.into_iter().find(|k| k.id() == cli).unwrap();
-            assert_eq!(spec.program, PathBuf::from(kind.binary_names()[0]));
+            // FIX1: the CLI is spawned by the path detection resolved, not by a
+            // bare name a GUI launch's PATH cannot find.
+            assert_eq!(spec.program, boba_agent::detect::resolve_program(kind));
             // Exactly this run's MCP config, this CLI's pinned lockdown flags
             // (none for Gemini: it has no verified pinning yet), then the CLI's
             // own documented non-interactive argv.
@@ -1967,14 +1976,57 @@ mod tests {
                 sandbox.config.display().to_string(),
             ]
             .into_iter()
-            .chain(lockdown::pinned_args(kind, "profile_import").unwrap_or_default())
             .chain(kind.non_interactive_argv("extract the offers").unwrap())
+            .chain(lockdown::pinned_args(kind, "profile_import").unwrap_or_default())
             .collect();
             assert_eq!(spec.args, expected, "{cli}");
             // Secrets never travel in argv, and the runtime owns cwd.
             assert!(!spec.args.iter().any(|arg| arg.contains("a-token")));
             assert_eq!(spec.cwd, None);
         }
+    }
+
+    /// FIX1: Claude Code 2.1.302 reads every word after `--allowedTools` (and
+    /// after `--tools`) as another tool name, so a pinned flag placed before the
+    /// positional prompt swallowed the prompt and the test call failed with
+    /// "Input must be provided …". The prompt now precedes the pinned flags; the
+    /// lockdown flags themselves are untouched, so the gate is not weakened.
+    #[test]
+    fn the_prompt_precedes_the_pinned_flags_that_take_values() {
+        let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
+        let sandbox = run_sandbox("argv-order");
+        let task = task_of(
+            "claude_code",
+            boba_app::ports::agent::AgentTaskKind::ProfileImport,
+            InputTrust::User,
+        );
+        let spec = builder(&task, &sandbox);
+
+        let prompt = spec
+            .args
+            .iter()
+            .position(|arg| arg == &task.prompt)
+            .expect("the prompt is in the argv");
+        for consuming in ["--allowedTools", "--tools"] {
+            let flag = spec
+                .args
+                .iter()
+                .position(|arg| arg == consuming)
+                .unwrap_or_else(|| panic!("{consuming} is still pinned"));
+            assert!(
+                prompt < flag,
+                "{consuming} would swallow the prompt: {:?}",
+                spec.args
+            );
+        }
+        // The pin itself is unchanged: native tools are removed, and ours are
+        // allowed, with the MCP config read strictly from this run's file.
+        assert!(spec.args.contains(&"--strict-mcp-config".to_string()));
+        assert!(
+            spec.args
+                .windows(2)
+                .any(|pair| pair[0] == "--tools" && pair[1].is_empty())
+        );
     }
 
     /// S3.2 F1: the model the user picked is in the argv, as one entry per CLI,
@@ -2133,7 +2185,13 @@ mod tests {
 
         let builder = command_builder(Ok(PathBuf::from("/app/binaries/boba-mcp")));
         let spec = builder(&user, &run_sandbox("badge"));
-        assert_eq!(spec.program, PathBuf::from("claude"), "{spec:?}");
+        // FIX1: the resolved path (or the bare name when nothing was found),
+        // never a refusal.
+        assert_eq!(
+            spec.program,
+            boba_agent::detect::resolve_program(CliKind::ClaudeCode),
+            "{spec:?}"
+        );
         assert!(
             !spec.program.to_string_lossy().contains("boba-refused-"),
             "a user-input task must still run: {spec:?}"
@@ -2238,17 +2296,18 @@ mod tests {
 
         for cli in ["claude_code", "gemini_cli", "codex", "opencode"] {
             let spec = builder(&trusted(cli), &run_sandbox(&format!("wired-{cli}")));
-            assert_eq!(spec.program, PathBuf::from(cli_program(cli)), "{cli}");
+            let kind = CliKind::ALL
+                .into_iter()
+                .find(|kind| kind.id() == cli)
+                .expect("a known CLI");
+            // FIX1: the path detection resolved, else the bare name.
+            assert_eq!(
+                spec.program,
+                boba_agent::detect::resolve_program(kind),
+                "{cli}"
+            );
             assert!(!spec.args.is_empty(), "{cli}");
         }
-    }
-
-    fn cli_program(cli: &str) -> &'static str {
-        CliKind::ALL
-            .into_iter()
-            .find(|kind| kind.id() == cli)
-            .expect("a known CLI")
-            .binary_names()[0]
     }
 
     /// Codex takes config overrides instead of a config file, and OpenCode reads

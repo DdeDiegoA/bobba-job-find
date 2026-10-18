@@ -603,6 +603,9 @@ fn run_listing(program: &std::path::Path, args: &[&str]) -> String {
     use std::process::{Command, Stdio};
     let Ok(mut child) = Command::new(program)
         .args(args)
+        // FIX1: a GUI launch's own PATH cannot see the CLI's install dir or the
+        // `node` its shim needs; the resolved path can.
+        .env("PATH", boba_agent::detect::child_path())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

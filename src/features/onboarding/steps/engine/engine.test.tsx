@@ -196,7 +196,7 @@ describe("Engine step — pick a CLI and model (FR-2, FR-3, AC1)", () => {
     renderStep();
     fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
 
-    expect(await screen.findByText("The connection test failed.")).toBeTruthy();
+    expect(await screen.findByText("The connection test with Claude Code failed.")).toBeTruthy();
     // The reason is translated from the run's message key, never raw text.
     expect(screen.getByText(/sign in again/)).toBeTruthy();
     // The CLI's own words and what to do about them.
@@ -204,6 +204,56 @@ describe("Engine step — pick a CLI and model (FR-2, FR-3, AC1)", () => {
     expect(screen.getAllByText(/error: not logged in/).length).toBeGreaterThan(0);
     expect(screen.getByText(/log in, then test again/)).toBeTruthy();
     expect(answers().testedOk).toBe(false);
+  });
+
+  /// FIX1: a failed test used to dead-end the wizard — Next stayed disabled with
+  /// no way out. The failure now names the CLI, and Limited mode (S3.3) is the
+  /// way past it.
+  it("names the CLI in the failure and offers Limited mode as the way on (S3.3)", async () => {
+    vi.mocked(commands.agentTestCall).mockImplementation(() => ok(failed()));
+    renderStep();
+    fireEvent.click(await screen.findByRole("button", { name: "Test connection" }));
+
+    expect(await screen.findByText("The connection test with Claude Code failed.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue without an AI engine" }));
+
+    await waitFor(() => expect(answers().limitedMode).toBe(true));
+    // A pass was never recorded: Limited mode is an honest exit, not a fake one.
+    expect(answers().testedOk).toBe(false);
+    expect(engineStepIsValid(answers())).toBe(true);
+  });
+
+  it("still needs a pass and the data notice when no Limited mode was chosen", () => {
+    expect(engineStepIsValid({ testedOk: true, disclosureAck: true })).toBe(true);
+    expect(engineStepIsValid({ testedOk: true, disclosureAck: false })).toBe(false);
+    expect(engineStepIsValid({ testedOk: false, disclosureAck: false })).toBe(false);
+    expect(engineStepIsValid({ testedOk: false, disclosureAck: false, limitedMode: true })).toBe(
+      true,
+    );
+  });
+
+  /// The same way out exists when the probe finds no CLI at all: the step used
+  /// to tell the user to install one and reopen it, with Next still disabled.
+  it("lets a computer with no CLI at all continue in Limited mode (S3.3)", async () => {
+    vi.mocked(commands.agentEngineSnapshot).mockImplementation(() =>
+      ok(
+        snapshot([
+          card({
+            installed: false,
+            version: "",
+            path: null,
+            health: "unhealthy",
+            install_url: "https://example.test/claude",
+          }),
+        ]),
+      ),
+    );
+    renderStep();
+
+    expect(await screen.findByText(/No agent CLI was found/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue without an AI engine" }));
+    await waitFor(() => expect(engineStepIsValid(answers())).toBe(true));
   });
 
   it("drops a passing result when the CLI or the model changes", async () => {

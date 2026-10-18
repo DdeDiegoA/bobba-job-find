@@ -25,10 +25,13 @@ const PROVIDER: Record<string, string> = {
 };
 
 /**
- * Next is allowed only after a passing test and the data notice (FR-3, NFR-3).
- * Limited mode, which lets the user continue without any CLI, is S3.3.
+ * Next is allowed after a passing test and the data notice (FR-3, NFR-3), or
+ * after the user chooses Limited mode (S3.3): a CLI that cannot pass the test
+ * must never dead-end the wizard (FIX1). Limited mode is an honest exit, not a
+ * pass, so `testedOk` stays false.
  */
 export function engineStepIsValid(answers: Record<string, unknown>): boolean {
+  if (answers.limitedMode === true) return true;
   return answers.testedOk === true && answers.disclosureAck === true;
 }
 
@@ -72,6 +75,7 @@ export default function EngineStep({ answers, setAnswer }: StepProps) {
   /** A different CLI or model invalidates the previous pass: test again. */
   const resetTest = () => {
     setAnswer("testedOk", false);
+    setAnswer("limitedMode", false);
     setAnswer("lastResult", null);
     setErrorText(null);
   };
@@ -92,6 +96,7 @@ export default function EngineStep({ answers, setAnswer }: StepProps) {
     onSuccess: (result) => {
       setAnswer("cli", result.cli);
       setAnswer("testedOk", result.ok);
+      setAnswer("limitedMode", false);
       setAnswer("lastResult", result);
       setErrorText(null);
       // A passing test is the choice Settings edits later (FR-17).
@@ -223,7 +228,7 @@ export default function EngineStep({ answers, setAnswer }: StepProps) {
             </Button>
           </div>
 
-          {last ? <TestResultView result={last} /> : null}
+          {last ? <TestResultView result={last} cliName={selected.name} /> : null}
 
           <section className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted p-4">
             <h3 className="font-medium text-fg">{t("onboarding_engine:disclosure.title")}</h3>
@@ -244,6 +249,29 @@ export default function EngineStep({ answers, setAnswer }: StepProps) {
           </section>
         </>
       ) : null}
+
+      {/* S3.3 (FIX1): a CLI that cannot pass the test — or no CLI at all — must
+          not dead-end the wizard. Limited mode is an honest exit: no pass is
+          recorded, so every AI feature stays off until an engine is connected. */}
+      {answers.limitedMode === true ? (
+        <p role="status" className="text-sm text-fg-muted">
+          {t("onboarding_engine:limited.chosen")}
+        </p>
+      ) : (
+        <section className="flex flex-col gap-1">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setAnswer("limitedMode", true);
+              setAnswer("testedOk", false);
+              setAnswer("lastResult", null);
+            }}
+          >
+            {t("onboarding_engine:limited.action")}
+          </Button>
+          <p className="text-sm text-fg-muted">{t("onboarding_engine:limited.body")}</p>
+        </section>
+      )}
     </div>
   );
 }
@@ -279,7 +307,7 @@ function EngineOption({
 }
 
 /** The test call's outcome: latency and model, or the CLI's error and a hint. */
-function TestResultView({ result }: { result: TestCallResult }) {
+function TestResultView({ result, cliName }: { result: TestCallResult; cliName?: string }) {
   const { t } = useTranslation();
   if (result.ok) {
     return (
@@ -295,7 +323,11 @@ function TestResultView({ result }: { result: TestCallResult }) {
   }
   return (
     <div role="status" className="flex flex-col gap-1 text-sm">
-      <p className="text-danger">{t("onboarding_engine:test.failure")}</p>
+      <p className="text-danger">
+        {cliName
+          ? t("onboarding_engine:test.failureOn", { cli: cliName })
+          : t("onboarding_engine:test.failure")}
+      </p>
       {result.message_key ? <p className="text-fg">{t(result.message_key)}</p> : null}
       {result.failure_reason ? (
         <p className="text-fg-muted">{t(`onboarding_engine:test.hint.${result.failure_reason}`)}</p>
