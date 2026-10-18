@@ -3,7 +3,7 @@
 > **Reviewer:** reviewer-2 (qa) · **Dev:** dev-2 · **Date:** 2026-10-18
 > **Branch:** `hermad/FX4` · **Reviewed commit:** `7854501` (`fix(shell): wire Run now to the run lifecycle and always show the Kill Switch`)
 > **Spec:** FX4 in `beta-fix-plan.md`; root cause issue 6 in `beta1-issues.md`
-> **Verdict:** CHANGES REQUESTED (1 bug, medium)
+> **Verdict:** APPROVED at `358f440` (re-review of the fix; Bug 1 and Low 1–2 closed, Low 3 acknowledged)
 
 ## Scope
 
@@ -60,6 +60,13 @@ Probe file `src/app/shell/race-probe.test.tsx` was created for the repro and rem
 - `run_report:progressed` phases are `started` | `source` | `finished` (`src-tauri/src/commands/daily_search.rs:141`); the listener treats any non-`finished` phase as running, which is correct.
 - The Kill Switch no longer depends on `autoEnabled`. Its own query and `killSwitchChanged` listener keep it live.
 
-## Next
+## Re-review at `358f440`
 
-Dev-2 fixes Bug 1 with a test, optionally takes Low 1 and 2, re-runs the gate, and re-commits. Re-review then runs on the new commit.
+`fix(shell): keep Run now from sticking when the run ends before the command answers`.
+
+- **Bug 1:** `finishedRun` ref records the run id from `finished`; `runNow` skips `running: true` when the command answers with that id. Test "stays on Run now when the run finishes before the command resolves" fails on `4eb6251` and passes on `358f440`.
+- **Low 1:** test "shows the backup reason before a run can start (AC3)" added.
+- **Low 2:** a failed `run_report_latest` now sets the `role="alert"` message. Test "surfaces a failed last-run read" fails on `4eb6251`, passes on `358f440`.
+- **Low 3:** acknowledged, unchanged.
+
+Gate on `358f440`: `pnpm lint` exit 0 (same pre-existing warnings), `pnpm typecheck` exit 0, `pnpm test` 80 files / 615 tests passed, `check-i18n` exit 0, `check-conventions` exit 0. The new tests were checked against the pre-fix hook (2 failures, 19 passed). e2e/a11y was not run by reviewer-2; the dev reports 72 passing.
