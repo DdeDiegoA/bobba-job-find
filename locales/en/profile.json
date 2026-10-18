@@ -33,5 +33,16 @@
   "form.evidence": "Evidence — quote the role or project",
   "form.save": "Save",
   "form.cancel": "Cancel",
-  "form.required": "Add text in English or Spanish."
+  "form.required": "Add text in English or Spanish.",
+  "drafts.aria": "Draft the missing language with AI",
+  "drafts.draft": "Draft in {lang} with AI",
+  "drafts.drafting": "Drafting…",
+  "drafts.openSettings": "Open Settings > AI engine",
+  "drafts.confirm": "Confirm",
+  "drafts.edit": "Edit",
+  "drafts.saveEdit": "Save edit",
+  "drafts.cancel": "Cancel",
+  "drafts.discard": "Delete",
+  "drafts.editHint": "This is the full proposed text. Edit the wording before saving.",
+  "drafts.untrusted": "Boba read this from text it didn't write. Check it before saving."
 }
