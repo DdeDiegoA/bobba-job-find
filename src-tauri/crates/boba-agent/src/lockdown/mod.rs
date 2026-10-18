@@ -391,6 +391,18 @@ mod tests {
         }
         // A CLI that reports no tools is not the configuration we verified.
         assert!(!init_event_is_locked_down(&[]));
+        // FX22 (L-1): the server boundary is the whole `boba__` segment. A
+        // name that only starts with `mcp__boba` belongs to another server.
+        for near_miss in [
+            "mcp__boba_evil__x",
+            "mcp__bobax__y",
+            "mcp__bob__get_task_input",
+        ] {
+            assert!(
+                !init_event_is_locked_down(&[near_miss.to_string()]),
+                "{near_miss} must fail the check"
+            );
+        }
     }
 
     #[test]

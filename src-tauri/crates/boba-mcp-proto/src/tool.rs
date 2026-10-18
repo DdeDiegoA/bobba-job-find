@@ -316,6 +316,25 @@ mod tests {
         assert_eq!(classify, vec!["get_task_input", "propose_status_change"]);
     }
 
+    /// FX22 (L-2): `bound_to_run` (`boba-agent/src/mcp/server.rs`) exempts
+    /// `propose_status_change` from the application-binding rule because the
+    /// classify run's one batch covers every message, and the core checks the
+    /// named application against the message's own candidates instead. The
+    /// exemption is keyed on the tool name, so this test pins the reason it is
+    /// safe: no other task ever gets the tool.
+    #[test]
+    fn the_status_proposal_tool_belongs_to_the_classify_run_only() {
+        let tool = find("propose_status_change").expect("in the catalog");
+        assert_eq!(tool.tasks, &[CLASSIFY_EMAILS]);
+        for task in ALL_TASKS {
+            assert_eq!(
+                allows(task, "propose_status_change"),
+                task == CLASSIFY_EMAILS,
+                "{task} must not hold propose_status_change"
+            );
+        }
+    }
+
     #[test]
     fn every_task_gets_a_nonempty_subset_and_task_input() {
         for task in ALL_TASKS {
