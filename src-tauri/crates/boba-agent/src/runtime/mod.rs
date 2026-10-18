@@ -404,6 +404,14 @@ fn shim_path(sandbox: &RunSandbox) -> PathBuf {
 /// Put the run inside its workspace: `cwd` is the run's own directory, and the
 /// endpoint and token travel in the environment, never in argv.
 fn sandboxed(mut run_spec: RunSpec, sandbox: Option<&RunSandbox>) -> RunSpec {
+    // FIX1: a GUI launch inherits `/usr/bin:/bin:…` only, so the CLI — and the
+    // `node` its shim looks up — is reachable only through the resolved PATH.
+    if !run_spec.spec.env.iter().any(|(key, _)| key == "PATH") {
+        run_spec.spec.env.push((
+            "PATH".to_string(),
+            crate::detect::child_path().to_string_lossy().to_string(),
+        ));
+    }
     if let Some(sandbox) = sandbox {
         run_spec.spec.cwd = Some(sandbox.workspace.path().to_path_buf());
         run_spec
@@ -568,6 +576,10 @@ fn run_process<R: AgentRepo>(
         .unwrap_or_default();
     let mut usage = budget::Usage::default();
     let mut meter = Meter::default();
+    // The CLI's own text, kept only to classify a nonzero exit (FIX1): some
+    // CLIs report their error on stdout (OpenCode's JSON error line), and a
+    // stderr-only scan called that a crash.
+    let mut cli_output = String::new();
     let mut polls: u64 = 0;
     // Whether this run has been opened by its init event (ADR-010 §1).
     let mut opened = false;
@@ -652,6 +664,9 @@ fn run_process<R: AgentRepo>(
                     {
                         usage.absorb(*tokens_in, *tokens_out, *cost_usd);
                     }
+                    if let AgentEvent::Text { text } = event {
+                        remember_output(&mut cli_output, text);
+                    }
                     state.emit(event);
                 }
                 // S2.5 AC2: count the line against the task's budget (one turn
@@ -684,7 +699,11 @@ fn run_process<R: AgentRepo>(
         },
         Some(status) => {
             let stderr = proc.stderr_so_far();
-            Outcome::Failed(classify_failure(&stderr, status.code().unwrap_or(1)))
+            Outcome::Failed(classify_exit(
+                &stderr,
+                &cli_output,
+                status.code().unwrap_or(1),
+            ))
         }
         None => Outcome::Failed(FailureReason::Crashed),
     };
@@ -718,6 +737,54 @@ fn event_kind(event: &AgentEvent) -> &'static str {
         AgentEvent::Usage { .. } => "usage",
         AgentEvent::Finished { .. } => "finished",
         AgentEvent::Failed { .. } => "failed",
+    }
+}
+
+/// Classify a nonzero exit. `cli_output` is the CLI's own text output, read
+/// only when stderr says nothing (FIX1): some CLIs report their failure on
+/// stdout, e.g. OpenCode's JSON error line for an expired key.
+///
+/// Only strong signals are matched here. Agent prose can say "login" or "rate
+/// limit" without the run failing for that reason, and misreading it would
+/// pause AI work.
+pub fn classify_exit(stderr: &str, cli_output: &str, exit_code: i32) -> FailureReason {
+    let reason = classify_failure(stderr, exit_code);
+    if !matches!(reason, FailureReason::Crashed) || cli_output.is_empty() {
+        return reason;
+    }
+    let lower = cli_output.to_ascii_lowercase();
+    const AUTH_HINTS: [&str; 4] = [
+        "api key has expired",
+        "invalid api key",
+        "authentication_error",
+        "unauthenticated",
+    ];
+    const QUOTA_HINTS: [&str; 3] = [
+        "rate limit exceeded",
+        "quota exceeded",
+        "usage limit exceeded",
+    ];
+    if QUOTA_HINTS.iter().any(|hint| lower.contains(hint)) {
+        FailureReason::QuotaExceeded
+    } else if AUTH_HINTS.iter().any(|hint| lower.contains(hint)) {
+        FailureReason::AuthExpired
+    } else {
+        FailureReason::Crashed
+    }
+}
+
+/// Keep the last 4 KB of the CLI's text, so a talkative run cannot grow this
+/// without bound.
+fn remember_output(seen: &mut String, text: &str) {
+    const OUTPUT_CAP: usize = 4_096;
+    seen.push_str(text);
+    seen.push('\n');
+    if seen.len() > OUTPUT_CAP {
+        let mut cut = seen.len() - OUTPUT_CAP;
+        while cut < seen.len() && !seen.is_char_boundary(cut) {
+            cut += 1;
+        }
+        seen.drain(..cut);
     }
 }
 
@@ -1765,6 +1832,52 @@ mod tests {
             classify_failure("segmentation fault", 139),
             FailureReason::Crashed
         );
+    }
+
+    /// FIX1: OpenCode reports an expired key as a JSON line on **stdout**, not
+    /// stderr, so a stderr-only classification called it a crash and the user
+    /// got "check that it runs in a terminal" instead of "sign in again".
+    #[test]
+    fn an_expired_key_reported_on_stdout_is_an_auth_failure() {
+        let line = concat!(
+            r#"{"type":"error","error":{"name":"APIError","data":{"message":"#,
+            r#""This API key has expired. Create a new API key in OpenCode Console","#,
+            r#""statusCode":401}}}"#
+        );
+        assert_eq!(classify_exit("", line, 1), FailureReason::AuthExpired);
+        // Prose that merely mentions a word is not evidence.
+        assert_eq!(
+            classify_exit("", "the login flow looks odd to me", 1),
+            FailureReason::Crashed
+        );
+        assert_eq!(
+            classify_exit("", "no such subcommand", 1),
+            FailureReason::Crashed
+        );
+    }
+
+    /// FIX1: every spawned CLI gets the resolved PATH, so a GUI launch can find
+    /// `claude`/`opencode` (and the `node` their shims look up).
+    #[test]
+    fn a_run_spec_carries_the_resolved_path_to_the_child() {
+        let spec = sandboxed(
+            RunSpec {
+                spec: CommandSpec {
+                    program: PathBuf::from("claude"),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: Vec::new(),
+                },
+            },
+            None,
+        );
+        let path = spec
+            .spec
+            .env
+            .iter()
+            .find(|(key, _)| key == "PATH")
+            .expect("PATH on the child");
+        assert_eq!(path.1, crate::detect::child_path().to_string_lossy());
     }
 
     #[test]
