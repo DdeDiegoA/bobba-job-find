@@ -35,6 +35,10 @@ describe("money's ISO-4217 minor units (AD-17)", () => {
     expect(noSpace(formatMoney(1234, "CLP", "es-CL"))).toBe("$1.234");
     expect(formatMoney(123_400, "USD", "en-US")).toBe("$1,234.00");
   });
+
+  it("shows three decimals for a three-decimal currency", () => {
+    expect(noSpace(formatMoney(1_234_500, "KWD", "en-US"))).toBe("KWD1,234.500");
+  });
 });
 
 describe("salary formatting (FR-115)", () => {
