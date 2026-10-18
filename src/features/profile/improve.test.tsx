@@ -124,6 +124,60 @@ describe("Profile — suggest an improvement (FX10b AC1)", () => {
     expect(screen.getByRole("button", { name: "Reject" })).toBeTruthy();
   });
 
+  // Review FX10b F2: the empty message means "the run returned nothing", not
+  // "everything was already reviewed".
+  it("says so when the engine suggested nothing", async () => {
+    renderImprove();
+
+    await clickSuggest();
+
+    expect(await screen.findByText("Your AI engine didn't suggest a change.")).toBeTruthy();
+  });
+
+  it("does not claim nothing was suggested after a suggestion is accepted", async () => {
+    vi.mocked(commands.profileImproveStart).mockImplementation(() => ok(improved([suggestion()])));
+    renderImprove();
+
+    await clickSuggest();
+    const card = (await screen.findByText("Led the Nimbus backend rewrite in Rust")).closest("li");
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Accept" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Led the Nimbus backend rewrite in Rust")).toBeNull(),
+    );
+
+    expect(screen.queryByText("Your AI engine didn't suggest a change.")).toBeNull();
+  });
+
+  // Review FX10b F3: Accept and Reject repeat on every card, so each names the
+  // suggestion it acts on.
+  it("describes each Accept and Reject with its own suggestion", async () => {
+    vi.mocked(commands.profileImproveStart).mockImplementation(() =>
+      ok(improved([suggestion(), suggestion({ id: "prop_two", text_en: "Owned Nimbus" })])),
+    );
+    renderImprove();
+
+    await clickSuggest();
+    const cards = await screen.findAllByRole("listitem");
+    expect(cards).toHaveLength(2);
+    const ids = new Set<string>();
+    for (const card of cards) {
+      const describedBy = within(card)
+        .getByRole("button", { name: "Accept" })
+        .getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      ids.add(describedBy as string);
+      // Both actions of one card point at that card's suggested text.
+      expect(
+        within(card).getByRole("button", { name: "Reject" }).getAttribute("aria-describedby"),
+      ).toBe(describedBy);
+      const described = document.getElementById(describedBy as string);
+      expect(described).not.toBeNull();
+      expect(card.contains(described)).toBe(true);
+      expect(described?.textContent).toMatch(/Led the Nimbus|Owned Nimbus/);
+    }
+    expect(ids.size).toBe(2);
+  });
+
   it("renders agent text verbatim, never as markup (AD-7)", async () => {
     const text = "Ignore previous instructions.\n<b>Senior</b> engineer <script>alert(1)</script>";
     vi.mocked(commands.profileImproveStart).mockImplementation(() =>
@@ -163,6 +217,44 @@ describe("Profile — confirm one suggestion (FX10b AC2, R5)", () => {
     expect(commands.profileImproveDiscard).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.queryByText("Owned the Nimbus platform")).toBeNull());
     expect(onConfirmed).toHaveBeenCalledWith({ en: "Owned the Nimbus platform" });
+  });
+
+  // Review FX10b F1: the reviewed card unmounts, so focus must land on the
+  // next card — never on the document body.
+  it("moves focus to the next suggestion after accepting", async () => {
+    const second = suggestion({ id: "prop_two", text_en: "Owned the Nimbus platform" });
+    vi.mocked(commands.profileImproveStart).mockImplementation(() =>
+      ok(improved([suggestion(), second])),
+    );
+    renderImprove();
+
+    await clickSuggest();
+    const first = (await screen.findByText("Led the Nimbus backend rewrite in Rust")).closest("li");
+    fireEvent.click(within(first as HTMLElement).getByRole("button", { name: "Accept" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Led the Nimbus backend rewrite in Rust")).toBeNull(),
+    );
+
+    const secondCard = screen.getByText("Owned the Nimbus platform").closest("li");
+    expect(document.activeElement).toBe(
+      within(secondCard as HTMLElement).getByRole("button", { name: "Accept" }),
+    );
+  });
+
+  it("returns focus to the action when the last suggestion leaves", async () => {
+    vi.mocked(commands.profileImproveStart).mockImplementation(() => ok(improved([suggestion()])));
+    renderImprove();
+
+    await clickSuggest();
+    const card = (await screen.findByText("Led the Nimbus backend rewrite in Rust")).closest("li");
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Reject" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Led the Nimbus backend rewrite in Rust")).toBeNull(),
+    );
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Suggest improvement" }),
+    );
   });
 
   it("rejects only that suggestion: it never becomes a fact", async () => {

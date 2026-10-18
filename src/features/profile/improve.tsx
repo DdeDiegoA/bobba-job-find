@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -47,8 +47,13 @@ export function ImproveFact({
   const queryClient = useQueryClient();
   const [suggestions, setSuggestions] = useState<ProposalView[]>([]);
   const [removed, setRemoved] = useState<string[]>([]);
-  const [ran, setRan] = useState(false);
+  /** The last run returned no suggestion (review F2: never after a review). */
+  const [empty, setEmpty] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  // Review F1: a reviewed card unmounts; focus must land on the next one, or
+  // back on the action when none is left — never on the document body.
+  // `undefined` = no request; `null` = the Suggest button; an id = that card.
+  const [focusAfter, setFocusAfter] = useState<string | null | undefined>(undefined);
 
   const start = useMutation({
     mutationFn: () => commands.profileImproveStart(fact.item_id, currentLocale()).then(unwrap),
@@ -69,8 +74,23 @@ export function ImproveFact({
   const fail = (error: unknown) =>
     setErrorText(isAppError(error) ? renderAppError(error, tError) : tError("errors.unknown"));
 
+  useEffect(() => {
+    if (focusAfter === undefined) return;
+    const target =
+      focusAfter === null
+        ? document.getElementById(suggestId(fact.item_id))
+        : document.getElementById(acceptId(focusAfter));
+    target?.focus();
+    setFocusAfter(undefined);
+  }, [focusAfter, fact.item_id]);
+
   /** The core or the user dropped it; stop listing it either way. */
   const drop = (id: string) => {
+    // The next card takes focus; the previous one when the last card goes;
+    // the action itself when the list is now empty.
+    const order = pending.map((item) => item.id);
+    const at = order.indexOf(id);
+    setFocusAfter(order[at + 1] ?? order[at - 1] ?? null);
     setRemoved((current) => [...current, id]);
   };
 
@@ -85,18 +105,19 @@ export function ImproveFact({
     <section aria-label={t("improve.aria")} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button
+          id={suggestId(fact.item_id)}
           type="button"
           size="sm"
           variant="outline"
           disabled={!access.available || busy}
           onClick={() => {
             setErrorText(null);
-            setRan(false);
+            setEmpty(false);
             start.mutate(undefined, {
               onSuccess: (outcome) => {
                 // Append, never replace: an earlier suggestion stays actionable.
                 setSuggestions((current) => mergeSuggestions(current, outcome.proposals));
-                setRan(true);
+                setEmpty(outcome.proposals.length === 0);
               },
               onError: fail,
             });
@@ -126,7 +147,7 @@ export function ImproveFact({
           {t("improve.running")}
         </p>
       ) : null}
-      {ran && !start.isPending && pending.length === 0 ? (
+      {empty ? (
         <p className="text-sm text-fg-muted" role="status">
           {t("improve.empty")}
         </p>
@@ -181,6 +202,9 @@ function ImprovementCard({
   onReject: () => void;
 }) {
   const { t } = useTranslation("profile");
+  // Review F3: "Accept" and "Reject" repeat on every card, so both name the
+  // suggested text they act on.
+  const describedBy = suggestionTextId(suggestion.id);
 
   return (
     <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
@@ -198,7 +222,7 @@ function ImprovementCard({
             <p className="whitespace-pre-wrap break-words text-fg-muted">{fact.text_es}</p>
           ) : null}
         </div>
-        <div className="flex flex-col gap-1">
+        <div id={describedBy} className="flex flex-col gap-1">
           <p className="text-xs uppercase tracking-wide text-fg-subtle">{t("improve.suggested")}</p>
           {suggestion.text_en ? (
             <p className="whitespace-pre-wrap break-words text-fg">{suggestion.text_en}</p>
@@ -209,10 +233,24 @@ function ImprovementCard({
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" disabled={busy} onClick={onAccept}>
+        <Button
+          id={acceptId(suggestion.id)}
+          type="button"
+          size="sm"
+          aria-describedby={describedBy}
+          disabled={busy}
+          onClick={onAccept}
+        >
           {t("improve.accept")}
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onReject}>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          aria-describedby={describedBy}
+          disabled={busy}
+          onClick={onReject}
+        >
           {t("improve.reject")}
         </Button>
       </div>
@@ -226,6 +264,21 @@ function changed(fact: FactView, suggestion: ProposalView): ImprovedText {
   if (suggestion.text_en !== fact.text_en) result.en = suggestion.text_en;
   if (suggestion.text_es !== fact.text_es) result.es = suggestion.text_es;
   return result;
+}
+
+/** The id of the action that starts a run for one fact. */
+function suggestId(itemId: string): string {
+  return `improve-suggest-${itemId}`;
+}
+
+/** The id of the card's Accept button: where focus lands after a review. */
+function acceptId(suggestionId: string): string {
+  return `improve-accept-${suggestionId}`;
+}
+
+/** The id of a suggestion's text: what its Accept and Reject describe. */
+function suggestionTextId(suggestionId: string): string {
+  return `improve-suggested-${suggestionId}`;
 }
 
 /** Keep suggestions in arrival order without duplicating an id. */
