@@ -5,6 +5,11 @@ builds every installer, signs the updater artifacts, verifies the macOS
 signature, and publishes the release with `latest.json`. Nothing runs on a push
 to `main`, and the CI workflow never publishes.
 
+Since REL3 the release run starts by calling the whole CI workflow
+(`ci.yml` is reusable via `on: workflow_call`) on the tagged commit, and the
+installer matrix only starts if that gate passes. CI and Release therefore never
+disagree, and a red `main` can never be released.
+
 ## One-time setup
 
 ### 1. Updater minisign keypair
@@ -94,21 +99,38 @@ SignPath steps to the Windows matrix entry and remove that section from
 1. Bump the version in **all three** places (the guard fails otherwise):
    `package.json`, `src-tauri/tauri.conf.json`, `Cargo.toml`
    (`[workspace.package]`).
-2. Commit, then tag and push:
+2. Push to `main` and wait for CI to go green **on that commit**:
+
+   ```sh
+   git push origin main
+   ```
+
+   The release runs that workflow again on the tagged commit (below), so a red
+   `main` cannot publish — but tagging a broken commit only wastes two long
+   pipelines. Wait for green.
+
+3. Tag the commit CI just passed, and push the tag:
 
    ```sh
    git tag v0.2.0
    git push origin v0.2.0
    ```
 
-3. Watch the workflow. It runs three jobs:
+4. Watch the workflow. It runs four jobs:
+   - **ci** — the entire `ci.yml` matrix (hygiene, web, rust, the three-OS
+     build) on the tagged commit (`on: workflow_call`). It holds no signing
+     secrets, so its macOS signing branch is skipped here; the release build
+     makes the signed bundle and runs the ADR-009 checks.
    - **guard** — tag/version agreement, updater pubkey, the pin, the secrets.
-   - **build** — the matrix; the release stays a **draft**.
+   - **build** — the matrix, only after `ci` and `guard` pass; the release
+     stays a **draft**.
    - **publish** — downloads the draft, verifies every installer and
      `latest.json`, re-checks the signature of the `.app` inside the DMG, then
      publishes (`--latest` for a stable tag, plain publish for a `-beta` tag).
 
-4. Confirm on the release page that `latest.json` is attached and the release is
+   At most one release run per tag: a second run queues behind the first.
+
+5. Confirm on the release page that `latest.json` is attached and the release is
    not a draft.
 
 A beta (`v0.3.0-beta.1`) is built and published the same way but never becomes
@@ -153,8 +175,15 @@ enter the tag.
   builds; move it into `dev/` if you want to keep it.
 - `pnpm tauri build` **with bundling** needs the updater key because
   `createUpdaterArtifacts` is on: set
-  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, or pass
-  `--no-bundle` (what CI does). `tauri dev` is unaffected.
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, pass
+  `--no-bundle`, or turn updater artifacts off for that build (what CI does for
+  its signature-check bundle, since it never holds the key):
+
+  ```sh
+  pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+  ```
+
+  `tauri dev` is unaffected.
 - A local bundle is signed with whatever identity your keychain has; only CI
   enforces the pinned self-signed identity, and `check-macos-signature.mjs`
   tells you when a local build does not match it.
@@ -175,6 +204,8 @@ Include, every time:
 
 - **Guard fails on versions:** fix the three files; the tag must move (delete
   and re-push the tag before the release is public).
+- **The `ci` job fails:** nothing was built and nothing was published. Fix
+  `main`, delete and re-push the tag before the release is public.
 - **Signature gate fails:** the runner did not sign with the pinned identity.
   Check that `MACOS_CERTIFICATE` matches `macos-identity.pin`; never bypass the
   gate — an ad-hoc build breaks Keychain access for every existing user.

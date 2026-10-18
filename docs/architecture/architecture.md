@@ -576,6 +576,7 @@ stateDiagram-v2
   - `e2e` (Ubuntu, Windows): tauri-driver with WebdriverIO smoke tests (onboarding with fake CLI, ranking view, kill switch)
   - **No live job-board or LLM calls in CI.** A fake `CliDriver` and a fake agent binary replay recorded JSONL.
 - **`release.yml`** runs on a `v*` tag: a 3-OS matrix with `tauri-apps/tauri-action@v1`, signing secrets, `releaseDraft: false`, and `latest.json` generated.
+  Since REL3 its first job calls the whole `ci.yml` (`on: workflow_call`) on the tagged commit, and the build matrix `needs` it, so no installer is built unless CI passes on that exact commit.
 - Actions use `actions/checkout@v5` and `actions/setup-node@v5`. Linux apt installs `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev` only (never also `libappindicator3-dev`).
 
 ---
