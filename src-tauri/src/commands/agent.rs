@@ -804,6 +804,9 @@ mod tests {
                 "review_application",
                 "answer_questions",
                 "classify_emails",
+                // FX10a: agent text rewrites the user's fact, so it too needs
+                // a verified lockdown.
+                "improve_fact",
             ]
         );
 

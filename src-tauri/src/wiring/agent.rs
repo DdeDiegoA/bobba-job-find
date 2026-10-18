@@ -37,6 +37,7 @@ use boba_app::ports::repo::ingestion::IngestionRepo;
 use boba_app::ports::repo::profile::ProfileRepo;
 use boba_app::ports::repo::scoring::ScoringRepo;
 use boba_app::posting_features;
+use boba_app::profile::improve;
 use boba_app::profile_gaps;
 use boba_app::profile_import;
 use boba_app::tailoring;
@@ -604,6 +605,15 @@ impl ToolHandler for RepoTools {
                     .map(|accepted| json!({ "accepted": accepted }))
                     .map_err(|error| error.to_string())
             }
+            // FX10a: the improve pass's suggestion. Shape-checked here so a
+            // malformed call costs the run a retry; `boba_app::profile::improve`
+            // keeps only what this item's revision allows and stores it as a
+            // pending proposal, never a fact.
+            Some(spec) if spec.name == improve::IMPROVE_TOOL => {
+                improve::validate_improvements(args)
+                    .map(|accepted| json!({ "accepted": accepted }))
+                    .map_err(|error| error.to_string())
+            }
             // S7.7: what a `tailor_application` run reads, and the two drafts it
             // writes. The user's own data (facts, preferences) is not untrusted
             // and the posting is (the endpoint decides the envelope, AD-7).
@@ -952,6 +962,7 @@ mod tests {
             || name == profile_import::PROPOSE_TOOL
             || name == profile_gaps::ASK_TOOL
             || name == profile_gaps::TRANSLATE_TOOL
+            || name == improve::IMPROVE_TOOL
     }
 
     /// A handler over a real (encrypted, temp) store: the same construction the
@@ -1871,6 +1882,37 @@ mod tests {
             )
             .expect_err("an unknown section is refused");
         assert!(refused.contains("hobby"), "{refused}");
+    }
+
+    /// FX10a: the improvement tool is the catalog's, and the boundary refuses a
+    /// payload outside its contract instead of storing it.
+    #[test]
+    fn the_improve_tool_is_the_catalog_tool() {
+        let spec = tool::find(improve::IMPROVE_TOOL).expect("in the catalog");
+        assert_eq!(spec.name, improve::IMPROVE_TOOL);
+        assert_eq!(spec.tasks, &[tool::IMPROVE_FACT]);
+        assert!(spec.kind.is_write(), "a proposal, not a read");
+
+        let tools = repo_tools("improve");
+        let accepted = tools
+            .call(
+                "improve_fact",
+                None,
+                improve::IMPROVE_TOOL,
+                &json!({"improvements": [{"item_id": "01ITEM", "text_en": "Rust"}]}),
+            )
+            .expect("a well-formed suggestion is accepted");
+        assert_eq!(accepted, json!({ "accepted": 1 }));
+
+        let refused = tools
+            .call(
+                "improve_fact",
+                None,
+                improve::IMPROVE_TOOL,
+                &json!({"improvements": [{"item_id": " ", "text_en": "Rust"}]}),
+            )
+            .expect_err("a suggestion with no item is refused");
+        assert!(refused.contains("item_id"), "{refused}");
     }
 
     /// A run reads its queue and is checked at the tool boundary (AD-5). The

@@ -67,6 +67,8 @@ pub fn default_budget(kind: AgentTaskKind) -> RunBudget {
         AgentTaskKind::AnswerQuestions => (20, 30, Duration::from_secs(600)),
         AgentTaskKind::ClassifyEmails => (20, 20, Duration::from_secs(600)),
         AgentTaskKind::TranslateProfile => (12, 10, Duration::from_secs(300)),
+        // FX10a: the improve pass reads its input, the profile, then proposes.
+        AgentTaskKind::ImproveFact => (12, 10, Duration::from_secs(300)),
     };
     RunBudget {
         wall_clock: Some(wall_clock),

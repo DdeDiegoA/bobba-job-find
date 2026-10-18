@@ -14,6 +14,8 @@
 //! ULIDs, clocks and storage live in the caller; this module only decides what
 //! the data means.
 
+pub mod improve;
+
 use serde::{Deserialize, Serialize};
 
 /// A fresh ULID, as text (AD-17). Kept here so the app layer needs no id crate
@@ -289,6 +291,10 @@ pub struct FactProposal {
     pub draft: FactDraft,
     /// Excerpt the proposal was read from, shown with Confirm/Edit/Delete (S3.5).
     pub source_excerpt: Option<String>,
+    /// The revision an improvement suggestion was written against (FX10a). A
+    /// confirm is refused as stale once the item has moved past it; `None` for
+    /// proposals that do not revise existing text (a CV import).
+    pub base_revision: Option<String>,
     pub untrusted_origin: bool,
     pub agent_run_id: String,
     pub created_at: String,
@@ -395,6 +401,7 @@ mod tests {
             item_id: None,
             draft: draft(Some("Rust"), None),
             source_excerpt: Some("Rust, 5 years".to_string()),
+            base_revision: None,
             untrusted_origin: true,
             agent_run_id: "run_01".to_string(),
             created_at: "2026-10-15T12:00:00.000Z".to_string(),

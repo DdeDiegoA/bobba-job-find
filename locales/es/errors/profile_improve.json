@@ -1,0 +1,9 @@
+{
+  "errors.profile_improve.store": "No se pudo leer ni guardar tu perfil.",
+  "errors.profile_improve.unknown_item": "Ese dato del perfil ya no existe.",
+  "errors.profile_improve.unknown_proposal": "Esa sugerencia ya no está esperando revisión.",
+  "errors.profile_improve.stale": "Esa sugerencia es anterior a tu última edición. Pide una nueva y revísala otra vez.",
+  "errors.profile_improve.contract": "El agente envió una sugerencia que Boba no pudo leer. Pídelo otra vez.",
+  "errors.profile_improve.run": "La sugerencia no terminó. Puede que el motor de IA esté desconectado o sin cuota.",
+  "errors.profile_improve.no_engine": "Elige un motor de IA antes de pedir a Boba que mejore un dato."
+}

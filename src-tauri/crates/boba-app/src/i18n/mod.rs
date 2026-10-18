@@ -74,6 +74,7 @@ const ERROR_FRAGMENTS: &[(&str, &str, &str)] = error_fragments![
     "preferences",
     "profile",
     "profile_gaps",
+    "profile_improve",
     "profile_import",
     "run_report",
     "scoring",

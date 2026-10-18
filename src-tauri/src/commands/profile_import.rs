@@ -78,6 +78,7 @@ fn to_app(error: ImportError) -> AppError {
             | boba_app::profile::ProfileError::UnknownRevision(_),
         )
         | ImportError::UnknownProposal(_) => ErrorCode::NotFound,
+        ImportError::Stale(_) => ErrorCode::Conflict,
         ImportError::Text(TextError::NoText { .. })
         | ImportError::Text(TextError::Unsupported { .. })
         | ImportError::Text(TextError::TooLarge) => ErrorCode::InvalidInput,

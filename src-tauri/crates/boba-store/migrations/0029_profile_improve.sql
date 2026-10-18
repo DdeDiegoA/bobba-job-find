@@ -1,0 +1,11 @@
+-- 0029_profile_improve.sql — FX10a: improvement suggestions remember the
+-- revision they were written against. Owner: profile (AD-16). Never edit once
+-- shipped (AD-20).
+--
+-- An `improve_fact` run rewrites an existing fact's text as a pending proposal.
+-- The core stamps the fact's current revision id here, and a confirm is refused
+-- as stale once the item has moved past it — a newer edit always wins and a
+-- stale suggestion never overwrites it. `NULL` for proposals that do not revise
+-- existing text (a CV import creates new items; a translation draft revises a
+-- variant, not the fact's wording).
+ALTER TABLE profile_fact_proposal ADD COLUMN base_revision TEXT;

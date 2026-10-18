@@ -414,6 +414,89 @@ fn classify_failure_maps_quota_and_not_found() {
     assert!(!FailureReason::NotFound.pauses_ai());
 }
 
+// --- FX10a: an improve_fact run proves its lockdown before it proposes. ---
+
+/// The improve task: agent text that rewrites one existing fact. Its input is
+/// the user's own fact, but the run still takes the lockdown gate (ADR-010).
+fn improve_task(budget: RunBudget) -> AgentTask {
+    AgentTask {
+        kind: AgentTaskKind::ImproveFact,
+        input_trust: InputTrust::Untrusted,
+        cli: "claude_code".to_string(),
+        model: Some("sonnet".to_string()),
+        prompt: r#"{"item_id":"01ITEM","revision_id":"01REV1"}"#.to_string(),
+        target_language: "en".to_string(),
+        budget,
+        env: vec![],
+    }
+}
+
+/// AC1: an init event that opens a tool outside `mcp__boba__*` aborts the run
+/// before its proposal is ever accepted — the run fails closed.
+#[test]
+fn an_improve_run_aborts_when_its_init_event_opens_other_tools() {
+    let repo = Arc::new(FakeRepo::default());
+    let runtime = runtime(Arc::clone(&repo));
+    let lines = [
+        r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input","Bash"]}"#,
+        r#"{"type":"tool_call","name":"mcp__boba__propose_fact_improvements","input":{"improvements":[]}}"#,
+        r#"{"type":"finished","exit_code":0}"#,
+    ]
+    .join("\n");
+    let handle = runtime.start(
+        improve_task(RunBudget::default()),
+        spec(&[("BOBA_FAKE_MODE", "replay"), ("BOBA_FAKE_LINES", &lines)]),
+    );
+    let (run_id, events) = drain(handle);
+
+    assert!(
+        matches!(
+            events.last(),
+            Some(AgentEvent::Failed {
+                reason: FailureReason::Unsupported,
+                ..
+            })
+        ),
+        "{events:?}"
+    );
+    assert_eq!(
+        repo.get_run(&run_id)
+            .unwrap()
+            .expect("run")
+            .failure_reason
+            .as_deref(),
+        Some("unsupported")
+    );
+}
+
+/// The same run with only our shim's tools opens and finishes: the gate is not
+/// a blanket refusal of the improve task.
+#[test]
+fn an_improve_run_whose_init_event_lists_only_boba_tools_finishes() {
+    let repo = Arc::new(FakeRepo::default());
+    let runtime = runtime(Arc::clone(&repo));
+    let lines = [
+        r#"{"type":"system","subtype":"init","tools":["mcp__boba__get_task_input","mcp__boba__propose_fact_improvements"]}"#,
+        r#"{"type":"tool_call","name":"mcp__boba__propose_fact_improvements","input":{"improvements":[]}}"#,
+        r#"{"type":"finished","exit_code":0}"#,
+    ]
+    .join("\n");
+    let handle = runtime.start(
+        improve_task(RunBudget::default()),
+        spec(&[("BOBA_FAKE_MODE", "replay"), ("BOBA_FAKE_LINES", &lines)]),
+    );
+    let (run_id, events) = drain(handle);
+
+    assert!(
+        matches!(events.last(), Some(AgentEvent::Finished { .. })),
+        "{events:?}"
+    );
+    assert_eq!(
+        repo.get_run(&run_id).unwrap().expect("run").status,
+        "finished"
+    );
+}
+
 // --- CH8: the run's own MCP endpoint, driven end to end by the fake CLI. ---
 
 /// Accepts every call: this test is about the path, not the tool data.

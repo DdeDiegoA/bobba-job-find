@@ -45,7 +45,7 @@ The agent CLI is the least trusted component. It touches the app only through th
 
 Postings, emails and scraped pages are untrusted. They are wrapped in an `untrusted_content` envelope, but a prompt-level guard does not remove capability, so the real control is **removing the capability**:
 
-1. A task that reads untrusted content (`extract_postings`, `narrate_scores`, `tailor_application`, `review_application`, `classify_emails`) needs a CLI with verified `tool_lockdown`. This is a hard gate with no user override.
+1. A task that reads untrusted content (`extract_postings`, `narrate_scores`, `tailor_application`, `review_application`, `classify_emails`) needs a CLI with verified `tool_lockdown`. This is a hard gate with no user override. `improve_fact` is gated the same way even though its input is the user's own fact: its output rewrites that fact as agent text (FX10a).
 2. The gate is checked **per run**: the CLI version must have a pinned lockdown config, **and** the run's own init event must list only `mcp__boba__*` tools. Anything else aborts the run as `Unsupported` before any tool call. A missing init event fails closed.
 3. Claude Code runs with `--strict-mcp-config --tools "" --allowedTools mcp__boba__*`. Aider has no MCP and is refused. Codex and OpenCode have configs but only count when their init event is verifiable.
 4. Tasks whose input is the user's own (`profile_import`, `translate_profile`) may run on Limited CLIs with a security badge. In **Limited mode** (S3.3) the UI says what is off and why.

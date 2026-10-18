@@ -516,6 +516,7 @@ impl InterviewService {
                             .unwrap_or_else(|| "{}".to_string()),
                     },
                     source_excerpt: Some(excerpt.to_string()),
+                    base_revision: None,
                     untrusted_origin: untrusted,
                     agent_run_id: run_id.to_string(),
                     created_at: self.clock.now_rfc3339(),
@@ -562,6 +563,7 @@ impl InterviewService {
                     // A drafted variant cites no outside words: the fact it
                     // translates is the user's own.
                     source_excerpt: None,
+                    base_revision: None,
                     untrusted_origin: false,
                     agent_run_id: run_id.to_string(),
                     created_at: self.clock.now_rfc3339(),
@@ -582,6 +584,7 @@ fn map_import(error: ImportError) -> ProfileGapsError {
         ImportError::Profile(error) => ProfileGapsError::Profile(error),
         ImportError::Contract(_) => ProfileGapsError::Contract,
         ImportError::UnknownProposal(id) => ProfileGapsError::UnknownProposal(id),
+        ImportError::Stale(id) => ProfileGapsError::Stale(id),
         ImportError::Run(reason) => ProfileGapsError::Run(reason),
         ImportError::Text(_) => ProfileGapsError::Store,
     }
