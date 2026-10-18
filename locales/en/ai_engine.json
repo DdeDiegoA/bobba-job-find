@@ -21,12 +21,18 @@
     "limits": "Limits",
     "summary": "{turns} turns · {toolCalls} tool calls · {seconds} s"
   },
+  "engine": {
+    "title": "Agent CLI",
+    "body": "Pick the CLI Boba drives and the model it should use. Boba tests it before saving, so an engine that cannot answer is never stored.",
+    "saved": "Engine saved.",
+    "error": "Boba could not save the engine."
+  },
   "usage": {
     "title": "Token usage",
     "body": "Run a quick test call to see what your CLI reports about a task. Boba shows what the CLI sends and never estimates the rest.",
     "run": "Run a test call",
     "running": "Running…",
-    "noEngine": "Choose an engine in onboarding first to see its usage.",
+    "noEngine": "Choose and save an engine above to see its usage.",
     "error": "The test call could not run.",
     "tokensIn": "Tokens in",
     "tokensOut": "Tokens out",

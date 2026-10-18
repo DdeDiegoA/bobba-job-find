@@ -47,5 +47,7 @@
   "tasks.name.review_application": "Reviewing drafts",
   "tasks.name.answer_questions": "Answering screening questions",
   "tasks.name.classify_emails": "Classifying email",
-  "tasks.name.translate_profile": "Translating your profile"
+  "tasks.name.translate_profile": "Translating your profile",
+  "save.action": "Save engine",
+  "save.saving": "Saving…"
 }
