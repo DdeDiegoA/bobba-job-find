@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "boba-agent"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-app",
  "boba-domain",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "boba-app"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "ammonia",
  "boba-domain",
@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "boba-browser"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "blake3",
  "boba-app",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "boba-docs"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-app",
  "boba-domain",
@@ -729,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "boba-domain"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -739,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "boba-embed"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-app",
  "boba-domain",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "boba-fake-cli"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-mcp-proto",
  "serde_json",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "boba-job-find"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-agent",
  "boba-app",
@@ -801,7 +801,7 @@ dependencies = [
 
 [[package]]
 name = "boba-mail"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "async-imap",
  "base64 0.22.1",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "boba-mcp"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "boba-mcp-proto",
  "interprocess",
@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "boba-mcp-proto"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "interprocess",
  "schemars 1.2.2",
@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "boba-sources"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "ammonia",
  "boba-app",
@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "boba-store"
-version = "1.0.0-beta.3"
+version = "1.0.0-beta.4"
 dependencies = [
  "apple-native-keyring-store",
  "argon2",
