@@ -124,3 +124,35 @@ only `detect/mod.rs`, and the boba-agent gate above covers it).
 5. Either show the CI `-ilc` evidence or harden the fixture against the spawn
    race. Then rerun CI on the REL7 commit.
 6. Mention the pnpm search paths in the FIX1 CHANGELOG bullet, or split them out.
+
+## Re-review at e0ef7dd (rebased onto main f529864)
+
+**Verdict: the REL7 content passes; the gate is not green because of an
+unrelated, load-sensitive test.** Approval waits on the orquestador's call on
+that test (see below).
+
+- **Items 1–4 and 6 fixed.** REL attributions are right (REL3 gate, REL5
+  `latest.json`, REL2 WiX, REL4 bash). The `xattr -dr` form is used. The
+  "offers Limited mode" wording is in. The login-shell comments no longer claim
+  an interpreter dependency. The FIX1 bullet names the pnpm dirs.
+- **Item 5 (login-shell flake) not proven.** The warm-up exec in
+  `login_shell_path_reads_an_interactive_login_shell` is a mitigation with no
+  verified cause. There is no `-ilc` evidence in the CI log. Treat the next CI
+  run on this commit as the real check; if it flakes again, log the probe output.
+- **CHANGELOG missing FX4.** `main` is at `abdc454`, which merged FX4 after the
+  `f529864` base. The beta.2 CHANGELOG has FX1, FX2, FX3 and FX5 but not FX4.
+  Add it, or rebase onto `abdc454`, before the merge.
+- **Gates on e0ef7dd.** `cargo fmt --check`, `cargo metadata --locked`,
+  `cargo clippy --workspace --all-targets --locked -D warnings`, `cargo deny
+  check`: exit 0. `gen-bindings --check`, `check-conventions`, `check-i18n`,
+  `check-workflow-policy`, `vitest run scripts/release` (81/81), `check-version
+  v1.0.0-beta.2`, `wix-version` (`1.0.0.2`): ok. `cargo test --workspace
+  --locked`: one failure, `boba-mail eml::tests::many_script_tags_are_stripped_in_linear_time`
+  (`eml/mod.rs:438`, a 1 s wall-clock assertion over 50k tags). Everything else
+  passed, including `detect` 13/13.
+- **The failing test is not REL7's.** `boba-mail` has zero diff against `main`.
+  Run alone it passed 10 of 10. In the full workspace run it failed once while
+  Docker and clippy loaded the machine. Dev-1 reported the same flake
+  earlier. It is pre-existing and load-sensitive, and it can fail the CI gate
+  intermittently. Fixing it belongs in its own slice (for example, a
+  generous bound or a relative check), not in REL7.
