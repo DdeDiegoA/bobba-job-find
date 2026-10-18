@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePaletteStore } from "@/app/palette/store";
 import { ThemeProvider } from "@/app/theme";
@@ -121,6 +122,15 @@ beforeEach(() => {
   vi.mocked(commands.offersInbox).mockImplementation(() => ok([]));
 });
 
+/** A screen that raises a toast, the way the onboarding finish step does. */
+function ToastProbe() {
+  return (
+    <button type="button" onClick={() => toast.error("The first run could not start")}>
+      Raise a toast
+    </button>
+  );
+}
+
 function renderShell(initialPath = "/") {
   return render(
     <ThemeProvider>
@@ -134,6 +144,7 @@ function renderShell(initialPath = "/") {
             <Route path="profile" element={<div>profile-screen</div>} />
             <Route path="connections" element={<div>connections-screen</div>} />
             <Route path="settings/*" element={<div>settings-screen</div>} />
+            <Route path="toast" element={<ToastProbe />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
@@ -377,5 +388,14 @@ describe("Shell — accessibility and empty states", () => {
     renderShell("/");
     expect(screen.getByRole("button", { name: /Theme: System/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Language: EN/ })).toBeTruthy();
+  });
+});
+
+describe("Shell — toast region (FX14 F1)", () => {
+  it("shows a toast from any screen with the real Toaster mounted", async () => {
+    // No `sonner` mock in this file: a toast raised is a toast visible.
+    renderShell("/toast");
+    fireEvent.click(screen.getByRole("button", { name: "Raise a toast" }));
+    expect(await screen.findByText("The first run could not start")).toBeTruthy();
   });
 });

@@ -91,9 +91,14 @@ export default function FinishStep(_props: StepProps) {
                   ? t("finish.autostart.on")
                   : t("finish.autostart.off")}
           </dd>
-          <dd className="text-sm text-fg-muted">
-            {autostart.data?.enabled ? t("finish.autostart.hintOn") : t("finish.autostart.hintOff")}
-          </dd>
+          {/* Only a state the core actually reported can be described (F2). */}
+          {autostart.data ? (
+            <dd className="text-sm text-fg-muted">
+              {autostart.data.enabled
+                ? t("finish.autostart.hintOn")
+                : t("finish.autostart.hintOff")}
+            </dd>
+          ) : null}
           <dd className="text-sm">
             <Link
               to="/settings/notifications"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
+import { Toaster } from "sonner";
 import CommandPalette from "@/app/palette";
 import { useTheme } from "@/app/theme";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -118,6 +119,9 @@ export function Shell() {
       </div>
       {/* S6.7's leaf (EXPERIENCE §6): the command palette, opened by Cmd/Ctrl+K. */}
       <CommandPalette />
+      {/* One toast region for every screen (FX14): a message raised from
+          onboarding, Today or the Kill Switch has somewhere to land. */}
+      <Toaster />
     </>
   );
 }

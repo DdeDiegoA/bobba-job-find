@@ -91,6 +91,22 @@ describe("Finish step — the defaults it hands over (AC4, FR-10)", () => {
     expect(screen.queryByText("Off")).toBeNull();
   });
 
+  it("does not claim a launch state it could not read (FX14 F2)", async () => {
+    vi.mocked(commands.autostartStatus).mockRejectedValue({
+      code: "locked",
+      message_key: "errors.store.locked",
+      details: null,
+    });
+    renderStep();
+
+    expect(
+      await screen.findByText("Boba could not read the launch-at-login setting."),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Boba opens only when you do. You can turn this on later."),
+    ).toBeNull();
+  });
+
   it("links to where launch at login is changed", async () => {
     renderStep();
     const link = await screen.findByRole("link", { name: "Change it in Settings → Notifications" });
