@@ -40,6 +40,7 @@ use boba_app::posting_features;
 use boba_app::profile::improve;
 use boba_app::profile_gaps;
 use boba_app::profile_import;
+use boba_app::status_proposals;
 use boba_app::tailoring;
 use boba_mcp_proto::tool;
 use boba_store::db::Store;
@@ -629,6 +630,23 @@ impl ToolHandler for RepoTools {
             Some(spec) if spec.name == "save_score_narration" => {
                 save_score_narration(&self.store, args)
             }
+            // S8.4: the classify run's proposal. Shape, batch membership, the
+            // application and the quote are checked here so a bad call costs
+            // the run a retry; the use case stores the accepted one off the
+            // run's event stream, and nothing is written on this answer.
+            Some(spec) if spec.name == status_proposals::PROPOSE_TOOL => {
+                let accepted = status_proposals::validate_agent_proposal(
+                    self.store.as_ref(),
+                    self.store.as_ref(),
+                    self.store.as_ref(),
+                    args,
+                )?;
+                Ok(json!({
+                    "accepted": true,
+                    "email_id": accepted.email_id,
+                    "app_id": accepted.app_id,
+                }))
+            }
             Some(spec) => Err(format!(
                 "`{}` has no data source yet: it lands with {}",
                 spec.name,
@@ -730,8 +748,6 @@ fn pending_slice(tool_name: &str) -> &'static str {
         "get_company_research" => {
             "no slice yet (company research is not built, and the tailor skill reads it only when it exists)"
         }
-        "get_email_batch" => "S8.1 (mail)",
-        "propose_status_change" => "S8.4 (status proposals)",
         // Never panic on a request path: an unmapped catalog tool is a bug, and
         // the test below fails when one appears.
         _ => UNOWNED,
@@ -878,6 +894,7 @@ mod tests {
     use boba_agent::drivers::{CliInstall, HealthStatus};
     use boba_agent::mcp::config::Workspace;
     use boba_app::ports::agent::InputTrust;
+    use boba_app::status_proposals::{ClassificationMode, StatusProposalsService};
     use serde_json::json;
 
     /// Claude Code's recorded-probe capabilities: MCP plus a tool allowlist,
@@ -934,6 +951,16 @@ mod tests {
         }
     }
 
+    /// A short root for a run's workspace and socket, removed on a re-run.
+    fn short_root(tag: &str) -> PathBuf {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = PathBuf::from(format!("/tmp/boba-fx16-{tag}-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("short root");
+        dir
+    }
+
     fn tmp_dir(tag: &str) -> PathBuf {
         static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -963,6 +990,7 @@ mod tests {
             || name == profile_gaps::ASK_TOOL
             || name == profile_gaps::TRANSLATE_TOOL
             || name == improve::IMPROVE_TOOL
+            || name == status_proposals::PROPOSE_TOOL
     }
 
     /// A handler over a real (encrypted, temp) store: the same construction the
@@ -1953,6 +1981,391 @@ mod tests {
             )
             .expect_err("a proposal without an id is refused");
         assert!(no_id.contains("`id`"), "{no_id}");
+    }
+
+    // ---- FX16: the classify run's proposal is checked at the tool boundary ----
+
+    /// The line the fake run quotes, verbatim, and no rule matches: the message
+    /// is exactly the uncertain case the LLM stage exists for.
+    const REPLY_LINE: &str = "Are you available for a conversation next week?";
+
+    fn count_rows(store: &Arc<Store>, table: &str) -> i64 {
+        let table = table.to_string();
+        store
+            .read(move |conn| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("count rows")
+    }
+
+    /// A store holding one mail reply the rules miss, the Offer it is about and
+    /// the Application on the card: everything a `classify_emails` run reads.
+    fn classify_store(tag: &str) -> Arc<Store> {
+        use boba_app::ports::repo::ingestion::IngestionRepo;
+        use boba_domain::application::{AppStatus, Application, StatusEvent, StatusSource};
+        use boba_domain::posting::{ApplyHints, Offer, Provenance, WorkMode};
+
+        let store = store(tag);
+        store
+            .execute(|conn| {
+                conn.execute(
+                    "INSERT INTO source (id, name, access_class, legal_tier, apply_capability, \
+                     min_interval_ms, enabled, added_at, updated_at) \
+                     VALUES ('greenhouse', 'Greenhouse', 'public_json', 'safe', 'link_out', 2000, 1, 't', 't')",
+                    [],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("seed the source");
+
+        let offer = Offer {
+            id: "pst_1".to_string(),
+            source_id: "greenhouse".to_string(),
+            external_id: "gh-1".to_string(),
+            title: "Senior Data Engineer".to_string(),
+            company: "Acme".to_string(),
+            locations: vec!["Remote".to_string()],
+            work_mode: WorkMode::Remote,
+            money: None,
+            posted_at: None,
+            deadline: None,
+            first_seen: "2026-10-18T00:00:00Z".to_string(),
+            last_seen: "2026-10-18T00:00:00Z".to_string(),
+            lang: "en".to_string(),
+            description_html: "<p>dbt.</p>".to_string(),
+            description_text: "dbt.".to_string(),
+            requirements: Vec::new(),
+            apply: ApplyHints {
+                url: "https://acme.example.com/jobs/1".to_string(),
+                email: Some("jobs@acme.com".to_string()),
+            },
+        };
+        let provenance = Provenance {
+            posting_id: offer.id.clone(),
+            source_id: offer.source_id.clone(),
+            external_id: offer.external_id.clone(),
+            url: offer.apply.url.clone(),
+            raw: "{}".to_string(),
+            fetched_at: offer.first_seen.clone(),
+        };
+        IngestionRepo::insert_offer(store.as_ref(), &offer, &provenance).expect("the posting");
+
+        let application = Application {
+            id: "app_1".to_string(),
+            posting_id: offer.id.clone(),
+            status: AppStatus::Applied,
+            offer_snapshot_json: json!({"title": "Senior Data Engineer", "company": "Acme"})
+                .to_string(),
+            notes: None,
+            next_action: None,
+            created_at: "2026-10-18T00:00:00Z".to_string(),
+            updated_at: "2026-10-18T00:00:00Z".to_string(),
+        };
+        let event = StatusEvent {
+            id: "se_1".to_string(),
+            application_id: application.id.clone(),
+            from_status: None,
+            to_status: AppStatus::Applied,
+            source: StatusSource::Import,
+            reason: None,
+            created_at: "2026-10-18T00:00:00Z".to_string(),
+        };
+        ApplyRepo::application_create(store.as_ref(), &application, &event).expect("the card");
+
+        store
+            .execute(move |conn| {
+                conn.execute(
+                    "INSERT INTO email_message (id, account_id, provider_message_id, from_address, \
+                     subject, received_at, body_text, has_attachments, matched_by, origin, imported_at) \
+                     VALUES ('msg_1', NULL, 'mid-1', 'recruiting@acme.com', 'Hello from Acme', \
+                     '2026-10-18T00:00:00Z', ?1, 0, 'company_domain', 'eml', \
+                     '2026-10-18T00:00:00Z')",
+                    [REPLY_LINE],
+                )
+                .map(|_| ())
+                .map_err(|e| boba_store::db::StoreError::Sqlite(e.to_string()))
+            })
+            .expect("the reply");
+        store
+    }
+
+    /// The fake CLI, built on demand: `cargo test` builds only the harness in
+    /// `target/debug/deps`, never the sibling bin (the same helper `boba-agent`
+    /// tests use). `BOBA_FAKE_CLI` short-circuits a packaged E2E run.
+    fn fake_cli() -> PathBuf {
+        use std::sync::OnceLock;
+
+        static BIN: OnceLock<PathBuf> = OnceLock::new();
+        BIN.get_or_init(|| {
+            if let Ok(path) = std::env::var("BOBA_FAKE_CLI") {
+                return PathBuf::from(path);
+            }
+            let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .find(|dir| dir.join("Cargo.toml").is_file() && dir.join("tools/fake-cli").is_dir())
+                .expect("workspace root");
+            let status = std::process::Command::new(env!("CARGO"))
+                .args(["build", "-p", "boba-fake-cli"])
+                .current_dir(workspace_root)
+                .status()
+                .expect("run cargo build -p boba-fake-cli");
+            assert!(status.success(), "cargo build -p boba-fake-cli failed");
+            let name = if cfg!(windows) {
+                "boba-fake-cli.exe"
+            } else {
+                "boba-fake-cli"
+            };
+            let bin = workspace_root.join("target/debug").join(name);
+            assert!(bin.exists(), "fake CLI not built at {}", bin.display());
+            bin
+        })
+        .clone()
+    }
+
+    /// A classify run over a real store, with the fake CLI speaking the run's
+    /// own MCP endpoint. `tools` is the run's init event: an untrusted run is
+    /// verified only when it names our tools and nothing else (ADR-010).
+    /// The run's own text lines, as the UI would have seen them — the CLI's
+    /// report of what the MCP endpoint answered.
+    type Said = Arc<std::sync::Mutex<Vec<String>>>;
+
+    fn classify_service(tag: &str, tools: &str) -> (Arc<Store>, StatusProposalsService, Said) {
+        use boba_app::ports::agent::AgentPort;
+        use boba_app::ports::repo::system::SystemRepo;
+        use boba_app::status_proposals::repo::StatusProposalRepo;
+        use boba_store::repos::audit::SqliteSystemRepo;
+
+        let store = classify_store(tag);
+        // The run's Unix socket lives under this root, and a `sockaddr_un`
+        // path is capped: the platform temp dir is too long for it.
+        let root = short_root(tag);
+        let tools = tools.to_string();
+        let said: Said = Arc::default();
+        let heard = Arc::clone(&said);
+        let runtime = AgentRuntime::new(Arc::clone(&store))
+            .with_gate(Arc::new(|_task: &AgentTask| TaskSupport::Supported))
+            .with_emitter(Arc::new(
+                move |_area: &str, _seq: i64, event: &AgentEvent| {
+                    if let AgentEvent::Text { text } = event {
+                        heard.lock().unwrap().push(text.clone());
+                    }
+                },
+            ))
+            .with_sandbox(
+                SandboxConfig {
+                    runs_root: root.join("runs"),
+                    app_data: root.clone(),
+                    shim: root.join("boba-mcp"),
+                },
+                Arc::new(RepoTools {
+                    store: Arc::clone(&store),
+                }),
+            )
+            .with_command_builder(Arc::new(move |_task: &AgentTask, _sandbox: &RunSandbox| {
+                CommandSpec {
+                    program: fake_cli(),
+                    args: Vec::new(),
+                    cwd: None,
+                    env: vec![
+                        ("BOBA_FAKE_MODE".to_string(), "mcp-run".to_string()),
+                        ("BOBA_FAKE_TOOLS".to_string(), tools.clone()),
+                        (
+                            "BOBA_FAKE_CALLS".to_string(),
+                            json!([
+                                {"name": "get_task_input"},
+                                {
+                                    "name": status_proposals::PROPOSE_TOOL,
+                                    "arguments": {
+                                        "email_id": "msg_1",
+                                        "app_id": "app_1",
+                                        "status": "interview",
+                                        "quote": REPLY_LINE,
+                                    }
+                                }
+                            ])
+                            .to_string(),
+                        ),
+                        ("BOBA_FAKE_HOLD_MS".to_string(), "0".to_string()),
+                    ],
+                }
+            }));
+
+        let agents: Arc<dyn AgentPort> = Arc::new(runtime);
+        let repo: Arc<dyn StatusProposalRepo> = store.clone();
+        let apply: Arc<dyn ApplyRepo> = store.clone();
+        let postings: Arc<dyn IngestionRepo> = store.clone();
+        let system: Arc<dyn SystemRepo> =
+            Arc::new(SqliteSystemRepo::new(Arc::clone(&store), "test"));
+        let service = StatusProposalsService::new(
+            repo,
+            apply,
+            postings,
+            system,
+            agents,
+            Arc::new(boba_mail::rules::RulesClassifier),
+            Arc::new(boba_app::system::SystemClock),
+        );
+        service
+            .save_settings(ClassificationMode::Llm, false, true)
+            .expect("the user accepted the disclosure");
+        (store, service, said)
+    }
+
+    /// FX16 AC1: a proposal the run's input backs is accepted, and the handler
+    /// writes nothing — the use case stores it later, off the event stream.
+    #[test]
+    fn a_valid_status_proposal_is_accepted_without_writing() {
+        let store = classify_store("fx16-accept");
+        let tools = repo_tools_over(Arc::clone(&store));
+
+        let accepted = tools
+            .call(
+                "classify_emails",
+                None,
+                status_proposals::PROPOSE_TOOL,
+                &json!({
+                    "email_id": "msg_1",
+                    "app_id": "app_1",
+                    "status": "interview",
+                    "quote": REPLY_LINE,
+                }),
+            )
+            .expect("a proposal from this run's batch is accepted");
+        assert_eq!(
+            accepted,
+            json!({"accepted": true, "email_id": "msg_1", "app_id": "app_1"})
+        );
+        assert_eq!(count_rows(&store, "status_proposal"), 0, "propose-only");
+        assert_eq!(
+            count_rows(&store, "email_classification"),
+            0,
+            "propose-only"
+        );
+    }
+
+    /// FX16 AC1: every way a proposal can leave the batch is refused with the
+    /// tool-error shape, so the agent can correct the call.
+    #[test]
+    fn a_status_proposal_outside_the_runs_batch_is_refused() {
+        let tools = repo_tools_over(classify_store("fx16-refuse"));
+        let proposal = |over: serde_json::Value| {
+            let mut call = json!({
+                "email_id": "msg_1",
+                "app_id": "app_1",
+                "status": "interview",
+                "quote": REPLY_LINE,
+            });
+            for (key, value) in over.as_object().expect("object") {
+                call[key] = value.clone();
+            }
+            call
+        };
+        let call = |args: &serde_json::Value| {
+            tools.call(
+                "classify_emails",
+                None,
+                status_proposals::PROPOSE_TOOL,
+                args,
+            )
+        };
+
+        let unknown_message = call(&proposal(json!({"email_id": "msg_ghost"})))
+            .expect_err("a message outside the batch is refused");
+        assert!(
+            unknown_message.contains("not in this run's batch"),
+            "{unknown_message}"
+        );
+
+        let foreign_app = call(&proposal(json!({"app_id": "app_ghost"})))
+            .expect_err("an application that is not a candidate is refused");
+        assert!(
+            foreign_app.contains("is not one of `msg_1`'s applications"),
+            "{foreign_app}"
+        );
+
+        let paraphrase = call(&proposal(json!({"quote": "We would like to talk soon."})))
+            .expect_err("a quote the message does not contain is refused");
+        assert!(paraphrase.contains("not a line of"), "{paraphrase}");
+
+        let bad_status = call(&proposal(json!({"status": "hired"})))
+            .expect_err("a status the run may not propose is refused");
+        assert!(
+            bad_status.contains("applied, interview, offer, rejected"),
+            "{bad_status}"
+        );
+    }
+
+    /// FX16 AC3: the same run, but the CLI's init event opens a tool outside
+    /// `mcp__boba__*` — the runtime aborts it, so no proposal exists even
+    /// though the fake CLI made the call.
+    #[test]
+    fn a_classify_run_without_the_verified_lockdown_aborts_before_any_proposal() {
+        let (store, service, _said) =
+            classify_service("fx16-lockdown", "mcp__boba__get_task_input,Bash");
+
+        let error = service
+            .classify(Some("claude_code"), None)
+            .expect_err("the init event does not verify: fail closed");
+        assert!(
+            matches!(
+                error,
+                boba_app::status_proposals::StatusProposalsError::Run(FailureReason::Unsupported)
+            ),
+            "{error:?}"
+        );
+        assert_eq!(count_rows(&store, "status_proposal"), 0);
+        assert_eq!(count_rows(&store, "email_classification"), 0);
+    }
+
+    /// FX16 AC1: "Check replies" in LLM mode, end to end through the real MCP
+    /// endpoint: the fake CLI reads its input and calls `propose_status_change`;
+    /// the handler accepts it; the core stores a pending proposal and the card
+    /// does not move until the user approves.
+    #[test]
+    fn a_classify_run_proposes_through_the_endpoint_and_only_the_user_moves_the_card() {
+        let (store, service, said) = classify_service(
+            "fx16-e2e",
+            "mcp__boba__get_task_input,mcp__boba__propose_status_change",
+        );
+
+        let outcome = service
+            .classify(Some("claude_code"), None)
+            .expect("the run finishes and proposes");
+        assert!(outcome.llm_asked, "{outcome:?}");
+        assert_eq!(outcome.classified, 1, "{outcome:?}");
+
+        // The endpoint, not just the event stream, accepted the call: the CLI
+        // reports each reply, and a refusal would be an error code here.
+        let said = said.lock().unwrap().join("\n");
+        assert!(
+            said.contains("propose_status_change -> ok"),
+            "the handler did not accept the call: {said}"
+        );
+
+        let pending = service.proposals().expect("the queue");
+        assert_eq!(pending.len(), 1, "{pending:?}");
+        assert_eq!(pending[0].message_id, "msg_1");
+        assert_eq!(pending[0].to_status, "interview");
+        assert_eq!(pending[0].quoted_line, REPLY_LINE);
+        assert!(pending[0].untrusted_origin);
+
+        // Propose-only: nothing moved before the user approves.
+        let card = ApplyRepo::application_get(store.as_ref(), "app_1")
+            .expect("read the card")
+            .expect("the card exists");
+        assert_eq!(card.status, boba_domain::application::AppStatus::Applied);
+
+        service
+            .approve(&pending[0].id, None)
+            .expect("the user approves");
+        let card = ApplyRepo::application_get(store.as_ref(), "app_1")
+            .expect("read the card")
+            .expect("the card exists");
+        assert_eq!(card.status, boba_domain::application::AppStatus::Interview);
     }
 
     /// The endpoint wraps third-party text (AD-7); a handler that pre-wrapped it

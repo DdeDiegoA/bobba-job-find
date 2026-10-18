@@ -149,14 +149,6 @@ pub const TOOLS: &[ToolSpec] = &[
         input_schema: BY_ID,
     },
     ToolSpec {
-        name: "get_email_batch",
-        kind: ToolKind::Read,
-        tasks: &[CLASSIFY_EMAILS],
-        untrusted: true,
-        about: "Unread recruiter mail waiting to be classified.",
-        input_schema: BY_LIMIT,
-    },
-    ToolSpec {
         name: "propose_profile_facts",
         kind: ToolKind::WriteProposal,
         tasks: &[PROFILE_IMPORT, PROFILE_GAPS, TRANSLATE_PROFILE],
@@ -285,7 +277,7 @@ mod tests {
                 "propose_translations",
             ]
         );
-        assert!(!allows(PROFILE_IMPORT, "get_email_batch"));
+        assert!(!allows(PROFILE_IMPORT, "propose_status_change"));
         assert!(!allows(PROFILE_IMPORT, "save_document_draft"));
         // S3.6: the interview asks questions and may propose what the context
         // it was given states — never a translation, never a posting feature.
@@ -304,9 +296,24 @@ mod tests {
             ]
         );
         assert!(!allows(PROFILE_GAPS, "propose_translations"));
-        assert!(!allows(PROFILE_GAPS, "get_email_batch"));
+        assert!(!allows(PROFILE_GAPS, "propose_status_change"));
         assert!(allows(CLASSIFY_EMAILS, "propose_status_change"));
         assert!(allows(TAILOR_APPLICATION, "save_document_draft"));
+    }
+
+    /// FX16: the classify run's batch travels in its own input, so the catalog
+    /// has no read tool for mail. The run sees its input and the proposal tool.
+    #[test]
+    fn the_classify_run_sees_its_input_and_the_proposal_tool_only() {
+        assert!(
+            find("get_email_batch").is_none(),
+            "mail is served by the run's input, not a read tool"
+        );
+        let classify: Vec<&str> = tools_for_task(CLASSIFY_EMAILS)
+            .iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert_eq!(classify, vec!["get_task_input", "propose_status_change"]);
     }
 
     #[test]
@@ -359,8 +366,9 @@ mod tests {
         let writes = TOOLS.iter().filter(|tool| tool.kind.is_write()).count();
         let reads = TOOLS.len() - writes;
         // S3.6 added `propose_gap_questions` and FX10a `propose_fact_improvements`,
-        // so the catalog holds ten writes.
-        assert_eq!((reads, writes), (8, 10));
+        // so the catalog holds ten writes. FX16 removed the mail reader: the
+        // classify run's batch is its own input.
+        assert_eq!((reads, writes), (7, 10));
     }
 
     #[test]
@@ -382,7 +390,6 @@ mod tests {
                 "get_posting",
                 "get_score_card",
                 "get_company_research",
-                "get_email_batch",
             ]
         );
     }

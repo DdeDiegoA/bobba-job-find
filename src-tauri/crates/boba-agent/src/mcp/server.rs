@@ -362,7 +362,7 @@ fn call_tool(state: &RunState, id: Value, params: &Value) -> Value {
         // rule): a run may only write to the application its own input names,
         // so a run drafting for one application cannot answer for another. The
         // refusal is the run's to fix and spends no output retry.
-        if let Err(refusal) = bound_to_run(state, &args) {
+        if let Err(refusal) = bound_to_run(state, name, &args) {
             return wire::error(id, wire::CODE_TOOL_DENIED, &refusal);
         }
         let mut attempts = state
@@ -448,7 +448,14 @@ fn application_of(input: &str) -> Option<String> {
 ///
 /// A write tool whose arguments carry no `app_id` (`propose_posting_features`,
 /// `save_score_narration`) is not about one application, and is left alone.
-fn bound_to_run(state: &RunState, args: &Value) -> Result<(), String> {
+fn bound_to_run(state: &RunState, tool: &str, args: &Value) -> Result<(), String> {
+    // The classify run's proposal names the application the *message* is
+    // about, not one this run was started for: one batch covers every message.
+    // The core checks that application against the message's own candidates
+    // (S8.4); the binding rule guards the per-application writes instead.
+    if tool == "propose_status_change" {
+        return Ok(());
+    }
     let Some(asked) = args.get("app_id").and_then(Value::as_str) else {
         return Ok(());
     };
@@ -802,6 +809,30 @@ mod tests {
         );
         assert!(!names.contains(&"get_email_batch"));
         assert!(!names.contains(&"save_document_draft"));
+    }
+
+    /// FX16: a classify run's batch arrives in its own input, so the tool list
+    /// it opens with is the input and the proposal tool — no mail reader.
+    #[test]
+    fn a_classify_run_opens_with_its_input_and_the_proposal_tool_only() {
+        let (root, _endpoint, _recorder) = start_endpoint("t", tool::CLASSIFY_EMAILS, None);
+        let mut client = Client::connect(&root.endpoint("01RUN"), "t");
+
+        client.request(wire::METHOD_INITIALIZE, &json!({}));
+        client.notify("notifications/initialized");
+        let listed = client.request(wire::METHOD_TOOLS_LIST, &json!({}));
+        let names: Vec<&str> = listed["result"]["tools"]
+            .as_array()
+            .expect("tools array")
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["get_task_input", "propose_status_change"],
+            "the batch is the run's input; there is no mail read tool"
+        );
+        assert!(!names.contains(&"get_email_batch"));
     }
 
     #[test]

@@ -31,8 +31,9 @@
 //!                   (`BOBA_IPC_ENDPOINT`/`BOBA_RUN_TOKEN`): authenticate and make
 //!                   one `tools/call` per entry in `BOBA_FAKE_CALLS` (JSON array
 //!                   of `{"name":…,"arguments":…}`), reporting each reply as a
-//!                   text line. It then holds so the **runtime's** own limit —
-//!                   output failure or wall clock — is what ends the run.
+//!                   text line and each call as the assistant `tool_use` block
+//!                   a real CLI prints. It then holds so the **runtime's** own
+//!                   limit — output failure or wall clock — is what ends the run.
 //!
 //! ponytail: modes are tiny on purpose; add one only when a test needs it.
 
@@ -227,6 +228,32 @@ fn mcp_run() {
         .ok()
         .and_then(|blob| serde_json::from_str(&blob).ok())
         .unwrap_or_default();
+    // A CLI reports the tools it calls in its own stream, and that stream is
+    // where the core reads a proposal from (S8.4). Each call gets the
+    // assistant `tool_use` block a real CLI would print, so a test sees the
+    // same events it would see from Claude Code — not just the endpoint's reply.
+    for (index, call) in calls.iter().enumerate() {
+        // The stream names an MCP tool the way the CLI sees it:
+        // `mcp__boba__<tool>`, the same name the init event lists. The
+        // endpoint call below takes the bare name.
+        let name = call
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(|name| format!("mcp__{}__{name}", boba_mcp_proto::tool::SERVER_NAME))
+            .unwrap_or_default();
+        println!(
+            "{}",
+            serde_json::json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use",
+                    "id": format!("toolu_fake_{index}"),
+                    "name": name,
+                    "input": call.get("arguments").cloned().unwrap_or(serde_json::json!({})),
+                }]},
+            })
+        );
+    }
     match mcp_calls(&calls) {
         Ok(replies) => {
             for reply in replies {
