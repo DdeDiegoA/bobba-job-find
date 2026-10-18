@@ -48,8 +48,11 @@ The hard rules:
   one.
 - **Write in `{{target_language}}`** for wording choices, but return each
   variant in its own language (`text_en` in English, `text_es` in Spanish).
-- **Leave out what you are not changing.** Omit `evidence` and `detail` to keep
-  the fact's own; include them only when the rewrite needs them changed.
+- **Send text only.** The core keeps the fact's own `evidence` and `detail`;
+  whatever you send for them is ignored. A suggestion may not add evidence the
+  Profile never stated.
+- **Stay short.** Each variant may be at most 2 000 characters; the core refuses
+  a longer suggestion and asks for a shorter one.
 - Short and concrete: one fact, active voice, no buzzwords, no adjectives the
   user did not earn.
 - Never add personal data the fact does not already contain: no phone numbers,

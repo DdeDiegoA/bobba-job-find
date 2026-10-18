@@ -35,6 +35,7 @@
 | R-S1.2b-8 | macOS | Manual key-survives-upgrade test (`docs/qa/macos-upgrade-test.md`) not run | Needs a real signed build | Run it before the first release |
 | R-S10.2-D1 | Reset | On Windows, if the DB file cannot be unlinked, its content is erased but the file and key stay; the app still starts on the empty store | File locking on Windows | Surfaced via `remaining`; re-check at S10.6 |
 | R-CH6-1 | Store tests | `cfg(test)` is per crate; a test outside `boba-store` that calls `Store::open` would compile the platform path | No such test exists | Re-check if one is added |
+| R-FX10a-2 | Profile review | `ImportService::confirm` reads the latest revision and then saves it in a separate step; a save landing in between could let a stale suggestion through | The improve and import commands are synchronous, so they do not interleave in practice | Wrap the check and the save in one transaction if a command ever becomes async |
 
 ## 3. Agent sandbox and untrusted content
 
@@ -48,6 +49,8 @@
 | R-S11.1b-3 | Session boards | The untrusted tag is documented and `ammonia`-normalised, not enforced by a type | Relies on the S2.4 gate for any LLM step | Add a taint type |
 | R-S3.5-1 | CV import | PDF inflation cap is checked after `lopdf` loads; many streams just under the per-stream cap cause a transient memory spike | The input is a file the user chose | Pre-scan the PDF |
 | R-S3.5-2 | CV import | The import command accepts any path | Input is the user's own file; UI uses the dialog | Restrict to dialog-granted paths |
+| R-FX10a-3 | Improve fact | A confirmed improvement is stored as the user's own text: provenance stays `user` and the run is named only in the audit row | That is the design — the user confirms every word, and the core keeps the fact's own evidence and detail (FX10b) | None |
+| R-FX10a-6 | Improve fact | An improvement run costs a full verified-lockdown CLI even though its input is the user's own fact, because its output becomes fact text | Deliberate (`docs/security/security-model.md` item 1, ADR-010): agent text never runs without the tool lockdown | None |
 
 ## 4. Network, sources and email
 

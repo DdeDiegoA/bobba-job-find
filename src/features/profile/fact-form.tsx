@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { FactRevisionInput, FactView } from "@/lib/ipc/bindings";
 import { AiDraft } from "./ai-draft";
+import { ImproveFact } from "./improve";
 import { takesEvidence } from "./sections";
 
 /**
@@ -90,6 +91,18 @@ export function FactForm({
           onConfirmed={(lang, text) => {
             if (lang === "es") setTextEs(text);
             else setTextEn(text);
+          }}
+        />
+      ) : null}
+
+      {/* FX10b: an existing fact can be improved; the accepted text lands in
+          the fields above so Save stores exactly what the user reviewed. */}
+      {fact ? (
+        <ImproveFact
+          fact={fact}
+          onConfirmed={(changed) => {
+            if ("en" in changed) setTextEn(changed.en ?? "");
+            if ("es" in changed) setTextEs(changed.es ?? "");
           }}
         />
       ) : null}
