@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 
 #[cfg(windows)]
 use process_wrap::std::JobObject;
-use process_wrap::std::{ChildWrapper, CommandWrap, ProcessGroup};
+#[cfg(unix)]
+use process_wrap::std::ProcessGroup;
+use process_wrap::std::{ChildWrapper, CommandWrap};
 use thiserror::Error;
 
 /// How to launch a child. `env` carries per-run values (MCP token, workspace).
@@ -208,7 +210,9 @@ impl Drop for SupervisedProcess {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::fs;
+    #[cfg(unix)]
     use std::time::Instant;
 
     /// The fake CLI, built on demand so a cold target still works (see
@@ -327,6 +331,7 @@ mod tests {
     }
 
     /// Wait (bounded) for the grandchild to write its pid.
+    #[cfg(unix)]
     fn wait_for_pid(path: &std::path::Path) -> u32 {
         let mut pid = None;
         assert!(
@@ -342,6 +347,7 @@ mod tests {
     }
 
     /// Whether `pid` still exists (`kill -0`).
+    #[cfg(unix)]
     fn alive(pid: u32) -> bool {
         std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])
@@ -353,6 +359,7 @@ mod tests {
 
     /// Poll `condition` until it holds, with a deadline. Used for conditions
     /// another process produces (never as a substitute for a signal).
+    #[cfg(unix)]
     fn until(mut condition: impl FnMut() -> bool) -> bool {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
