@@ -212,9 +212,9 @@ export default function TodayNeedsYou() {
     <section className="flex flex-col gap-4 p-6" aria-labelledby="needs-you-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 id="needs-you-title" className="font-display text-2xl text-fg">
+          <h2 id="needs-you-title" className="font-display text-2xl text-fg">
             {t("title")}
-          </h1>
+          </h2>
           <p className="text-sm text-fg-muted">{t("subtitle")}</p>
         </div>
         <Button type="button" onClick={check} disabled={classify.isPending}>

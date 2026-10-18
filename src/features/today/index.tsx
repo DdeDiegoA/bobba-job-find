@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import TodayMatches from "./matches";
+import TodayNeedsYou from "./needs-you";
 import TodayOutbox from "./outbox";
 import TodayRunReport from "./run-report";
 
@@ -11,6 +12,7 @@ import TodayRunReport from "./run-report";
  */
 const TODAY_PANELS: readonly { id: string; Component: () => React.JSX.Element }[] = [
   { id: "matches", Component: TodayMatches },
+  { id: "needs-you", Component: TodayNeedsYou },
   { id: "outbox", Component: TodayOutbox },
   { id: "run-report", Component: TodayRunReport },
 ];

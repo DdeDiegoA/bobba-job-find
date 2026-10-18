@@ -9,6 +9,7 @@ import SettingsNotifications from "./notifications";
 import SettingsPreferences from "./preferences";
 import SettingsPrivacyAudit from "./privacy/audit";
 import SettingsPrivacyBackup from "./privacy/backup";
+import SettingsPrivacyDisclosures from "./privacy/disclosures";
 import SettingsPrivacyExport from "./privacy/export";
 import SettingsPrivacyNetwork from "./privacy/network";
 import SettingsPrivacySessions from "./privacy/sessions";
@@ -28,6 +29,11 @@ const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: Compon
   },
   { id: "privacy/audit", labelKey: "audit_stats:audit.title", Component: SettingsPrivacyAudit },
   { id: "privacy/backup", labelKey: "backup:title", Component: SettingsPrivacyBackup },
+  {
+    id: "privacy/disclosures",
+    labelKey: "status_proposals:settings.title",
+    Component: SettingsPrivacyDisclosures,
+  },
   { id: "privacy/export", labelKey: "export:title", Component: SettingsPrivacyExport },
   { id: "privacy/network", labelKey: "network:title", Component: SettingsPrivacyNetwork },
   { id: "applying", labelKey: "applying:title", Component: SettingsApplyingRules },
