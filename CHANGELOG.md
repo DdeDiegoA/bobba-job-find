@@ -4,6 +4,42 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [1.0.0-beta.3] - 2026-10-18
+
+Pre-release, like beta.1 and beta.2: the tag is `v1.0.0-beta.3`, so it never
+becomes `/releases/latest`.
+
+### Added
+
+- The Today screen mounts the **Needs you** panel, so the offers waiting on a
+  review or a decision show on the home screen, and Settings gains a
+  **Disclosures** section that lists what the app does with your data (FX13).
+- A **Launch at login** switch under Settings > Notifications, and a finish step
+  that says what will actually happen next instead of promising more than it
+  does (FX14).
+- Email one-click setup now hides itself when the bundled OAuth client is
+  absent, and the app offers the own-client form plus a step-by-step guide,
+  `docs/user-guide/email-own-client.md`, instead of a dead button (FX5b).
+
+### Fixed
+
+- The test suite is robust under load: a global async timeout, `findBy` queries
+  and load-independent mail timing, so a busy machine no longer flakes it (FX19).
+- The boba-mcp shim test no longer races the sidecar copy, and the release
+  script stops clobbering the shim binary (FX20).
+
+### Release pipeline
+
+- The publish job now verifies the draft, publishes, then verifies the published
+  release and every platform URL, instead of failing on its own draft and
+  needing a hand publish (FX21).
+
+### Internal
+
+- `check-conventions` fails when a screen is built but never mounted, and the
+  route containers have render tests (FX18).
+- Cleanup: removed the orphan tracker board and stale stub comments (FX17).
+
 ## [1.0.0-beta.2] - 2026-10-18
 
 Pre-release, like beta.1: the tag is `v1.0.0-beta.2`, so it never becomes
