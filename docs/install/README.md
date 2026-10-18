@@ -6,7 +6,7 @@ or build it yourself from source.
 
 | OS | Installer | Signing |
 |---|---|---|
-| macOS 13+ (Apple Silicon and Intel) | Universal `.dmg` | Self-signed with the project's persistent identity; [Gatekeeper bypass](macos.md) on first launch |
+| macOS 13+ (Apple Silicon and Intel) | Universal `.dmg` | Self-signed with the project's persistent identity; [quarantine step](macos.md) on first launch |
 | Windows 10/11 x64 | NSIS `-setup.exe`, or `.msi` | Unsigned; [SmartScreen bypass](windows.md) until the SignPath Foundation application is accepted |
 | Linux x64 | `.AppImage`, `.deb`, `.rpm` | Unsigned (as is normal for Linux desktop apps) |
 

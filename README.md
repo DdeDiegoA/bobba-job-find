@@ -52,8 +52,19 @@ Details: [Privacy, backup and reset](docs/user-guide/privacy-and-backup.md).
 | Linux x64 | `.AppImage`, `.deb`, `.rpm` |
 
 Builds are not signed by Apple or Microsoft yet, so the first launch needs a one-time
-approval. See [docs/install/](docs/install/README.md) and the
-[troubleshooting guide](docs/user-guide/troubleshooting.md).
+approval. On macOS the supported beta path is:
+
+1. Open the DMG and drag **Boba Job Find** to **Applications**. There is no licence
+   agreement to click through.
+2. Clear the quarantine flag once:
+   `xattr -dr com.apple.quarantine "/Applications/Boba Job Find.app"`
+3. Open the app. Right-click → Open no longer bypasses Gatekeeper on macOS 15+, and
+   `spctl` keeps reporting `rejected` until the project can notarise with an Apple
+   Developer ID; both are expected.
+
+See [docs/install/macos.md](docs/install/macos.md) for the certificate check, and
+[docs/install/](docs/install/README.md) for Windows and Linux. The
+[troubleshooting guide](docs/user-guide/troubleshooting.md) covers the rest.
 
 ## The AI engine: bring your own agent CLI
 
