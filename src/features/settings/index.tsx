@@ -57,7 +57,7 @@ export default function SettingsIndex() {
             {SETTINGS_PAGES.map((entry) => (
               <li key={entry.id}>
                 <NavLink
-                  to={entry.id}
+                  to={`/settings/${entry.id}`}
                   className={({ isActive }) =>
                     cn(
                       "block rounded-xl px-3 py-2 text-sm",
