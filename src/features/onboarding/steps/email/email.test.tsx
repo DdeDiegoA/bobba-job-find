@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,11 +10,14 @@ import enEmailErrors from "../../../../../locales/en/errors/email.json";
 import esEmailErrors from "../../../../../locales/es/errors/email.json";
 import EmailStep from "./index";
 
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
+
 vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
     emailAccounts: vi.fn(),
     emailConnectOutlook: vi.fn(),
     emailConnectGmail: vi.fn(),
+    emailBundledClients: vi.fn(),
   },
 }));
 
@@ -46,6 +50,11 @@ beforeEach(() => {
   vi.mocked(commands.emailAccounts).mockReset().mockReturnValue(ok([]));
   vi.mocked(commands.emailConnectOutlook).mockReset();
   vi.mocked(commands.emailConnectGmail).mockReset();
+  // Both providers bundled by default, so the one-click tests keep their path.
+  vi.mocked(commands.emailBundledClients)
+    .mockReset()
+    .mockReturnValue(ok({ outlook: true, gmail: true }));
+  vi.mocked(openUrl).mockClear();
 });
 
 describe("Email step — optional connection (AC2, FR-9)", () => {
@@ -173,6 +182,45 @@ describe("Email step — never a dead end (FX5)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect Outlook" }));
 
     expect(await screen.findByText(/finish signing in in your browser/i)).toBeTruthy();
+  });
+
+  it("offers your own client and the guide when the build has no bundled one", async () => {
+    vi.mocked(commands.emailBundledClients).mockReturnValue(ok({ outlook: false, gmail: false }));
+    renderStep();
+
+    // AC2: neither one-click button can work, so neither is offered.
+    expect(await screen.findByText("Add your own client")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect Outlook" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+
+    // The two ways forward: Connections > Email and the guide.
+    expect(screen.getByRole("link", { name: /connections > email/i })).toHaveAttribute(
+      "href",
+      "/connections",
+    );
+    fireEvent.click(screen.getByRole("button", { name: /read the guide/i }));
+    expect(openUrl).toHaveBeenCalledWith(expect.stringMatching(/email-own-client\.md$/));
+  });
+
+  it("hides only the provider the build cannot offer (AC3)", async () => {
+    vi.mocked(commands.emailBundledClients).mockReturnValue(ok({ outlook: true, gmail: false }));
+    renderStep();
+
+    // Wait for the probe: the card appears only once its answer is in.
+    expect(await screen.findByText("Add your own client")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect Outlook" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
+    // The card names what needs the user's own client, not both providers.
+    expect(screen.getByText(/no one-click sign-in for Gmail/i)).toBeTruthy();
+  });
+
+  it("stays skippable: the card says the wizard goes on without a mailbox", async () => {
+    vi.mocked(commands.emailBundledClients).mockReturnValue(ok({ outlook: false, gmail: false }));
+    renderStep();
+
+    // AC2: Skip stays prominent in the wizard, and the step says so itself.
+    expect(await screen.findByText(/Skip for now works too/i)).toBeTruthy();
+    expect(screen.getByText(/optional/i)).toBeTruthy();
   });
 
   it("ships error copy that names a place that exists, in en and es", () => {

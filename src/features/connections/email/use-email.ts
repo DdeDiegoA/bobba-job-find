@@ -34,8 +34,32 @@ export const GMAIL_SCOPES_BY_MODE: Record<EmailMode, string[]> = {
   ],
 };
 
+/**
+ * The user guide for creating your own Google or Microsoft OAuth client
+ * (FX5b, AC5). Opens in the system browser, never in the app's webview.
+ */
+export const EMAIL_OWN_CLIENT_GUIDE_URL =
+  "https://github.com/DdeDiegoA/bobba-job-find/blob/main/docs/user-guide/email-own-client.md";
+
 /** The connections screen is one query: every connected mailbox (AC1). */
 export const emailAccountsKey = ["email", "accounts"] as const;
+
+/** Which one-click providers this build carries (FX5b, AC1). */
+export const emailBundledClientsKey = ["email", "bundled_clients"] as const;
+
+/**
+ * Which providers have a bundled OAuth client in this build (FX5b, AC1).
+ *
+ * Booleans only: the core never sends the client id or the Gmail secret. While
+ * the probe is loading the app behaves as it always did (both buttons), and a
+ * provider it says is absent is hidden instead of failing after the click.
+ */
+export function useBundledEmailClients() {
+  return useQuery({
+    queryKey: emailBundledClientsKey,
+    queryFn: () => commands.emailBundledClients().then(unwrap),
+  });
+}
 
 /** Connected mailboxes, oldest first. */
 export function useEmailAccounts() {

@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -12,8 +13,10 @@ import type {
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import {
+  EMAIL_OWN_CLIENT_GUIDE_URL,
   GMAIL_SCOPES_BY_MODE,
   SCOPES_BY_MODE,
+  useBundledEmailClients,
   useConnectGmail,
   useConnectImapSmtp,
   useConnectOutlook,
@@ -76,6 +79,20 @@ const PROVIDER_LABELS: Record<MailProvider, string> = {
   gmail: "connections_email:provider.gmail",
   imap_smtp: "connections_email:provider.imap_smtp",
 };
+
+/** Opens the bring-your-own-client guide in the user's browser (FX5b, AC5). */
+function GuideLink() {
+  const { t } = useTranslation("connections_email");
+  return (
+    <button
+      type="button"
+      className="self-start text-sm text-fg underline underline-offset-2"
+      onClick={() => void openUrl(EMAIL_OWN_CLIENT_GUIDE_URL).catch(() => undefined)}
+    >
+      {t("guide")}
+    </button>
+  );
+}
 
 /** The plain-language list of what Boba asks the provider for (AC1). */
 function ScopeList({ scopes }: { scopes: string[] }) {
@@ -190,10 +207,14 @@ function ConnectOutlook() {
   const { t } = useTranslation("connections_email");
   const { t: tError } = useTranslation();
   const connect = useConnectOutlook();
+  const bundled = useBundledEmailClients();
   const [address, setAddress] = useState("");
   const [mode, setMode] = useState<EmailMode>("send_only");
   const [clientId, setClientId] = useState("");
 
+  // FX5b, AC4: with nothing bundled, the user's own client is the only way in,
+  // so the form presents it as the main path instead of an "advanced" extra.
+  const byo = bundled.data?.outlook === false;
   const error = connect.error && isAppError(connect.error) ? connect.error : null;
 
   return (
@@ -252,15 +273,19 @@ function ConnectOutlook() {
       </div>
 
       <label className="flex flex-col gap-1 text-sm text-fg">
-        {t("client_id")}
+        {byo ? t("client_id.primary") : t("client_id")}
         <input
+          required={byo}
           value={clientId}
           placeholder={t("client_id.placeholder")}
           onChange={(event) => setClientId(event.target.value)}
           className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
         />
-        <span className="text-xs text-fg-subtle">{t("client_id.hint")}</span>
+        <span className="text-xs text-fg-subtle">
+          {byo ? t("client_id.byo_hint") : t("client_id.hint")}
+        </span>
       </label>
+      {byo ? <GuideLink /> : null}
 
       <div className="flex items-center gap-2">
         <Button type="submit" disabled={connect.isPending}>
@@ -292,11 +317,15 @@ function ConnectGmail() {
   const { t } = useTranslation("connections_email");
   const { t: tError } = useTranslation();
   const connect = useConnectGmail();
+  const bundled = useBundledEmailClients();
   const [address, setAddress] = useState("");
   const [mode, setMode] = useState<EmailMode>("send_only");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
 
+  // FX5b, AC4: a build with no bundled Google client cannot sign in at all
+  // without the user's own id and secret, so both are required and primary.
+  const byo = bundled.data?.gmail === false;
   const error = connect.error && isAppError(connect.error) ? connect.error : null;
 
   // AC1: read+send is the user's own client or nothing.
@@ -372,19 +401,23 @@ function ConnectGmail() {
       </div>
 
       <label className="flex flex-col gap-1 text-sm text-fg">
-        {t("client_id")}
+        {byo ? t("client_id.primary") : t("client_id")}
         <input
+          required={byo}
           value={clientId}
           placeholder={t("client_id.placeholder")}
           onChange={(event) => setClientId(event.target.value)}
           className="h-10 rounded-xl border border-border bg-surface px-3 text-fg"
         />
-        <span className="text-xs text-fg-subtle">{t("client_id.hint")}</span>
+        <span className="text-xs text-fg-subtle">
+          {byo ? t("client_id.byo_hint") : t("client_id.hint")}
+        </span>
       </label>
 
       <label className="flex flex-col gap-1 text-sm text-fg">
-        {t("client_secret")}
+        {byo ? t("client_secret.primary") : t("client_secret")}
         <input
+          required={byo}
           value={clientSecret}
           placeholder={t("client_secret.placeholder")}
           onChange={(event) => setClientSecret(event.target.value)}
@@ -392,6 +425,7 @@ function ConnectGmail() {
         />
         <span className="text-xs text-fg-subtle">{t("client_secret.hint")}</span>
       </label>
+      {byo ? <GuideLink /> : null}
 
       <div className="flex items-center gap-2">
         <Button type="submit" disabled={connect.isPending || readBlocked}>

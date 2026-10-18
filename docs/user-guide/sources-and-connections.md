@@ -41,6 +41,11 @@ Connect a mailbox to send applications from your own address.
   ID (bring your own).
 - **IMAP / SMTP.** For any other provider.
 
+If a build arrives without a one-click client, or you would rather use your own, follow
+[Connect email with your own OAuth client](email-own-client.md) to register a Microsoft or
+Google client and paste it into **Connections → Email**. The app links to the same guide
+from the onboarding Email step and from both connect forms.
+
 Sign-in happens in your browser and Boba accepts the answer only on your own machine
 (`127.0.0.1`). If the browser window is closed or blocked, try again, or use your own client
 ID or IMAP. **Disconnect** revokes access where the provider allows it and deletes the stored
