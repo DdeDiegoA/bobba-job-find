@@ -4,6 +4,40 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [1.0.0-beta.4] - 2026-10-18
+
+Pre-release, like beta.1 to beta.3: the tag is `v1.0.0-beta.4`, so it never
+becomes `/releases/latest`.
+
+### Added
+
+- **Switch AI engine** in Settings: pick the agent CLI Boba drives from a shared
+  engine picker, instead of being tied to the one found during setup (FX7).
+- Profile facts can be **drafted in your other language**: the agent proposes,
+  and you confirm each item before it is saved (FX8).
+- Re-run the **gap interview** from the Profile at any time, approving each item
+  on its own (FX9).
+- A **Suggest improvement** action on profile facts: the agent proposes a
+  clearer wording and nothing changes until you accept it. It runs behind the
+  same tool lockdown and core-side apply as every other proposal
+  (FX10a, FX10b).
+- Cancel a running daily search: the run stops cleanly and is recorded as
+  cancelled (FX15).
+
+### Fixed
+
+- **Check replies** in LLM mode now produces status proposals instead of
+  quietly doing nothing (FX16).
+- The unused `get_email_batch` tool is gone from the agent tool surface (FX16).
+
+### Security
+
+- The accepted residuals for the profile-improvement slices are recorded in
+  `docs/security/residuals.md` (FX10b).
+- Agent lockdown now enforces the exact `boba__` server boundary; status
+  proposals are pinned to the reply-classify run; verified quotes need an
+  8-character minimum (FX22).
+
 ## [1.0.0-beta.3] - 2026-10-18
 
 Pre-release, like beta.1 and beta.2: the tag is `v1.0.0-beta.3`, so it never
