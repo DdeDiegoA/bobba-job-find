@@ -9,6 +9,8 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -205,9 +207,21 @@ fn run_capture_with(
         .ok()?;
     let stdout = child.stdout.take().expect("stdout is piped");
     let stderr = child.stderr.take().expect("stderr is piped");
-    // Drain both pipes on threads so a full pipe can never block the child.
-    let stdout_reader = thread::spawn(move || read_to_string(stdout));
-    let stderr_reader = thread::spawn(move || read_to_string(stderr));
+    // Drain both pipes on threads so a full pipe can never block the child, and
+    // keep what arrived even if a background process keeps the pipe open after
+    // the child exits (an rc file that leaves a daemon running does that).
+    let stdout_sink = Arc::new(Mutex::new(Vec::new()));
+    let stderr_sink = Arc::new(Mutex::new(Vec::new()));
+    let (stdout_done, stdout_wait) = mpsc::channel();
+    let (stderr_done, stderr_wait) = mpsc::channel();
+    thread::spawn({
+        let sink = Arc::clone(&stdout_sink);
+        move || drain_into(stdout, sink, stdout_done)
+    });
+    thread::spawn({
+        let sink = Arc::clone(&stderr_sink);
+        move || drain_into(stderr, sink, stderr_done)
+    });
 
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -228,17 +242,41 @@ fn run_capture_with(
             }
         }
     };
+    // Bounded: the child is gone, so whatever it printed is in the sink. A
+    // pipe held open by its child must not hold this probe past its deadline
+    // (B1). Both readers share one grace window.
+    let grace = Instant::now() + READER_JOIN_GRACE;
+    let _ = stdout_wait.recv_timeout(grace.saturating_duration_since(Instant::now()));
+    let _ = stderr_wait.recv_timeout(grace.saturating_duration_since(Instant::now()));
     Some(Captured {
         ok: status.success(),
-        stdout: stdout_reader.join().unwrap_or_default(),
-        stderr: stderr_reader.join().unwrap_or_default(),
+        stdout: text_of(&stdout_sink),
+        stderr: text_of(&stderr_sink),
     })
 }
 
-fn read_to_string(mut reader: impl std::io::Read) -> String {
-    let mut text = String::new();
-    let _ = reader.read_to_string(&mut text);
-    text
+/// How long a reader thread may keep running once its child has exited.
+const READER_JOIN_GRACE: Duration = Duration::from_millis(500);
+
+fn drain_into(mut reader: impl std::io::Read, sink: Arc<Mutex<Vec<u8>>>, done: mpsc::Sender<()>) {
+    let mut buffer = [0u8; 4_096];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                if let Ok(mut bytes) = sink.lock() {
+                    bytes.extend_from_slice(&buffer[..read]);
+                }
+            }
+        }
+    }
+    let _ = done.send(());
+}
+
+fn text_of(sink: &Mutex<Vec<u8>>) -> String {
+    sink.lock()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default()
 }
 
 fn first_line(text: &str) -> String {
@@ -491,6 +529,31 @@ mod tests {
             find_binary(CliKind::OpenCode, &search_dirs()),
             Some(opencode)
         );
+    }
+
+    /// B1: an rc file that leaves a daemon running holds the stdout pipe open
+    /// after the shell exits. The probe must return at its deadline, not when
+    /// that daemon happens to close the pipe.
+    #[cfg(unix)]
+    #[test]
+    fn login_shell_path_does_not_wait_for_a_background_child_holding_stdout() {
+        let dir = tmp_dir("loginshell-bg");
+        let shell = write_exe(
+            &dir,
+            "fakeshell",
+            "#!/bin/sh\n\
+             sleep 5 &\n\
+             printf '%s' '__BOBA_PATH__/usr/bin__BOBA_END__'\n",
+        );
+        let started = Instant::now();
+        let path = login_shell_path_from(&shell);
+        let elapsed = started.elapsed();
+        assert_eq!(path.as_deref(), Some("/usr/bin"));
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "the probe waited for the background child: {elapsed:?}"
+        );
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
