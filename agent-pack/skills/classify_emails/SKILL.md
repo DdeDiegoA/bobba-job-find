@@ -55,8 +55,8 @@ Call `propose_status_change` **once per message you can place**:
 - `status`: one of `applied`, `interview`, `offer`, `rejected`.
 - `quote`: **one line copied verbatim** from the message — the sentence that
   shows the status. The core checks it against the stored text; a quote that is
-  not there is refused. Do not paraphrase, translate, trim words out of the
-  middle, or join two lines.
+  not there is refused, and so is one shorter than 8 characters. Do not
+  paraphrase, translate, trim words out of the middle, or join two lines.
 
 Do not describe your reasoning, do not summarize the message, and do not write
 anything the user will read: the core shows the class, the confidence it assigns

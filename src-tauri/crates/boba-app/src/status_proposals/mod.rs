@@ -852,8 +852,12 @@ pub fn validate_agent_proposal(
         .into_iter()
         .find(|message| message.id == email_id)
         .ok_or_else(|| format!("`{email_id}` is not in this run's batch"))?;
-    let quote = verified_quote(&message, &quote)
-        .ok_or_else(|| format!("the quote is not a line of `{email_id}`"))?;
+    let quote = verified_quote(&message, &quote).ok_or_else(|| {
+        format!(
+            "the quote is not a line of `{email_id}`, or is shorter than {MIN_QUOTE_CHARS} \
+             characters"
+        )
+    })?;
     let candidates =
         candidates_for(&message, apply, postings).map_err(|error| error.to_string())?;
     if !candidates
@@ -918,8 +922,8 @@ fn prompt(messages: &[(StoredMessage, Vec<CandidateView>)]) -> String {
          implies and call `propose_status_change` with: the message's `email_id`; an \
          `app_id` from that message's listed applications; a `status` of `applied`, \
          `interview`, `offer` or `rejected`; and as `quote` the exact line of the message \
-         that shows it, copied verbatim. Propose nothing when the message does not clearly \
-         imply one of those statuses.\n",
+         that shows it, copied verbatim (at least 8 characters). Propose nothing when the \
+         message does not clearly imply one of those statuses.\n",
     );
     for (message, candidates) in messages {
         let ids: Vec<String> = candidates
@@ -981,10 +985,26 @@ fn answers(events: &[AgentEvent]) -> Vec<LlmAnswer> {
 
 /// Whether a tool call in the run's stream is the proposal tool. The stream
 /// carries the CLI's name for it (`mcp__boba__propose_status_change`); the
-/// catalog's bare name is the last segment.
+/// catalog's bare name is the other spelling. Anything else — a near-miss
+/// server such as `mcp__boba_evil__…`, or another tool of this server — is
+/// not the proposal (FX22, L-1).
 fn is_proposal(name: &str) -> bool {
-    name.rsplit("__").next() == Some(PROPOSE_TOOL)
+    name == PROPOSE_TOOL || name.strip_prefix(MCP_SERVER_PREFIX) == Some(PROPOSE_TOOL)
 }
+
+/// This app's MCP server, as the CLI names it in the stream: Claude Code spells
+/// an MCP tool `mcp__<server>__<tool>`. Mirrors
+/// `boba_mcp_proto::tool::SERVER_NAME`, which the core cannot depend on
+/// (hexagon); the boundary is the whole `boba__` segment, not a `mcp__boba`
+/// prefix.
+const MCP_SERVER_PREFIX: &str = "mcp__boba__";
+
+/// The shortest quote that can be evidence (FX22, L-3; the floor was ruled by
+/// the orquestador on 2026-10-18). Eight characters keeps a real short
+/// rejection line — `We're sorry` — as the user's evidence, while still
+/// refusing a snippet such as `ok` or `chat` that matches most lines of a
+/// message and shows nothing. Counted in characters after trimming.
+const MIN_QUOTE_CHARS: usize = 8;
 
 /// The failure a run reported, if it reported one (FR-21).
 fn failure(events: &[AgentEvent]) -> Option<FailureReason> {
@@ -1030,11 +1050,12 @@ fn forward_move(class: ReplyClass, from: AppStatus) -> Option<AppStatus> {
 }
 
 /// The run's quote, taken from the message itself: the run names the words,
-/// the core returns the message's own line. A quote that is not in the message
-/// drops the proposal (ADR-010: the core disposes).
+/// the core returns the message's own line. A quote shorter than
+/// [`MIN_QUOTE_CHARS`] or not in the message drops the proposal (ADR-010: the
+/// core disposes).
 fn verified_quote(message: &StoredMessage, quote: &str) -> Option<String> {
     let needle = quote.trim().to_lowercase();
-    if needle.is_empty() {
+    if needle.chars().count() < MIN_QUOTE_CHARS {
         return None;
     }
     let line = message

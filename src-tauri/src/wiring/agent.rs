@@ -2291,6 +2291,11 @@ mod tests {
             .expect_err("a quote the message does not contain is refused");
         assert!(paraphrase.contains("not a line of"), "{paraphrase}");
 
+        // FX22 (L-3): `Are you` is in the message, but it is not evidence.
+        let short = call(&proposal(json!({"quote": "Are you"})))
+            .expect_err("a quote shorter than the minimum is refused");
+        assert!(short.contains("shorter than"), "{short}");
+
         let bad_status = call(&proposal(json!({"status": "hired"})))
             .expect_err("a status the run may not propose is refused");
         assert!(

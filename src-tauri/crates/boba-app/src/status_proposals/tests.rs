@@ -538,9 +538,32 @@ fn a_proposal_named_the_way_the_cli_names_it_is_stored() {
     assert_eq!(harness.repo.proposals().len(), 1);
 }
 
+/// FX22 (L-1): the stream's name is `mcp__boba__<tool>` — this app's server,
+/// with the trailing `__` as the boundary. A name from a server that only
+/// starts with `mcp__boba` is another server's tool, not the proposal tool.
+#[test]
+fn a_proposal_under_another_server_name_is_not_the_proposal_tool() {
+    assert!(is_proposal(PROPOSE_TOOL));
+    assert!(is_proposal(&format!("mcp__boba__{PROPOSE_TOOL}")));
+    for near_miss in [
+        format!("mcp__boba_evil__{PROPOSE_TOOL}"),
+        format!("mcp__bobax__{PROPOSE_TOOL}"),
+        format!("evil__{PROPOSE_TOOL}"),
+        format!("mcp__boba__{PROPOSE_TOOL}_evil"),
+        "mcp__boba__get_task_input".to_string(),
+    ] {
+        assert!(!is_proposal(&near_miss), "{near_miss} must not match");
+    }
+}
+
 #[test]
 fn a_proposal_whose_quote_is_not_in_the_message_is_dropped() {
-    let harness = llm_harness(vec![propose("msg_1", "app_1", "offer", "we offer 1M")]);
+    let harness = llm_harness(vec![propose(
+        "msg_1",
+        "app_1",
+        "offer",
+        "we offer 1M salary",
+    )]);
     seed_offer(&harness, "pst_1", "acme", "jobs@acme.com");
     harness
         .apply
@@ -559,9 +582,80 @@ fn a_proposal_whose_quote_is_not_in_the_message_is_dropped() {
     assert!(harness.repo.proposals().is_empty());
 }
 
+/// FX22 (L-3): `ok` or `chat` is not evidence. A quote shorter than
+/// [`MIN_QUOTE_CHARS`] is refused even when the message contains it, so the
+/// user never sees a proposal whose quote shows nothing.
+#[test]
+fn a_quote_shorter_than_the_minimum_is_refused() {
+    let stored = message(
+        "msg_1",
+        "recruiting@acme.com",
+        "Hello",
+        "We would love to set up a chat about the role.",
+    );
+    // Eight characters is the floor: the shortest quote that still names
+    // something.
+    assert_eq!(
+        verified_quote(&stored, "would lo").as_deref(),
+        Some("We would love to set up a chat about the role.")
+    );
+    for short in ["would l", "chat", "ok"] {
+        assert!(
+            verified_quote(&stored, short).is_none(),
+            "`{short}` must be too short to be evidence"
+        );
+    }
+}
+
+/// FX22 (orquestador ruling): the floor is 8, not 12, so a real short
+/// rejection line still verifies. `We're sorry` is 11 characters and is what
+/// a recruiter writes; `We're s` is 7 and is a snippet.
+#[test]
+fn a_real_short_rejection_line_still_verifies() {
+    let stored = message(
+        "msg_2",
+        "recruiting@acme.com",
+        "Update on your application",
+        "We're sorry, but the position has been filled.",
+    );
+    assert_eq!(
+        verified_quote(&stored, "We're sorry").as_deref(),
+        Some("We're sorry, but the position has been filled.")
+    );
+    assert!(verified_quote(&stored, "We're s").is_none());
+}
+
+/// FX22 (L-3): and the run's proposal is dropped, not stored, on a short
+/// quote the message really contains.
+#[test]
+fn a_proposal_quoted_too_short_is_dropped() {
+    let harness = llm_harness(vec![propose("msg_1", "app_1", "interview", "chat")]);
+    seed_offer(&harness, "pst_1", "acme", "jobs@acme.com");
+    harness
+        .apply
+        .seed_application(application("app_1", "pst_1", AppStatus::Applied, "Acme"));
+    harness.repo.seed_message(message(
+        "msg_1",
+        "recruiting@acme.com",
+        "Hello",
+        "We would love to set up a chat about the role.",
+    ));
+
+    let outcome = harness.service.classify(Some("claude_code"), None).unwrap();
+
+    assert_eq!(outcome.dropped, 1);
+    assert!(harness.repo.classifications().is_empty());
+    assert!(harness.repo.proposals().is_empty());
+}
+
 #[test]
 fn a_proposal_for_an_unrelated_application_is_dropped() {
-    let harness = llm_harness(vec![propose("msg_1", "app_evil", "rejected", "chat")]);
+    let harness = llm_harness(vec![propose(
+        "msg_1",
+        "app_evil",
+        "rejected",
+        "set up a chat",
+    )]);
     seed_offer(&harness, "pst_1", "acme", "jobs@acme.com");
     harness
         .apply
