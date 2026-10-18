@@ -11,6 +11,19 @@ export function endpointRepo(url) {
   return match ? `${match[1]}/${match[2]}` : null;
 }
 
+// The repository the checkout belongs to. Parsed from a git remote URL so the
+// guard compares the endpoint with the origin instead of a hard-coded slug,
+// and the two can never drift apart again (REL1).
+const REMOTE =
+  /^(?:git@github\.com:|(?:ssh|https):\/\/(?:git@)?github\.com\/)([^/\s]+)\/([^/\s]+)$/;
+
+/** `owner/repo` of a GitHub remote URL (ssh, ssh:// or https), or null. */
+export function repoFromRemote(remote) {
+  const text = String(remote ?? "").trim().replace(/\.git$/, "");
+  const match = REMOTE.exec(text);
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
 /** `{ok, errors}` for the endpoint against the publishing repository. */
 export function checkEndpoint(url, repository) {
   const repo = endpointRepo(url);

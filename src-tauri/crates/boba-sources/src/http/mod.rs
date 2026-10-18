@@ -18,7 +18,7 @@ use reqwest::header::{
 use texting_robots::Robot;
 
 /// Honest identity: `BobaJobFind/<ver> (+repo URL)` (AD-10).
-pub const REPO_URL: &str = "https://github.com/diegoarenas/boba-job-find";
+pub const REPO_URL: &str = "https://github.com/DdeDiegoA/bobba-job-find";
 
 /// Redirects a robots.txt fetch may follow before it is treated as broken
 /// (RFC 9309 allows five). A broken chain fails closed (AD-10).

@@ -1,7 +1,7 @@
 # Install Boba Job Find
 
 Boba Job Find is a local-first desktop app. Download the installer for your OS
-from the [latest release](https://github.com/diegoarenas/boba-job-find/releases/latest),
+from the [latest release](https://github.com/DdeDiegoA/bobba-job-find/releases/latest),
 or build it yourself from source.
 
 | OS | Installer | Signing |

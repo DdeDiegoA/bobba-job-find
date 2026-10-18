@@ -3,7 +3,7 @@
 ## Install
 
 1. Download `Boba Job Find_<version>_x64-setup.exe` (NSIS) from the
-   [latest release](https://github.com/diegoarenas/boba-job-find/releases/latest).
+   [latest release](https://github.com/DdeDiegoA/bobba-job-find/releases/latest).
    The `.msi` is published for managed installs; both work the same.
 2. Windows 10/11 x64 is supported.
 

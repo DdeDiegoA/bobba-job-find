@@ -56,7 +56,7 @@ pub fn user_agent() -> String {
     format!(
         "BobaJobFind/{} (+{})",
         env!("CARGO_PKG_VERSION"),
-        "https://github.com/diegoarenas/boba-job-find"
+        "https://github.com/DdeDiegoA/bobba-job-find"
     )
 }
 
