@@ -4,7 +4,8 @@ import { NavLink } from "react-router";
 import { useTheme } from "@/app/theme";
 import { currentLocale, setLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { NAV_ITEMS, type RunState } from "./nav";
+import { NAV_ITEMS } from "./nav";
+import type { RunState } from "./use-run-now";
 
 const navLinkBase =
   "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors max-xl:justify-center max-xl:px-0";

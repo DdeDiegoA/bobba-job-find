@@ -7,15 +7,22 @@ import { openPalette } from "@/app/palette/store";
 import { Button } from "@/components/ui/button";
 import { RunProgress } from "@/features/today/run-report/run-progress";
 import { currentLocale } from "@/lib/i18n";
-import { pageTitleKey, type RunState } from "./nav";
+import { cn } from "@/lib/utils";
+import { pageTitleKey } from "./nav";
+import type { RunMessage, RunState } from "./use-run-now";
 
 interface TopbarProps {
   run: RunState;
+  /** The core's reason for a failed Run now, or the "already running" notice. */
+  message: RunMessage | null;
+  /** The command is in flight: keep the button from firing twice. */
+  pending: boolean;
+  onRunNow: () => void;
   searchRef: RefObject<HTMLButtonElement | null>;
   onSearch: () => void;
 }
 
-export function Topbar({ run, searchRef, onSearch }: TopbarProps) {
+export function Topbar({ run, message, pending, onRunNow, searchRef, onSearch }: TopbarProps) {
   const { t } = useTranslation();
   const { pathname } = useLocation();
 
@@ -43,21 +50,34 @@ export function Topbar({ run, searchRef, onSearch }: TopbarProps) {
         <span className="max-lg:hidden">{t("shell:topbar.searchHint")}</span>
       </button>
 
-      {/* ponytail: no handler yet; the run lifecycle (S2.2) starts a run over IPC. */}
       <Button
         type="button"
         size="sm"
-        disabled={run.running}
+        disabled={run.running || pending}
         title={run.running ? t("shell:topbar.runNow.busy") : undefined}
+        onClick={onRunNow}
       >
         {run.running ? t("shell:topbar.runNow.running") : t("shell:topbar.runNow")}
       </Button>
 
-      {run.autoEnabled ? (
-        <div data-slot="kill-switch" className="shrink-0">
-          <KillSwitch />
-        </div>
+      {message ? (
+        <span
+          data-slot="run-message"
+          role={message.kind === "error" ? "alert" : "status"}
+          title={message.text}
+          className={cn(
+            "max-w-56 truncate text-xs max-lg:hidden",
+            message.kind === "error" ? "text-danger" : "text-fg-muted",
+          )}
+        >
+          {message.text}
+        </span>
       ) : null}
+
+      {/* The safety control is always reachable (FX4): it reads its own state. */}
+      <div data-slot="kill-switch" className="shrink-0">
+        <KillSwitch />
+      </div>
 
       <RunProgress />
       <RunStatus run={run} />

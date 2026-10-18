@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useNavigate } from "react-router";
 import CommandPalette from "@/app/palette";
 import { useTheme } from "@/app/theme";
 import { EmptyState } from "@/components/ui/empty-state";
-import { IDLE_RUN_STATE, NAV_ITEMS, type RunState } from "./nav";
+import { NAV_ITEMS } from "./nav";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
+import { useRunNow } from "./use-run-now";
 
 function isEditable(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -90,9 +91,7 @@ export function Shell() {
   const { t } = useTranslation();
   const { toggleTheme } = useTheme();
   const searchRef = useRef<HTMLButtonElement>(null);
-  // ponytail: idle placeholder; the run lifecycle (S2.2) and Kill Switch (S9.8)
-  // wire the real values over IPC.
-  const [run] = useState<RunState>(IDLE_RUN_STATE);
+  const { run, message, pending, runNow } = useRunNow();
   const focusSearch = useCallback(() => searchRef.current?.focus(), []);
   useShellShortcuts({ focusSearch, toggleTheme });
 
@@ -104,7 +103,14 @@ export function Shell() {
       <div className="shell grid h-full grid-cols-[15rem_minmax(0,1fr)] max-xl:grid-cols-[4rem_minmax(0,1fr)]">
         <Sidebar run={run} />
         <div className="flex h-full min-w-0 flex-col">
-          <Topbar run={run} searchRef={searchRef} onSearch={focusSearch} />
+          <Topbar
+            run={run}
+            message={message}
+            pending={pending}
+            onRunNow={runNow}
+            searchRef={searchRef}
+            onSearch={focusSearch}
+          />
           <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto">
             <Outlet />
           </main>

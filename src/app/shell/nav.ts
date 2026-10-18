@@ -47,21 +47,3 @@ export function pageTitleKey(pathname: string): string {
   )[0];
   return match?.labelKey ?? "shell:nav.today";
 }
-
-/**
- * Shell-level run state. A placeholder seam: the run lifecycle (S2.2) and the
- * Kill Switch (S9.8) slices replace `IDLE_RUN_STATE` with IPC/event-bus values.
- */
-export interface RunState {
-  running: boolean;
-  autoEnabled: boolean;
-  lastRunAt: string | null;
-  newCount: number;
-}
-
-export const IDLE_RUN_STATE: RunState = {
-  running: false,
-  autoEnabled: false,
-  lastRunAt: null,
-  newCount: 0,
-};
