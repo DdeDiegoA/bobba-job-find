@@ -427,21 +427,48 @@ mod tests {
         );
     }
 
+    /// The fastest of three runs: one scheduler stall must not decide a test.
+    fn fastest_of_three(html: &str) -> std::time::Duration {
+        (0..3)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                let text = html_to_text(std::hint::black_box(html));
+                std::hint::black_box(text);
+                started.elapsed()
+            })
+            .min()
+            .expect("three runs")
+    }
+
+    /// Guards against quadratic work without a wall-clock deadline (FX19): four
+    /// times the input takes about four times as long when the work is linear
+    /// and about sixteen when it is quadratic. Under load both runs slow down
+    /// together, so the ratio holds; the 50ms slack covers a base run fast
+    /// enough to be pure timer noise.
+    fn assert_linear_time(named: &str, once: &str, four_times: &str) {
+        let small = fastest_of_three(once).as_secs_f64();
+        let big = fastest_of_three(four_times).as_secs_f64();
+        assert!(
+            big <= small * 10.0 + 0.050,
+            "{named}: 4x the input took {big:.4}s against {small:.4}s; that is not linear"
+        );
+    }
+
     #[test]
     fn many_script_tags_are_stripped_in_linear_time() {
-        let mut html = String::from("<html><body>");
-        for _ in 0..50_000 {
-            html.push_str("<script>alert('x')</script><p>hello</p>");
-        }
-        let started = std::time::Instant::now();
+        let tagged = |count: usize| {
+            let mut html = String::from("<html><body>");
+            for _ in 0..count {
+                html.push_str("<script>alert('x')</script><p>hello</p>");
+            }
+            html
+        };
+        let html = tagged(50_000);
         let text = html_to_text(&html);
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
-            "stripping 50k tags took {:?}",
-            started.elapsed()
-        );
         assert!(text.contains("hello"));
         assert!(!text.contains("alert"));
+
+        assert_linear_time("50k tags", &html, &tagged(200_000));
     }
 
     #[test]
@@ -449,27 +476,18 @@ mod tests {
         // The exact shape that made the first version quadratic: no closing
         // tag anywhere, so every later open tag would rescan the whole rest.
         let html = "<script>".repeat(50_000);
-        let started = std::time::Instant::now();
-        let text = html_to_text(&html);
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
-            "stripping 50k unclosed script tags took {:?}",
-            started.elapsed()
-        );
-        assert!(text.is_empty());
+        assert!(html_to_text(&html).is_empty());
+
+        assert_linear_time("unclosed tags", &html, &"<script>".repeat(200_000));
     }
 
     #[test]
     fn an_unterminated_script_stops_instead_of_rescanning_the_remainder() {
-        let html = String::from("<p>before</p><script>") + &"<p>after</p>".repeat(50_000);
-        let started = std::time::Instant::now();
-        let text = html_to_text(&html);
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(1),
-            "stripping an unterminated script took {:?}",
-            started.elapsed()
-        );
-        assert_eq!(text, "before");
+        let body = |count: usize| format!("<p>before</p><script>{}", "<p>after</p>".repeat(count));
+        let html = body(50_000);
+        assert_eq!(html_to_text(&html), "before");
+
+        assert_linear_time("unterminated script", &html, &body(200_000));
     }
 
     #[test]

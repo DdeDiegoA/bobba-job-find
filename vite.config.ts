@@ -25,6 +25,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    setupFiles: ["./src/test/setup.ts"],
     passWithNoTests: true,
     // 5s (Vitest's default) flakes under parallel load (CH12): a jsdom render
     // plus a React Query tick can exceed it on a busy machine.

@@ -108,7 +108,8 @@ describe("Connections container (FX3)", () => {
     expect(await screen.findByRole("heading", { name: "Remotive" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Connections", level: 1 })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Sources", level: 2 })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: /^Email/, level: 2 })).toBeTruthy();
+    // The Email section has its own read, so it can land after the Sources one.
+    expect(await screen.findByRole("heading", { name: /^Email/, level: 2 })).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
