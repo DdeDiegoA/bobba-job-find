@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use boba_domain::audit::AuditOutcome;
-use boba_domain::profile::improve::FactImprovement;
+use boba_domain::profile::improve::{FactImprovement, MAX_IMPROVEMENT_TEXT};
 use boba_domain::profile::{FactProposal, ProfileFact, new_ulid};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -77,7 +77,9 @@ impl ContractError {
 }
 
 /// One improvement as the run proposes it. The core keeps the fact's own
-/// revision, kind and variants: the run names the item and the text it wants.
+/// revision, kind, evidence and structured detail: the run names the item and
+/// the text it wants. `evidence` and `detail` in the payload are ignored (R1):
+/// evidence is the fact's source grounding, so an agent may not attach any.
 #[derive(Debug, Clone, Deserialize)]
 struct ProposedImprovement {
     item_id: String,
@@ -85,11 +87,6 @@ struct ProposedImprovement {
     text_en: Option<String>,
     #[serde(default)]
     text_es: Option<String>,
-    #[serde(default)]
-    evidence: Option<String>,
-    /// Kind-specific fields (organisation, dates, CEFR level, …) as JSON.
-    #[serde(default)]
-    detail: Option<Value>,
 }
 
 /// Validate one `propose_fact_improvements` payload at the tool boundary (AD-5).
@@ -122,8 +119,16 @@ fn improvements_of(args: &Value) -> Result<Vec<ProposedImprovement>, ContractErr
                 "an improvement needs English or Spanish text",
             ));
         }
-        if !matches!(improvement.detail.as_ref(), None | Some(Value::Object(_))) {
-            return Err(ContractError::new("`detail` must be an object"));
+        // R4: a suggestion is a rewritten fact, not a document. Refusing it
+        // here gives the agent a message it can retry with, rather than
+        // storing pages of agent text or truncating it behind the user's back.
+        if [en, es]
+            .into_iter()
+            .any(|text| text.chars().count() > MAX_IMPROVEMENT_TEXT)
+        {
+            return Err(ContractError::new(format!(
+                "an improvement's text may not exceed {MAX_IMPROVEMENT_TEXT} characters"
+            )));
         }
         parsed.push(improvement);
     }
@@ -357,6 +362,11 @@ impl ImproveService {
         fact: &ProfileFact,
         events: &[AgentEvent],
     ) -> Result<(), ProfileImproveError> {
+        // A call the boundary refused is the agent's to fix: it may retry in
+        // the same run. Only a run where every call was refused reports the
+        // contract failure, so a retried over-long suggestion (R4) still lands.
+        let mut accepted = 0_usize;
+        let mut refused = false;
         for event in events {
             let AgentEvent::ToolCall { name, input } = event else {
                 continue;
@@ -364,13 +374,19 @@ impl ImproveService {
             if rsplit2(name) != Some(IMPROVE_TOOL) {
                 continue;
             }
-            for proposed in improvements_of(input).map_err(|_| ProfileImproveError::Contract)? {
+            let Ok(proposed) = improvements_of(input) else {
+                refused = true;
+                continue;
+            };
+            for proposed in proposed {
                 if proposed.item_id != fact.item_id {
                     continue;
                 }
                 // The suggestion rewrites what it names and keeps everything
                 // else: the run can improve one language without wiping the
-                // other, the evidence or the structured detail.
+                // other. Evidence and structured detail are the fact's own and
+                // never the run's (R1): evidence grounds the fact in the CV, so
+                // an agent may not attach any.
                 let mut draft = fact.draft();
                 if let Some(en) = clean(proposed.text_en) {
                     draft.text_en = Some(en);
@@ -378,18 +394,15 @@ impl ImproveService {
                 if let Some(es) = clean(proposed.text_es) {
                     draft.text_es = Some(es);
                 }
-                if let Some(evidence) = clean(proposed.evidence) {
-                    draft.evidence = Some(evidence);
-                }
-                if let Some(detail) = proposed.detail {
-                    draft.detail_json = detail.to_string();
-                }
                 let improvement = FactImprovement {
                     item_id: fact.item_id.clone(),
                     base_revision: fact.id.clone(),
                     draft,
                 };
-                if !improvement.keeps_variants(fact) || improvement.validate().is_err() {
+                if !improvement.keeps_variants(fact)
+                    || improvement.validate().is_err()
+                    || !improvement.text_within_cap()
+                {
                     continue;
                 }
                 let proposal = FactProposal {
@@ -407,7 +420,11 @@ impl ImproveService {
                 self.repo
                     .proposal_append(&proposal)
                     .map_err(|_| ProfileImproveError::Store)?;
+                accepted += 1;
             }
+        }
+        if accepted == 0 && refused {
+            return Err(ProfileImproveError::Contract);
         }
         Ok(())
     }
@@ -723,6 +740,124 @@ mod tests {
         assert_eq!(fixture.profile.proposals_pending().unwrap().len(), 1);
     }
 
+    // R1 (FX10a review): the run rewrites text only. Evidence is source
+    // grounding and detail is structured data: the core keeps the fact's own
+    // whatever the run sent, so no agent can attach evidence the CV never said.
+    #[test]
+    fn a_suggestion_keeps_the_facts_own_evidence_and_detail() {
+        let fixture = fixture(vec![]);
+        let clock = std::sync::Arc::new(FixedClock::new("2026-10-18T09:30:00.000Z"));
+        ProfileService::new(fixture.profile.clone(), clock)
+            .save(FactRevisionInput {
+                item_id: Some(fixture.item_id.clone()),
+                kind: "experience".to_string(),
+                text_en: Some("Backend engineer at Nimbus".to_string()),
+                text_es: None,
+                evidence: Some("Nimbus CV, 2024: backend rewrite".to_string()),
+                detail_json: Some(r#"{"organisation":"Nimbus"}"#.to_string()),
+            })
+            .expect("seed the fact with evidence");
+        let item = fixture.item_id.clone();
+        *fixture.agents.events.lock().unwrap() = vec![
+            AgentEvent::ToolCall {
+                name: "mcp__boba__propose_fact_improvements".to_string(),
+                input: json!({ "improvements": [{
+                    "item_id": item,
+                    "text_en": "Led the Nimbus backend rewrite in Rust",
+                    "evidence": "Patent pending, 2025",
+                    "detail": { "organisation": "Invented Corp" }
+                }]}),
+            },
+            finished(),
+        ];
+
+        let outcome = fixture.service.start(request(&item)).expect("improve");
+        let proposal = &outcome.proposals[0];
+        assert_eq!(
+            proposal.evidence.as_deref(),
+            Some("Nimbus CV, 2024: backend rewrite")
+        );
+        assert!(proposal.detail_json.contains("Nimbus"));
+        assert!(
+            !proposal.detail_json.contains("Invented"),
+            "{}",
+            proposal.detail_json
+        );
+
+        let snapshot = fixture
+            .service
+            .confirm(&proposal.id, None)
+            .expect("confirm");
+        assert_eq!(snapshot.profile_version, 3);
+        let latest = fixture
+            .profile
+            .revisions()
+            .last()
+            .cloned()
+            .expect("revision");
+        assert_eq!(
+            latest.evidence.as_deref(),
+            Some("Nimbus CV, 2024: backend rewrite"),
+            "the confirmed fact keeps its own source grounding"
+        );
+        assert!(latest.detail_json.contains("Nimbus"));
+    }
+
+    // R4: an over-long suggestion is refused at the tool boundary with a
+    // contract error the agent can retry, never stored and never truncated.
+    #[test]
+    fn an_over_long_suggestion_is_refused_at_the_tool_boundary() {
+        let at_cap = "a".repeat(boba_domain::profile::improve::MAX_IMPROVEMENT_TEXT);
+        let over_cap = "a".repeat(boba_domain::profile::improve::MAX_IMPROVEMENT_TEXT + 1);
+        assert_eq!(
+            validate_improvements(&json!({ "improvements": [{
+                "item_id": "01ITEM", "text_en": at_cap
+            }]}))
+            .unwrap(),
+            1
+        );
+        assert!(
+            validate_improvements(&json!({ "improvements": [{
+                "item_id": "01ITEM", "text_en": over_cap
+            }]}))
+            .is_err(),
+            "an over-long suggestion must be refused, not stored"
+        );
+
+        // And a run that bypasses the boundary still stores nothing.
+        let fixture = fixture(vec![]);
+        let item = fixture.item_id.clone();
+        *fixture.agents.events.lock().unwrap() = vec![suggestion(&item, &over_cap), finished()];
+        let error = fixture
+            .service
+            .start(request(&item))
+            .expect_err("over-long suggestion");
+        assert_eq!(error.message_key(), "errors.profile_improve.contract");
+        assert!(fixture.profile.proposals_pending().unwrap().is_empty());
+    }
+
+    // R4: a refused call is the agent's to fix. When it retries with a shorter
+    // suggestion, the run keeps what the retry produced; only a run where every
+    // call was refused reports the contract failure.
+    #[test]
+    fn a_refused_suggestion_can_be_retried_in_the_same_run() {
+        let fixture = fixture(vec![]);
+        let item = fixture.item_id.clone();
+        let over_cap = "a".repeat(boba_domain::profile::improve::MAX_IMPROVEMENT_TEXT + 1);
+        *fixture.agents.events.lock().unwrap() = vec![
+            suggestion(&item, &over_cap),
+            suggestion(&item, "Led the Nimbus backend rewrite in Rust"),
+            finished(),
+        ];
+
+        let outcome = fixture.service.start(request(&item)).expect("improve");
+        assert_eq!(outcome.proposals.len(), 1);
+        assert_eq!(
+            outcome.proposals[0].text_en.as_deref(),
+            Some("Led the Nimbus backend rewrite in Rust")
+        );
+    }
+
     #[test]
     fn the_tool_boundary_refuses_a_payload_outside_the_contract() {
         assert!(validate_improvements(&json!({ "improvements": "nope" })).is_err());
@@ -739,11 +874,15 @@ mod tests {
             }]}))
             .is_err()
         );
-        assert!(
+        // R1: `evidence` and `detail` are the fact's own, not the run's; the
+        // boundary ignores them rather than trusting them.
+        assert_eq!(
             validate_improvements(&json!({ "improvements": [{
-                "item_id": "01ITEM", "text_en": "Rust", "detail": "nope"
+                "item_id": "01ITEM", "text_en": "Rust", "detail": "nope",
+                "evidence": "anything"
             }]}))
-            .is_err()
+            .unwrap(),
+            1
         );
         assert_eq!(
             validate_improvements(&json!({ "improvements": [{

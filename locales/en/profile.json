@@ -44,5 +44,16 @@
   "drafts.cancel": "Cancel",
   "drafts.discard": "Delete",
   "drafts.editHint": "This is the full proposed text. Edit the wording before saving.",
-  "drafts.untrusted": "Boba read this from text it didn't write. Check it before saving."
+  "drafts.untrusted": "Boba read this from text it didn't write. Check it before saving.",
+  "improve.aria": "Improve this fact with AI",
+  "improve.suggest": "Suggest improvement",
+  "improve.running": "Asking your AI engine…",
+  "improve.suggestion": "Suggested improvement",
+  "improve.current": "Current text",
+  "improve.suggested": "Suggested text",
+  "improve.accept": "Accept",
+  "improve.reject": "Reject",
+  "improve.empty": "Your AI engine didn't suggest a change.",
+  "improve.unsupported": "Your AI engine can't suggest improvements safely.",
+  "improve.openSettings": "Choose an engine"
 }

@@ -46,7 +46,24 @@ impl FactImprovement {
     pub fn validate(&self) -> Result<(), ProfileRuleError> {
         self.draft.validate()
     }
+
+    /// Whether every variant stays within [`MAX_IMPROVEMENT_TEXT`] characters
+    /// (R4). The tool boundary rejects an over-long suggestion with a message
+    /// the agent can retry; this is the core's own last-line check.
+    pub fn text_within_cap(&self) -> bool {
+        [self.draft.text_en.as_deref(), self.draft.text_es.as_deref()]
+            .into_iter()
+            .flatten()
+            .all(|text| text.chars().count() <= MAX_IMPROVEMENT_TEXT)
+    }
 }
+
+/// The longest suggestion text the core will store, in **characters** (R4).
+///
+/// A suggestion is a rewritten fact — a sentence or two — not a document. The
+/// core applies the cap at the tool boundary so an over-long run is refused
+/// with a message the agent can retry, instead of storing pages of agent text.
+pub const MAX_IMPROVEMENT_TEXT: usize = 2_000;
 
 #[cfg(test)]
 mod tests {
@@ -133,6 +150,40 @@ mod tests {
             drops_es.keeps_variants(&both),
             "removing a variant is an edit the user reviews, not an invention"
         );
+    }
+
+    // R4: agent text has a length cap. A suggestion that dumps pages is refused
+    // instead of stored, and the cap counts characters, not bytes.
+    #[test]
+    fn a_suggestion_longer_than_the_cap_is_refused() {
+        let at_cap = "a".repeat(MAX_IMPROVEMENT_TEXT);
+        let over_cap = "a".repeat(MAX_IMPROVEMENT_TEXT + 1);
+        let within = FactImprovement {
+            item_id: "01ITEM".to_string(),
+            base_revision: "01REV1".to_string(),
+            draft: draft(Some(&at_cap), None),
+        };
+        assert!(within.text_within_cap(), "the cap itself is allowed");
+
+        let too_long = FactImprovement {
+            item_id: "01ITEM".to_string(),
+            base_revision: "01REV1".to_string(),
+            draft: draft(None, Some(&over_cap)),
+        };
+        assert!(
+            !too_long.text_within_cap(),
+            "either variant may hit the cap"
+        );
+
+        // Multibyte text is cheap in characters: 2 000 `é` is within the cap
+        // even though it is 4 000 bytes.
+        let accents = "é".repeat(MAX_IMPROVEMENT_TEXT);
+        let multibyte = FactImprovement {
+            item_id: "01ITEM".to_string(),
+            base_revision: "01REV1".to_string(),
+            draft: draft(Some(&accents), None),
+        };
+        assert!(multibyte.text_within_cap());
     }
 
     // The profile's own rule still applies: a suggestion with no text at all

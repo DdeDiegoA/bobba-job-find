@@ -44,5 +44,16 @@
   "drafts.cancel": "Cancelar",
   "drafts.discard": "Descartar",
   "drafts.editHint": "Este es el texto propuesto completo. Edita la redacción antes de guardar.",
-  "drafts.untrusted": "Boba lo leyó de un texto que no escribió. Revísalo antes de guardar."
+  "drafts.untrusted": "Boba lo leyó de un texto que no escribió. Revísalo antes de guardar.",
+  "improve.aria": "Mejorar este dato con IA",
+  "improve.suggest": "Sugerir mejora",
+  "improve.running": "Consultando tu motor de IA…",
+  "improve.suggestion": "Mejora sugerida",
+  "improve.current": "Texto actual",
+  "improve.suggested": "Texto sugerido",
+  "improve.accept": "Aceptar",
+  "improve.reject": "Rechazar",
+  "improve.empty": "Tu motor de IA no sugirió ningún cambio.",
+  "improve.unsupported": "Tu motor de IA no puede sugerir mejoras de forma segura.",
+  "improve.openSettings": "Elegir un motor"
 }
