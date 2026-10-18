@@ -618,9 +618,8 @@ mod tests {
     ///
     /// Hermetic: the shell is a temp-dir script whose answer is hardcoded, so
     /// the host's `$SHELL`, `$HOME` and rc files cannot change the result. It
-    /// scans `"$@"` rather than `$1`, because the positional parameters a `#!`
-    /// script receives depend on the interpreter that runs it (bash, dash and
-    /// zsh differ), and the probe must work with whichever shell a user runs.
+    /// looks for the flag anywhere in `"$@"` rather than only in `$1`, so the
+    /// fixture cannot be defeated by how the arguments are positioned.
     /// Windows is covered by neither half: it has no login-shell `PATH`, and
     /// [`login_shell_path_from`] only exists under `cfg(unix)`.
     #[cfg(unix)]
@@ -637,6 +636,11 @@ mod tests {
              *) printf '%s' '__BOBA_PATH__/usr/bin:/bin__BOBA_END__' ;;\n\
              esac\n",
         );
+        // A script written a moment ago can lose its very first exec to a
+        // transient kernel/loader hiccup (reported as exit 127, which the probe
+        // reads as "this flag did not answer"). Warm the fixture up so the
+        // assertion measures the flag handling, not the first exec.
+        let _ = run_capture_inherited(&shell, &[], Duration::from_secs(2));
         assert_eq!(
             login_shell_path_from(&shell).as_deref(),
             Some("/opt/from-zshrc:/usr/bin")
@@ -645,7 +649,7 @@ mod tests {
     }
 
     /// A shell that cannot run interactively still yields its login PATH.
-    /// The fake scans `"$@"` for the same reason as the test above.
+    /// The fake matches the flag anywhere in `"$@"`, as the test above does.
     #[cfg(unix)]
     #[test]
     fn login_shell_path_falls_back_to_a_login_shell() {

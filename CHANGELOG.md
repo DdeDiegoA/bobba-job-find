@@ -11,23 +11,33 @@ Pre-release, like beta.1: the tag is `v1.0.0-beta.2`, so it never becomes
 
 ### Fixed
 
-- AI engine detection when the app is launched from Finder: the probe now
-  reads the login shell's `PATH` and also looks in `~/.opencode/bin`, so a CLI
-  installed for your shell is found (FIX1).
-- The **Test connection** step reports actionable errors and falls back to
-  Limited mode instead of failing the setup wizard (FIX1).
-- The macOS DMG mounts without a licence agreement window, and every macOS
-  install step matches the quarantine path (`xattr -d com.apple.quarantine`)
-  needed by the self-signed build (REL6).
+- AI engines when the app is launched from Finder: the probe now also searches
+  the login-shell `PATH` and the known install dirs a GUI launch misses
+  (`~/.opencode/bin`, and the pnpm global bin dir on Linux and Windows), so a
+  CLI your shell finds is found here too (FIX1).
+- The **Test connection** step reports actionable errors and offers Limited
+  mode as the way on, instead of leaving the setup wizard stuck (FIX1).
+- Settings navigation resolves every entry against `/settings`, so a second
+  click no longer nests the URL and falls back to Preferences (FX1).
+- The command palette runs the row you hover or arrow to, not the last row
+  (FX2).
+- The **Connections** page mounts Sources, Email and the session-board opt-in
+  instead of the placeholder (FX3).
+- The onboarding email step explains why the one-click buttons can be
+  disabled, and offers Skip or bring-your-own-client under Connections > Email
+  as the way on (FX5).
+- The macOS DMG mounts without a licence agreement window, and the install
+  steps match the quarantine path for the self-signed build:
+  `xattr -dr com.apple.quarantine "/Applications/Boba Job Find.app"` (REL6).
 
 ### Release pipeline
 
-- Releases run only after the CI gate passes (REL2).
+- Releases run only after the CI gate passes (REL3).
 - `latest.json` points at public release asset URLs so the updater can fetch
-  them (REL3).
+  them (REL5).
 - Windows MSI gets a numeric WiX version derived from the tag
-  (`v1.0.0-beta.2` → `1.0.0.2`), and the workflow uses `bash` on Windows
-  (REL2–REL5).
+  (`v1.0.0-beta.2` → `1.0.0.2`) (REL2), and the release workflow uses `bash`
+  on Windows (REL4).
 
 ## [1.0.0-beta.1] - 2026-10-18
 
