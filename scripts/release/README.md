@@ -8,6 +8,7 @@ hand, and its parsing lives in `lib/` with unit tests (`pnpm test`).
 | `check-version.mjs <tag>` | Fails unless the tag, `package.json`, `tauri.conf.json` and `Cargo.toml` agree (AD-22). | release guard |
 | `verify-updater-pubkey.mjs` | Fails unless `plugins.updater.pubkey` is a real minisign public key (never a placeholder or a secret key). | release guard |
 | `verify-updater-endpoint.mjs` | Fails unless the updater endpoint names the repository running it (`GITHUB_REPOSITORY`, or `--repo` locally). Release-only: on a fork, CI's repository is the fork, so the check lives in `release.yml`. | release guard |
+| `wix-version.mjs <tag> [--config <path>]` | Prints the numeric MSI version for the tag and, with `--config`, writes it as `tauri.windows.conf.json` (WiX cannot carry `1.0.0-beta.1`). | release guard + Windows build |
 | `check-macos-signature.mjs <App.app>` | Fails on an ad-hoc signature, the wrong identifier, or a designated requirement whose certificate differs from `macos-identity.pin` (ADR-009). | release build + publish |
 | `verify-release.mjs <tag> <dir>` | Fails unless every installer, the `.sig` files and a `latest.json` resolving every platform are attached, the version matches the tag, and the release is not a draft. | publish |
 | `build-sidecars.sh <triple>` | Builds `boba-mcp` for the release target and places it in `src-tauri/binaries/` (universal on macOS). | release build |
@@ -19,5 +20,6 @@ hand, and its parsing lives in `lib/` with unit tests (`pnpm test`).
 must carry. See `docs/install/RELEASING.md` for key custody and the full
 runbook.
 
-Pure parsing (tag/version rules, `codesign` output, `latest.json`, minisign
-keys) lives in `lib/*.mjs` and is unit-tested in `lib/*.test.mjs`.
+Pure parsing (tag/version rules, the MSI mapping, `codesign` output,
+`latest.json`, minisign keys) lives in `lib/*.mjs` and is unit-tested in
+`lib/*.test.mjs`.

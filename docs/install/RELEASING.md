@@ -114,6 +114,33 @@ SignPath steps to the Windows matrix entry and remove that section from
 A beta (`v0.3.0-beta.1`) is built and published the same way but never becomes
 `/releases/latest`, so the updater keeps serving the stable channel.
 
+### The MSI version
+
+The app version stays semver everywhere — the updater, the update guard and the
+release guard all read `1.0.0-beta.1` — but WiX (the MSI toolset) accepts only a
+numeric `major.minor.patch.build`, with major/minor ≤ 255 and patch/build ≤
+65535. The release workflow therefore derives `bundle.windows.wix.version` from
+the tag with `scripts/release/wix-version.mjs`, which writes it to
+`src-tauri/tauri.windows.conf.json` (generated on the Windows runner, gitignored,
+merged by Tauri on Windows only):
+
+| Tag | MSI version |
+|---|---|
+| `v1.0.0-beta.1` | `1.0.0.1` |
+| `v1.0.0-beta.12` | `1.0.0.12` |
+| `v1.0.0-rc.2` | `1.0.0.2` |
+| `v1.0.0` | `1.0.0.65535` |
+
+The build field is the last numeric part of the pre-release (`-beta` with no
+number counts as 1), and a stable release takes the maximum so it always
+upgrades its own betas. Nothing to edit per release: the guard fails early if a
+tag cannot be represented. To build a beta MSI locally, run the same command
+before `pnpm tauri build`:
+
+```sh
+node scripts/release/wix-version.mjs v1.0.0-beta.1 --config src-tauri/tauri.windows.conf.json
+```
+
 To rebuild an existing tag without moving it: Actions → Release → Run workflow,
 enter the tag.
 
