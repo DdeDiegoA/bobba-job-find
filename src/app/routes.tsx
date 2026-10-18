@@ -26,8 +26,8 @@ function FirstRun() {
 
 /**
  * Every top-level screen (AC9). `createHashRouter` is the Tauri history
- * strategy (memory/hash, ARCHITECTURE-SPINE §Stack). Placeholder pages are
- * replaced by their owning slice; this route table is not edited by them.
+ * strategy (memory/hash, ARCHITECTURE-SPINE §Stack). Each screen is owned by a
+ * feature slice; this route table is not edited by them.
  * Onboarding and Unlock are full-window (no shell chrome).
  */
 export const routes = [

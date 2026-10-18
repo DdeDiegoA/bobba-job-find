@@ -1,6 +1,5 @@
-//! Native notifications (S5.1 stub, replaced by S5.3): the digest a finished
-//! run announces (FR-45), the preferences that shape it (FR-107), and the click
-//! that opens Today.
+//! Native notifications: the digest a finished run announces (FR-45), the
+//! preferences that shape it (FR-107), and the click that opens Today.
 //!
 //! The decisions live in `boba_app::digest`; this module names them in the UI
 //! locale and hands them to the OS. It also owns the one thing the core cannot
