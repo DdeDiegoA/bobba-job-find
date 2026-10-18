@@ -10,7 +10,7 @@ import TodayRunReport from "./run-report";
  * those is a leaf its own slice owns, and each appends one line to
  * [`TODAY_PANELS`] when its real UI lands. This slice builds the matches panel.
  */
-const TODAY_PANELS: readonly { id: string; Component: () => React.JSX.Element }[] = [
+export const TODAY_PANELS: readonly { id: string; Component: () => React.JSX.Element }[] = [
   { id: "matches", Component: TodayMatches },
   { id: "needs-you", Component: TodayNeedsYou },
   { id: "outbox", Component: TodayOutbox },

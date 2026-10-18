@@ -16,8 +16,12 @@
 //      module's `mount()` helper that `port_list.rs` itself calls.
 //   6. The adapter dependency rule has a test (`src-tauri/tests/
 //      dependency_rules.rs`); this gate only makes sure that test is present.
+//   7. Feature leaves are mounted, pages are not placeholders, and no
+//      interactive element ships with a "no handler yet" marker (FX18,
+//      scripts/ci/leaf-guard.mjs).
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { checkLeafGuard } from "./leaf-guard.mjs";
 
 const ROOT = process.cwd();
 const errors = [];
@@ -280,6 +284,13 @@ if (!existsSync(join(ROOT, DEPENDENCY_RULES))) {
   );
 }
 
+/// 7. Mounted leaves ----------------------------------------------------------
+
+// FX18: the beta.2 stub sweep found six built-but-unmounted screens. A leaf, a
+// placeholder page or a dead control is invisible to the compiler; this rule
+// sees it. `scripts/ci/check-conventions.test.mjs` holds the negative tests.
+for (const problem of checkLeafGuard(ROOT)) fail(problem);
+
 /// Report ---------------------------------------------------------------------
 
 if (errors.length) {
@@ -288,5 +299,6 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(
-  "conventions ok: event names, error catalogs, migrations, IPC list, port list, dependency rules",
+  "conventions ok: event names, error catalogs, migrations, IPC list, port list, dependency rules, " +
+    "mounted leaves",
 );

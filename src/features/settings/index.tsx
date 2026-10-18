@@ -20,7 +20,11 @@ import SettingsScoring from "./scoring";
  * the page for the current `/settings/<id>` path. Each later settings slice
  * appends one entry — one line — to `SETTINGS_PAGES`.
  */
-const SETTINGS_PAGES: readonly { id: string; labelKey: string; Component: ComponentType }[] = [
+export const SETTINGS_PAGES: readonly {
+  id: string;
+  labelKey: string;
+  Component: ComponentType;
+}[] = [
   { id: "preferences", labelKey: "preferences:title", Component: SettingsPreferences },
   {
     id: "privacy/sessions",
