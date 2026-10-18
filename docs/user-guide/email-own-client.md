@@ -25,8 +25,9 @@ password, and needs no client at all.
 | Microsoft Graph | `Mail.Send`, `offline_access` | `Mail.Read`, `Mail.Send`, `offline_access` |
 | Gmail | `gmail.send` | `gmail.send`, `gmail.readonly` |
 
-No admin consent and no access without you. Reading is always opt-in, and Boba only reads
-messages that belong to your applications, locally.
+No admin consent and no access without you. Reading is always opt-in: when it is on, the
+sync narrows the mailbox to the company domains your applications were sent to and the
+threads Boba started, and keeps what matches on this device.
 
 ## Microsoft (Outlook / Microsoft 365)
 
@@ -35,10 +36,11 @@ messages that belong to your applications, locally.
 3. Give it a name (for example `Boba Job Find`), choose **Accounts in any organizational
    directory and personal Microsoft accounts**, and add a redirect URI:
    - Platform: **Mobile and desktop applications** (a public client; no secret is issued).
-   - Redirect URI: `http://127.0.0.1` — Microsoft treats loopback redirects from public
-     clients as matching any port, which is exactly what Boba needs.
-   - If Microsoft later reports a redirect-URI mismatch, add `http://127.0.0.1/cb` to the
-     same platform, and use the exact address the browser shows when Boba opens it.
+   - Redirect URI: `http://127.0.0.1/cb` — Boba always calls back on the `/cb` path, and
+     Microsoft treats loopback redirects from public clients as matching any port, so this
+     one entry covers every sign-in.
+   - If the portal refuses that URI, register `http://127.0.0.1` instead: the port changes
+     every time, the path never does.
 4. Copy the **Application (client) ID** from the app's overview page.
 5. In Boba: **Connections → Email → Outlook / Microsoft 365**, paste it into **Your own
    client ID**, choose **Send only** or **Read and send**, and press **Connect Outlook**.
@@ -86,8 +88,9 @@ optional; when it does not, they are the main way in.
 
 - **The browser window closed or was blocked.** Boba only accepts the answer on
   `127.0.0.1`, in the window it opened. Try again; do not paste the URL anywhere.
-- **"Redirect URI mismatch" from the provider.** Re-check the redirect URI above for
-  Microsoft, and that the Google client is type **Desktop app**, not **Web application**.
+- **"Redirect URI mismatch" from the provider.** Re-check that Microsoft has
+  `http://127.0.0.1/cb` on the **Mobile and desktop applications** platform, and that the
+  Google client is type **Desktop app**, not **Web application**.
 - **"Invalid client" or "unauthorised_client".** The client ID was copied with spaces or
   from another project. Copy it again; for Google, make sure the Gmail API is enabled.
 - **Microsoft refuses personal accounts.** The app registration must allow personal
