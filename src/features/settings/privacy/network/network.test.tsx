@@ -95,8 +95,8 @@ describe("Settings → Privacy → Network activity (NFR-1, AC1)", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Sources" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Email" })).toBeTruthy();
-    expect(screen.getByText("remotive.com")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Email" })).toBeTruthy();
+    expect(await screen.findByText("remotive.com")).toBeTruthy();
     // A configured destination that has not been contacted says so.
     expect(screen.getByText("boards-api.greenhouse.io")).toBeTruthy();
     expect(screen.getAllByText("Configured, not contacted yet").length).toBe(2);
