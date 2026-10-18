@@ -24,16 +24,19 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   # Tauri v2 Linux prerequisites (https://tauri.app/start/prerequisites/).
-  # The Rust gate and the Linux build both compile the desktop crate, so both
-  # jobs install this one list; it lives here so the two cannot drift.
+  # The Rust gate, the Linux build and the bindings export all compile the
+  # desktop crate, so all three jobs install this one list; it lives here so
+  # the three cannot drift (CH16: the web job lacked them and glib-sys died).
   LINUX_APT_PACKAGES: >-
     libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
     libxdo-dev build-essential pkg-config libssl-dev curl wget file
 
+# Ubuntu runners are pinned to 24.04: `ubuntu-latest` moves to 26.04 on
+# 2026-10-19 and some of the apt package names above change with it (CH16).
 jobs:
   hygiene:
     name: Repo hygiene
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -57,8 +60,8 @@ jobs:
 
   web:
     name: Web (Biome, tsc, Vitest, i18n, bindings)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
@@ -68,6 +71,18 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # "Bindings are fresh" runs `cargo test` on the desktop crate, so this job
+      # needs the Rust toolchain and the GTK/WebKit headers too. Without them
+      # glib-sys fails pkg-config and gen-bindings exits 101 (CH16).
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        with:
+          toolchain: 1.99.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ env.LINUX_APT_PACKAGES }}
       - name: Install (frozen lockfile, dependency scripts disabled)
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Biome (lint + format check)
@@ -86,7 +101,7 @@ jobs:
 
   rust:
     name: Rust (fmt, clippy, test, deny)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -119,7 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
