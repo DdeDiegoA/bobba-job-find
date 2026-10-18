@@ -4,6 +4,46 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [1.0.0-beta.2] - 2026-10-18
+
+Pre-release, like beta.1: the tag is `v1.0.0-beta.2`, so it never becomes
+`/releases/latest`.
+
+### Fixed
+
+- AI engines when the app is launched from Finder: the probe now also searches
+  the login-shell `PATH` and the known install dirs a GUI launch misses
+  (`~/.opencode/bin`, and the pnpm global bin dir on Linux and Windows), so a
+  CLI your shell finds is found here too (FIX1).
+- The **Test connection** step reports actionable errors and offers Limited
+  mode as the way on, instead of leaving the setup wizard stuck (FIX1).
+- Settings navigation resolves every entry against `/settings`, so a second
+  click no longer nests the URL and falls back to Preferences (FX1).
+- The command palette runs the row you hover or arrow to, not the last row
+  (FX2).
+- The **Connections** page mounts Sources, Email and the session-board opt-in
+  instead of the placeholder (FX3).
+- **Run now** starts a run and shows its real state, taken from the event
+  stream, so the button no longer sticks when a run ends before the command
+  answers (FX4).
+- The **Kill Switch** is always rendered in the header and reads its own
+  status, so stopping automation stays one click (or one shortcut) away (FX4).
+- The onboarding email step explains why the one-click buttons can be
+  disabled, and offers Skip or bring-your-own-client under Connections > Email
+  as the way on (FX5).
+- The macOS DMG mounts without a licence agreement window, and the install
+  steps match the quarantine path for the self-signed build:
+  `xattr -dr com.apple.quarantine "/Applications/Boba Job Find.app"` (REL6).
+
+### Release pipeline
+
+- Releases run only after the CI gate passes (REL3).
+- `latest.json` points at public release asset URLs so the updater can fetch
+  them (REL5).
+- Windows MSI gets a numeric WiX version derived from the tag
+  (`v1.0.0-beta.2` → `1.0.0.2`) (REL2), and the release workflow uses `bash`
+  on Windows (REL4).
+
 ## [1.0.0-beta.1] - 2026-10-18
 
 First release (pre-release; the tag is `v1.0.0-beta.1`, so it never becomes

@@ -21,11 +21,14 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The login shell is asked once per process, and a cold rc (nvm, pyenv,
 /// direnv) can take a few seconds: give it room beyond a single CLI probe.
+#[cfg(unix)]
 const LOGIN_SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Markers around the printed `PATH`, so a shell that prints a banner on
 /// startup cannot be mistaken for the path itself.
+#[cfg(unix)]
 const PATH_START: &str = "__BOBA_PATH__";
+#[cfg(unix)]
 const PATH_END: &str = "__BOBA_END__";
 
 /// A detection result: an installed, probed CLI, or an install prompt (FR-2).
@@ -185,6 +188,7 @@ fn run_capture(program: &Path, args: &[&str], timeout: Duration) -> Option<Captu
 /// [`run_capture`] on the inherited environment. The login shell probe uses
 /// this: [`child_path`] itself comes from that shell, so asking for it there
 /// would recurse.
+#[cfg(unix)]
 fn run_capture_inherited(program: &Path, args: &[&str], timeout: Duration) -> Option<Captured> {
     run_capture_with(program, args, timeout, None)
 }
@@ -346,6 +350,9 @@ fn known_locations() -> Vec<PathBuf> {
     {
         dirs.push(PathBuf::from("/usr/local/bin"));
         dirs.push(PathBuf::from("/snap/bin"));
+        // pnpm's `PNPM_HOME` default on Linux. The `.desktop` launch hands the
+        // app a minimal PATH too, so the GUI-launch gap applies here as well.
+        dirs.push(home.join(".local/share/pnpm"));
     }
     #[cfg(windows)]
     {
@@ -353,7 +360,10 @@ fn known_locations() -> Vec<PathBuf> {
             dirs.push(PathBuf::from(appdata).join("npm"));
         }
         if let Some(local) = env::var_os("LOCALAPPDATA") {
-            dirs.push(PathBuf::from(local).join("Programs"));
+            let local = PathBuf::from(local);
+            dirs.push(local.join("Programs"));
+            // pnpm's `PNPM_HOME` default on Windows.
+            dirs.push(local.join("pnpm"));
         }
     }
     dirs
@@ -420,6 +430,7 @@ fn login_shell_path_from(shell: &Path) -> Option<String> {
 
 /// The text between the markers, or the last non-empty line when a shell
 /// stripped them (some print the path on a line of its own).
+#[cfg(unix)]
 fn between_markers(text: &str) -> Option<String> {
     if let Some(start) = text.find(PATH_START) {
         let rest = &text[start + PATH_START.len()..];
@@ -556,21 +567,61 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// FIX1: the list has to answer per platform, and so does this test. A
+    /// macOS-only path (`~/Library/pnpm`, the Homebrew prefixes) is asserted
+    /// only where [`known_locations`] adds it; the Linux and Windows sets are
+    /// asserted where those exist.
     #[test]
     fn known_locations_cover_the_installs_a_gui_launch_misses() {
         let home = home_dir().expect("home");
         let dirs = known_locations();
-        // FIX1: both are common npm/installer targets that are absent from the
-        // minimal PATH a Finder launch hands the app.
+        // The same npm/installer targets on every platform.
+        assert!(dirs.contains(&home.join(".local/bin")));
         assert!(dirs.contains(&home.join(".opencode/bin")));
-        assert!(dirs.contains(&home.join("Library/pnpm")));
+        assert!(dirs.contains(&home.join(".cargo/bin")));
+
         #[cfg(target_os = "macos")]
-        assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+        {
+            // Finder hands the app a minimal PATH; these are the targets it
+            // misses on macOS.
+            assert!(dirs.contains(&home.join("Library/pnpm")));
+            assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+            assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+        }
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            // A `.desktop` launch has the same gap on Linux.
+            assert!(dirs.contains(&home.join(".local/share/pnpm")));
+            assert!(dirs.contains(&PathBuf::from("/usr/local/bin")));
+            assert!(dirs.contains(&PathBuf::from("/snap/bin")));
+            // The macOS-only location must not leak into the Linux set.
+            assert!(!dirs.contains(&home.join("Library/pnpm")));
+        }
+
+        #[cfg(windows)]
+        {
+            if let Some(local) = env::var_os("LOCALAPPDATA") {
+                let local = PathBuf::from(local);
+                assert!(dirs.contains(&local.join("pnpm")));
+                assert!(dirs.contains(&local.join("Programs")));
+            }
+            if let Some(appdata) = env::var_os("APPDATA") {
+                assert!(dirs.contains(&PathBuf::from(appdata).join("npm")));
+            }
+        }
     }
 
     /// The real-world case: `opencode` is exported from `.zshrc`, which only an
     /// **interactive** login shell reads. `-lc` misses it, which is why a GUI
     /// launch detected Claude (in `~/.local/bin`) but not OpenCode.
+    ///
+    /// Hermetic: the shell is a temp-dir script whose answer is hardcoded, so
+    /// the host's `$SHELL`, `$HOME` and rc files cannot change the result. It
+    /// looks for the flag anywhere in `"$@"` rather than only in `$1`, so the
+    /// fixture cannot be defeated by how the arguments are positioned.
+    /// Windows is covered by neither half: it has no login-shell `PATH`, and
+    /// [`login_shell_path_from`] only exists under `cfg(unix)`.
     #[cfg(unix)]
     #[test]
     fn login_shell_path_reads_an_interactive_login_shell() {
@@ -580,12 +631,16 @@ mod tests {
             "fakeshell",
             "#!/bin/sh\n\
              echo 'motd: startup noise'\n\
-             if [ \"$1\" = \"-ilc\" ]; then\n\
-             printf '%s' '__BOBA_PATH__/opt/from-zshrc:/usr/bin__BOBA_END__'\n\
-             else\n\
-             printf '%s' '__BOBA_PATH__/usr/bin:/bin__BOBA_END__'\n\
-             fi\n",
+             case \" $* \" in\n\
+             *' -ilc '*) printf '%s' '__BOBA_PATH__/opt/from-zshrc:/usr/bin__BOBA_END__' ;;\n\
+             *) printf '%s' '__BOBA_PATH__/usr/bin:/bin__BOBA_END__' ;;\n\
+             esac\n",
         );
+        // A script written a moment ago can lose its very first exec to a
+        // transient kernel/loader hiccup (reported as exit 127, which the probe
+        // reads as "this flag did not answer"). Warm the fixture up so the
+        // assertion measures the flag handling, not the first exec.
+        let _ = run_capture_inherited(&shell, &[], Duration::from_secs(2));
         assert_eq!(
             login_shell_path_from(&shell).as_deref(),
             Some("/opt/from-zshrc:/usr/bin")
@@ -594,6 +649,7 @@ mod tests {
     }
 
     /// A shell that cannot run interactively still yields its login PATH.
+    /// The fake matches the flag anywhere in `"$@"`, as the test above does.
     #[cfg(unix)]
     #[test]
     fn login_shell_path_falls_back_to_a_login_shell() {
@@ -602,10 +658,9 @@ mod tests {
             &dir,
             "fakeshell",
             "#!/bin/sh\n\
-             if [ \"$1\" = \"-ilc\" ]; then\n\
-             echo 'zsh: no controlling terminal' >&2\n\
-             exit 1\n\
-             fi\n\
+             case \" $* \" in\n\
+             *' -ilc '*) echo 'zsh: no controlling terminal' >&2; exit 1 ;;\n\
+             esac\n\
              printf '%s' '__BOBA_PATH__/usr/bin:/bin__BOBA_END__'\n",
         );
         assert_eq!(
