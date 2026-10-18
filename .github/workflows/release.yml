@@ -254,13 +254,30 @@ jobs:
         run: |
           mkdir -p release-assets
           gh release download "$TAG" --dir release-assets --pattern '*'
+      # REL5: while the release is a draft, tauri-action writes asset API ids
+      # (`api.github.com/repos/.../releases/assets/<id>`) into latest.json's
+      # platform urls. The updater downloads those urls after publish, so they
+      # must be the public download URL of the matching asset. Signatures are
+      # untouched, and a missing asset fails the run (run 39094995728).
+      - name: latest.json points at public download URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          node scripts/release/fix-latest-json.mjs "$TAG" release-assets/latest.json --repo "$REPO"
+          gh release upload "$TAG" release-assets/latest.json --clobber
       # AC1: every installer, a resolvable latest.json for every platform, and
-      # the release still unpublished (the script checks isDraft).
+      # the release still unpublished (the script checks isDraft). --repo makes
+      # the platform urls have to be the public form; a draft's assets are not
+      # downloadable yet, so only their names are checked against the asset list.
       - name: Installers and latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.guard.outputs.tag }}
-        run: node scripts/release/verify-release.mjs "$TAG" release-assets
+        run: |
+          node scripts/release/verify-release.mjs "$TAG" release-assets \
+            --repo "${{ github.repository }}"
       # The check runs on the artifact users actually install, not only on the
       # build tree (a DMG could in theory wrap a different .app).
       - name: The DMG carries the pinned identity
