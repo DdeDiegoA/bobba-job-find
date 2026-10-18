@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -75,6 +75,12 @@ export default function EnginePicker({
     initialCli ? { cli: initialCli, model: initialModel ?? "" } : null,
   );
   const [result, setResult] = useState<TestCallResult | null>(initialResult);
+  /**
+   * Bumped on every CLI/model change. A test call carries the epoch it started
+   * in, so an answer that lands after the user moved on is dropped instead of
+   * being attributed to the new selection (FX7 review).
+   */
+  const epoch = useRef(0);
 
   const snapshotQuery = useQuery({
     queryKey: ["engine", "snapshot"],
@@ -101,6 +107,7 @@ export default function EnginePicker({
 
   /** A different CLI or model invalidates the previous pass: test again. */
   const change = (next: EnginePick) => {
+    epoch.current += 1;
     setSelection(next);
     setResult(null);
     setErrorText(null);
@@ -108,19 +115,36 @@ export default function EnginePicker({
   };
 
   const test = useMutation({
-    mutationFn: () => {
+    // Both outcomes carry the epoch they started in: a verdict that arrives
+    // after the user changed the selection is about a pair they let go of.
+    mutationFn: async (): Promise<
+      | { kind: "tested"; tested: TestCallResult; epoch: number }
+      | { kind: "failed"; error: unknown; epoch: number }
+    > => {
+      const startedIn = epoch.current;
       const trimmed = model.trim();
-      return commands.agentTestCall(selectedId, trimmed === "" ? null : trimmed).then(unwrap);
+      try {
+        const tested = await commands
+          .agentTestCall(selectedId, trimmed === "" ? null : trimmed)
+          .then(unwrap);
+        return { kind: "tested", tested, epoch: startedIn };
+      } catch (error) {
+        return { kind: "failed", error, epoch: startedIn };
+      }
     },
-    onSuccess: (tested) => {
-      setResult(tested);
-      setErrorText(null);
-      onTested?.(tested);
-    },
-    onError: (error) => {
+    onSuccess: (outcome) => {
+      if (outcome.epoch !== epoch.current) return;
+      if (outcome.kind === "tested") {
+        setResult(outcome.tested);
+        setErrorText(null);
+        onTested?.(outcome.tested);
+        return;
+      }
       setResult(null);
       setErrorText(
-        isAppError(error) ? renderAppError(error, t) : t("onboarding_engine:test.failure"),
+        isAppError(outcome.error)
+          ? renderAppError(outcome.error, t)
+          : t("onboarding_engine:test.failure"),
       );
       onTestError?.();
     },

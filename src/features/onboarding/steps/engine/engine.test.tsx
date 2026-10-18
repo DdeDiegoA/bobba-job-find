@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -292,6 +292,36 @@ describe("Engine step — pick a CLI and model (FR-2, FR-3, AC1)", () => {
     expect(await screen.findByText("Answered in 812 ms as sonnet.")).toBeTruthy();
     expect((screen.getByLabelText("Model") as HTMLInputElement).value).toBe("sonnet");
     expect(engineStepIsValid(answers())).toBe(true);
+  });
+
+  /// FX7 review: a test that answers after the model changed describes the pair
+  /// that was tested, not the one on screen. It must not be shown, recorded, or
+  /// auto-stored against the new selection.
+  it("ignores a test result that lands after the model changed", async () => {
+    let resolveTest!: (value: { status: "ok"; data: TestCallResult }) => void;
+    vi.mocked(commands.agentTestCall).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTest = resolve;
+        }),
+    );
+    renderStep();
+
+    fireEvent.change(await screen.findByLabelText("Model"), { target: { value: "sonnet" } });
+    fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+    // The call is in flight; changing the model must make it irrelevant.
+    await waitFor(() => expect(vi.mocked(commands.agentTestCall)).toHaveBeenCalled());
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "opus" } });
+
+    await act(async () => {
+      resolveTest({ status: "ok", data: passed() });
+      await new Promise((tick) => setTimeout(tick, 0));
+    });
+
+    expect(screen.queryByText("Answered in 812 ms as sonnet.")).toBeNull();
+    expect(answers().testedOk).toBe(false);
+    expect(answers().model).toBe("opus");
+    expect(vi.mocked(commands.agentEngineChoose)).not.toHaveBeenCalled();
   });
 
   it("cannot continue without both a passing test and the acknowledgement", () => {
