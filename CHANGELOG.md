@@ -23,6 +23,11 @@ Pre-release, like beta.1: the tag is `v1.0.0-beta.2`, so it never becomes
   (FX2).
 - The **Connections** page mounts Sources, Email and the session-board opt-in
   instead of the placeholder (FX3).
+- **Run now** starts a run and shows its real state, taken from the event
+  stream, so the button no longer sticks when a run ends before the command
+  answers (FX4).
+- The **Kill Switch** is always rendered in the header and reads its own
+  status, so stopping automation stays one click (or one shortcut) away (FX4).
 - The onboarding email step explains why the one-click buttons can be
   disabled, and offers Skip or bring-your-own-client under Connections > Email
   as the way on (FX5).
