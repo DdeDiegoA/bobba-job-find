@@ -4,6 +4,31 @@ All notable changes to Boba Job Find. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [semantic versioning](https://semver.org/).
 
+## [1.0.0-beta.2] - 2026-10-18
+
+Pre-release, like beta.1: the tag is `v1.0.0-beta.2`, so it never becomes
+`/releases/latest`.
+
+### Fixed
+
+- AI engine detection when the app is launched from Finder: the probe now
+  reads the login shell's `PATH` and also looks in `~/.opencode/bin`, so a CLI
+  installed for your shell is found (FIX1).
+- The **Test connection** step reports actionable errors and falls back to
+  Limited mode instead of failing the setup wizard (FIX1).
+- The macOS DMG mounts without a licence agreement window, and every macOS
+  install step matches the quarantine path (`xattr -d com.apple.quarantine`)
+  needed by the self-signed build (REL6).
+
+### Release pipeline
+
+- Releases run only after the CI gate passes (REL2).
+- `latest.json` points at public release asset URLs so the updater can fetch
+  them (REL3).
+- Windows MSI gets a numeric WiX version derived from the tag
+  (`v1.0.0-beta.2` → `1.0.0.2`), and the workflow uses `bash` on Windows
+  (REL2–REL5).
+
 ## [1.0.0-beta.1] - 2026-10-18
 
 First release (pre-release; the tag is `v1.0.0-beta.1`, so it never becomes
