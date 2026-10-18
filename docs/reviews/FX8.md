@@ -2,7 +2,30 @@
 
 > **Reviewer:** reviewer-3 (qa) · **Dev:** dev-3 · **Date:** 2026-10-18
 > **Branch:** `hermad/FX8` · **Reviewed commit:** `3f5e3ec` (`feat(profile): draft the missing language with AI (FX8)`), on main `e32544f`
-> **Verdict:** CHANGES REQUESTED at `3f5e3ec` (1 major, 2 minor)
+> **Verdict:** APPROVED at `ea196ac` (fix for F1, F2, F3 on top of `3f5e3ec`; initial verdict was CHANGES REQUESTED)
+
+## Re-review at `ea196ac`
+
+| Finding | Fix | Verified by |
+|---|---|---|
+| F1 (major) | `ProposalView.item_id` added (Rust, `profile_import/mod.rs`), bindings regenerated. `usePendingDrafts` reads `profile_import_proposals` and filters by `item_id`. New drafts are appended (`mergeDrafts`), not swapped in. Confirm and Discard drop the draft and invalidate the query. | 4 new profile tests (reopen shows drafts, confirmed draft not offered again, earlier draft kept on second request), 2 Rust tests on `item_id` mapping |
+| F2 (minor) | Error is `role="alert"`; running state is `role="status"`. | "announces that a draft is running" |
+| F3 (minor) | Notice shows whenever `!available && !isLoading`, including a failed snapshot. | "explains the disabled draft when the capability snapshot cannot be read" |
+
+`item_id` is the fact's own ULID, which `FactView` already exposes to the UI. It carries no sensitive data.
+
+Gate at `ea196ac`:
+
+| Check | Result |
+|---|---|
+| `cargo fmt --all --check` | ok |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | ok |
+| `cargo test -p boba-app --locked` | ok |
+| `pnpm lint` / `pnpm typecheck` | ok (same 3 pre-existing binding warnings) |
+| `pnpm vitest run` on profile, onboarding, proposal-review | 16 files, 144 tests passed (was 139) |
+| `check-i18n`, `check-conventions`, `gen-bindings --check` | ok |
+
+The full web suite was not re-run here; dev-3 reports 719/719 including e2e/a11y, which I have not verified.
 
 ## Gate (web half, in the worktree)
 
