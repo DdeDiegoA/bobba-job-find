@@ -3,7 +3,7 @@
 - **Slice:** FX5b (branch `hermad/FX5b`)
 - **Reviewed commit:** `4f3b091` (dev-1)
 - **Reviewer:** reviewer-1
-- **Verdict:** changes requested (one documentation fix; code approved)
+- **Verdict:** approved at `31ee304` (code unchanged since `4f3b091`; docs fixed in `240acc1` and `31ee304`)
 
 ## Gate (run in the slice worktree, `CARGO_INCREMENTAL=0`)
 
@@ -75,7 +75,8 @@ verify it against the sync code. Reword it to what the code does, or remove it.
 
 - The 3 Biome warnings in generated `bindings.ts` predate this slice.
 
-## Next step
+## Follow-up: approved
 
-dev-1 fixes F1 and F2 on `hermad/FX5b`, then re-emits `HERMAD:DONE story=FX5b` with a
-new `n`. Reviewer-1 re-checks the two doc lines and re-runs the gate on the new commit.
+- **F1:** fixed in `240acc1`. The guide registers `http://127.0.0.1/cb`, and the troubleshooting line matches.
+- **F2:** fixed in `240acc1`, then completed in `31ee304`. The reading sentence now names the company domains, the applicant-tracking senders (Greenhouse, Lever, Workday, all in `ATS_SENDER_DOMAINS`), and the threads Boba started. This matches `sync/mod.rs`.
+- Code is unchanged since the `4f3b091` gate, which was fully green. `check-conventions` is green at `31ee304`.
