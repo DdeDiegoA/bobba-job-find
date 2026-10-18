@@ -349,6 +349,37 @@ mod tests {
         assert!(running(&conn, JobKind::DailySearch).unwrap().is_none());
     }
 
+    /// FX15: a cancelled run has its own terminal status, so it never reads as
+    /// a success.
+    #[test]
+    fn a_cancelled_run_is_stored_as_cancelled() {
+        let mut conn = connection();
+        let OpenOutcome::Started(run) = open(&mut conn, JobKind::DailySearch, SLOT, NOW).unwrap()
+        else {
+            panic!("started");
+        };
+
+        let done = finish(
+            &conn,
+            &run.id,
+            "2026-10-16T08:05:00Z",
+            RunStatus::Cancelled,
+            Some("cancelled by user"),
+        )
+        .unwrap();
+
+        assert_eq!(done.status, RunStatus::Cancelled);
+        assert_ne!(done.status, RunStatus::Succeeded, "never a success");
+        let stored: String = conn
+            .query_row(
+                "SELECT status FROM job_run WHERE id = ?1",
+                params![run.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "cancelled");
+    }
+
     #[test]
     fn finishing_a_run_twice_is_an_error() {
         let mut conn = connection();

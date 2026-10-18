@@ -210,6 +210,13 @@ export const commands = {
     ),
   /**  A manual "Run now" over IPC (FR-41). Registered in `ipc::command_list`. */
   jobsRunNow: () => typedError<RunNowOutcome, AppError_Serialize>(__TAURI_INVOKE("jobs_run_now")),
+  /**
+   *  The daily search running right now (FX15): its `job_run` id, which is also
+   *  the report id and the registry key Cancel targets. `None` when no run is
+   *  live — the shell reads it on mount so a run it did not start (tray, the
+   *  onboarding finish step, a reload mid-run) still offers Cancel.
+   */
+  jobsRunning: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("jobs_running")),
   /**  The channels and the copy-ready kit for one application (AC1/AC2). */
   applyView: (applicationId: string) =>
     typedError<ManualView, AppError_Serialize>(__TAURI_INVOKE("apply_view", { applicationId })),
@@ -657,6 +664,8 @@ export const commands = {
         errors: string[];
         /**  True when at least one Source failed: the banner with Retry (AC3). */
         partial: boolean;
+        /**  The user cancelled this run (FX15): what ran is kept and marked. */
+        cancelled: boolean;
       } | null,
       AppError_Serialize
     >(__TAURI_INVOKE("run_report_latest")),
@@ -2558,8 +2567,9 @@ export type RunNowOutcome = {
  *  A run's live progress, emitted as `run_report:progressed` (AC1).
  *
  *  One event per phase: `started` (the run began against `total` Sources),
- *  `source` (one Source's turn ended, `done` of `total` now finished) and
- *  `finished` (the report is stored; the screen reads it).
+ *  `source` (one Source's turn ended, `done` of `total` now finished),
+ *  `finished` (the report is stored; the screen reads it) and `cancelled`
+ *  (the user stopped the run between Sources; what ran is stored and marked).
  */
 export type RunReportProgressed = {
   run_id: string;
@@ -2601,6 +2611,8 @@ export type RunReportView = {
   errors: string[];
   /**  True when at least one Source failed: the banner with Retry (AC3). */
   partial: boolean;
+  /**  The user cancelled this run (FX15): what ran is kept and marked. */
+  cancelled: boolean;
 };
 
 /**  Whether the salary floor excludes Offers or only lowers their score (FR-7). */

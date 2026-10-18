@@ -48,7 +48,9 @@ export function useRunProgress(onFinished?: () => void): RunProgress | null {
     try {
       const unlisten = events.runReportProgressed.listen((event) => {
         const payload = event.payload;
-        if (payload.phase === "finished") {
+        // A cancelled run ends like a finished one, minus the success: the
+        // partial report is already stored, so the panel reloads it (FX15).
+        if (payload.phase === "finished" || payload.phase === "cancelled") {
           setProgress(null);
           onFinished?.();
           return;

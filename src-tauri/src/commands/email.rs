@@ -11,7 +11,7 @@
 //! mode and disconnects.
 
 use boba_app::error::{AppError, AppResult, ErrorCode};
-use boba_app::jobs::{JobHandler, JobKind};
+use boba_app::jobs::{JobEnd, JobHandler, JobKind};
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::repo::apply::ApplyRepo;
 use boba_app::ports::repo::email::{
@@ -946,7 +946,7 @@ impl<R: Runtime> EmailSyncHandler<R> {
 }
 
 impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
-    fn run(&self, job: JobKind) -> Result<(), String> {
+    fn run(&self, job: JobKind) -> Result<JobEnd, String> {
         if job != JobKind::EmailSync {
             return Err(format!("{} is not this handler's job", job.as_str()));
         }
@@ -973,7 +973,7 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
             .filter(|account| account.mode == EmailMode::ReadSend)
             .collect();
         if connected.is_empty() {
-            return Ok(());
+            return Ok(JobEnd::Completed);
         }
 
         let scope = sync_scope(apply.as_ref(), outbox.as_ref(), offers.as_ref())?;
@@ -1002,7 +1002,7 @@ impl<R: Runtime> JobHandler for EmailSyncHandler<R> {
             }
         }
         if failures.is_empty() {
-            Ok(())
+            Ok(JobEnd::Completed)
         } else {
             Err(failures.join("; "))
         }

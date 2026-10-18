@@ -43,6 +43,7 @@ macro_rules! boba_commands {
             crate::commands::studio::studio_generate,
             crate::commands::studio::studio_regenerate,
             crate::scheduler::jobs_run_now,
+            crate::scheduler::jobs_running,
             crate::commands::apply::apply_view,
             crate::commands::apply::apply_mark_applied,
             crate::commands::apply::apply_export_pdfs,

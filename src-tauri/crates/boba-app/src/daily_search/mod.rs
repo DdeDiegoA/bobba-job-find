@@ -83,6 +83,21 @@ pub trait RunSources: Send + Sync {
     fn search(&self, source_id: &str, query: &SearchQuery) -> Result<Vec<RawPosting>, SourceError>;
 }
 
+/// Whether the user has asked this run to stop (FX15).
+///
+/// The run checks it **between Sources only**, so a Source's turn always
+/// finishes its writes: cancelling never leaves a half-written posting or a
+/// `source_run` row that never closed. What the run already found is kept.
+pub trait RunCancel: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+}
+
+impl<F: Fn() -> bool + Send + Sync> RunCancel for F {
+    fn is_cancelled(&self) -> bool {
+        self()
+    }
+}
+
 /// What a run tells the outside world while it works (AC1).
 pub trait RunObserver: Send + Sync {
     /// The run began with `total` Sources.
@@ -196,6 +211,8 @@ pub struct DailySearch {
     /// `None` until the user opts in, so the factor drops out and the axis
     /// renormalises (AC2).
     embeddings: Option<Arc<EmbeddingsService>>,
+    /// The user's cancel request (FX15), checked between Sources.
+    cancel: Option<Arc<dyn RunCancel>>,
 }
 
 impl DailySearch {
@@ -216,7 +233,22 @@ impl DailySearch {
             digest: None,
             observer,
             embeddings: None,
+            cancel: None,
         }
+    }
+
+    /// The user's cancel request (FX15): the run stops between Sources, keeps
+    /// what it found and reports itself as cancelled.
+    pub fn with_cancel(mut self, cancel: Option<Arc<dyn RunCancel>>) -> Self {
+        self.cancel = cancel;
+        self
+    }
+
+    /// Whether the user has cancelled this run.
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.is_cancelled())
     }
 
     /// F3's optional scorer (S6.9): the composition root hands the mounted
@@ -267,7 +299,14 @@ impl DailySearch {
         let mut covered: Vec<String> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
 
+        let mut cancelled = false;
         for (index, source) in available.iter().enumerate() {
+            // FX15: the check is here, at the seam between Sources, never
+            // inside one: its writes always finish.
+            if self.cancelled() {
+                cancelled = true;
+                break;
+            }
             let report = self.run_source(
                 source,
                 &query,
@@ -278,6 +317,14 @@ impl DailySearch {
             );
             self.observe_source(&options.run_id, &report, index as u32 + 1, total);
             reports.push(report);
+        }
+
+        // FX15 (review M-1): a cancel that landed after the last Source is
+        // still honoured here, before the agent pass — so the report, the job
+        // row and the digest agree instead of the row saying cancelled while
+        // the report finished.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
         }
 
         let ended_at = self.clock.now_rfc3339();
@@ -309,8 +356,14 @@ impl DailySearch {
             }
         };
 
-        let agent_tasks_used =
-            self.run_agent_pass(&options, &new_ids, inputs.as_ref(), &mut errors);
+        // A cancelled run does not hand work to the engine: the user asked it
+        // to stop, and the deterministic scoring below already covers what the
+        // Sources that ran returned.
+        let agent_tasks_used = if cancelled {
+            0
+        } else {
+            self.run_agent_pass(&options, &new_ids, inputs.as_ref(), &mut errors)
+        };
         let tally = match &inputs {
             Some(inputs) => self.score(&seen, &new_ids, inputs, &mut errors),
             None => ScoreTally::default(),
@@ -319,8 +372,20 @@ impl DailySearch {
         // S5.3 the announcement is the digest (counts by band, quiet hours and
         // the user's choices); a host without the digest port keeps the plain
         // top-matches notice.
-        self.announce(&tally, total);
+        // A cancel that lands while scoring runs is honoured too: no digest.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
+        }
+        // A cancelled run stays quiet: the user stopped it, so no digest.
+        if !cancelled {
+            self.announce(&tally, total);
+        }
 
+        // Last look before the report is written: whatever the run says here
+        // is what closes its `job_run` row.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
+        }
         let finished_at = self.clock.now_rfc3339();
         let report = RunReport {
             run_id: options.run_id.clone(),
@@ -333,6 +398,7 @@ impl DailySearch {
             ranked: tally.ranked,
             agent_tasks_used,
             errors,
+            cancelled,
         };
         self.observe_finished(&report);
         Ok(report)

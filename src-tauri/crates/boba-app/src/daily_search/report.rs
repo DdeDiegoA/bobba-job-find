@@ -77,6 +77,11 @@ pub struct RunReport {
     pub agent_tasks_used: u32,
     /// Diagnostics the report screen shows as details, never as the outcome.
     pub errors: Vec<String>,
+    /// The user cancelled the run (FX15): the Sources that ran kept their
+    /// postings, and the rest never started. Reports stored before this field
+    /// existed read as not cancelled.
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 impl RunReport {
@@ -152,6 +157,7 @@ mod tests {
             ranked: 10,
             agent_tasks_used: 4,
             errors: Vec::new(),
+            cancelled: false,
         };
 
         assert_eq!(
@@ -183,6 +189,7 @@ mod tests {
             ranked: 0,
             agent_tasks_used: 0,
             errors: Vec::new(),
+            cancelled: false,
         };
 
         assert!(report.is_partial());
@@ -192,6 +199,37 @@ mod tests {
             .map(|source| source.source_id.as_str())
             .collect();
         assert_eq!(failed, ["hn", "wwr"]);
+    }
+
+    /// FX15: a cancelled run says so in its report, and a report stored before
+    /// the field existed still reads as not cancelled.
+    #[test]
+    fn a_cancelled_report_round_trips_and_an_old_report_defaults_to_not_cancelled() {
+        let report = RunReport {
+            run_id: "01J".to_string(),
+            retry_of: None,
+            started_at: "2026-10-18T09:00:00Z".to_string(),
+            finished_at: "2026-10-18T09:01:00Z".to_string(),
+            duration_ms: 60_000,
+            sources: vec![source("remotive", SourceOutcome::Ok, 4, 4, 0)],
+            vetoed: 0,
+            ranked: 4,
+            agent_tasks_used: 0,
+            errors: Vec::new(),
+            cancelled: true,
+        };
+
+        let json = serde_json::to_string(&report).expect("stored");
+        let back: RunReport = serde_json::from_str(&json).expect("read");
+        assert!(back.cancelled);
+
+        let mut value: serde_json::Value = serde_json::from_str(&json).expect("read");
+        value
+            .as_object_mut()
+            .expect("a report is an object")
+            .remove("cancelled");
+        let stored_before_fx15: RunReport = serde_json::from_value(value).expect("read");
+        assert!(!stored_before_fx15.cancelled);
     }
 
     /// The report survives its own JSON round-trip: that is how it is stored.
@@ -208,6 +246,7 @@ mod tests {
             ranked: 7,
             agent_tasks_used: 5,
             errors: vec!["lifecycle sweep failed".to_string()],
+            cancelled: false,
         };
 
         let json = serde_json::to_string(&report).expect("stored");

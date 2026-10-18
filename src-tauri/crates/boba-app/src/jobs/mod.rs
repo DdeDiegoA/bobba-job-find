@@ -70,6 +70,9 @@ pub enum RunStatus {
     Failed,
     /// The store was locked when the slot was due: never a success (ADR-009).
     SkippedLocked,
+    /// The user cancelled the run (FX15): never a success, and its partial
+    /// results are kept and marked in the report.
+    Cancelled,
 }
 
 impl RunStatus {
@@ -80,6 +83,7 @@ impl RunStatus {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::SkippedLocked => "skipped_locked",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -90,6 +94,7 @@ impl RunStatus {
             "succeeded" => Some(Self::Succeeded),
             "failed" => Some(Self::Failed),
             "skipped_locked" => Some(Self::SkippedLocked),
+            "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
     }
@@ -346,8 +351,24 @@ impl Dispatcher<'_> {
 /// thread and records its outcome, so a handler never touches `job_run` itself.
 pub trait JobHandler: Send + Sync {
     /// Run the job to completion. `Err` is diagnostic text for `job_run.detail`,
-    /// never user-facing prose; the row ends `failed`.
-    fn run(&self, job: JobKind) -> Result<(), String>;
+    /// never user-facing prose; the row ends `failed`. The returned [`JobEnd`]
+    /// is what closes the row, so the row says what the run actually did
+    /// (FX15: a cancel the run honoured, never a late token).
+    fn run(&self, job: JobKind) -> Result<JobEnd, String>;
+}
+
+/// How a handler's run ended, as the run itself reports it (FX15).
+///
+/// The scheduler closes `job_run` from this, never from the cancellation token
+/// alone: a cancel that lands after the run's last check does not exist as far
+/// as the row is concerned, so the row and the report can never disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JobEnd {
+    /// The job ran to completion.
+    #[default]
+    Completed,
+    /// The run stopped because it honoured a cancel request.
+    Cancelled,
 }
 
 /// The schedules a tick reads: one per job the user turned on (FR-41).
@@ -821,6 +842,7 @@ mod tests {
             RunStatus::Succeeded,
             RunStatus::Failed,
             RunStatus::SkippedLocked,
+            RunStatus::Cancelled,
         ] {
             assert_eq!(RunStatus::parse(status.as_str()), Some(status));
         }

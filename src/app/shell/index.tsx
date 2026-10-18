@@ -92,7 +92,7 @@ export function Shell() {
   const { t } = useTranslation();
   const { toggleTheme } = useTheme();
   const searchRef = useRef<HTMLButtonElement>(null);
-  const { run, message, pending, runNow } = useRunNow();
+  const { run, message, pending, cancelling, runNow, cancelRun } = useRunNow();
   const focusSearch = useCallback(() => searchRef.current?.focus(), []);
   useShellShortcuts({ focusSearch, toggleTheme });
 
@@ -102,13 +102,15 @@ export function Shell() {
         {t("shell:shell.skipToContent")}
       </a>
       <div className="shell grid h-full grid-cols-[15rem_minmax(0,1fr)] max-xl:grid-cols-[4rem_minmax(0,1fr)]">
-        <Sidebar run={run} />
+        <Sidebar run={run} cancelling={cancelling} onCancel={cancelRun} />
         <div className="flex h-full min-w-0 flex-col">
           <Topbar
             run={run}
             message={message}
             pending={pending}
+            cancelling={cancelling}
             onRunNow={runNow}
+            onCancel={cancelRun}
             searchRef={searchRef}
             onSearch={focusSearch}
           />

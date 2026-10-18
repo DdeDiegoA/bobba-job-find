@@ -174,7 +174,12 @@ impl TaskHandle {
     }
 
     /// Emit `task:finished` and unregister the task.
-    pub fn finished(&self, app: &AppHandle, outcome: TaskOutcome, message_key: Option<&str>) {
+    pub fn finished<R: tauri::Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        outcome: TaskOutcome,
+        message_key: Option<&str>,
+    ) {
         let event = TaskFinished {
             task_id: self.task_id.clone(),
             area: self.area.clone(),
