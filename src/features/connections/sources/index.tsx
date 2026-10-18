@@ -227,9 +227,9 @@ export default function ConnectionsSources() {
   return (
     <section className="flex flex-col gap-4 p-6" aria-labelledby="ConnectionsSources-title">
       <header className="flex items-baseline justify-between gap-2">
-        <h1 id="ConnectionsSources-title" className="font-display text-2xl text-fg">
+        <h2 id="ConnectionsSources-title" className="font-display text-2xl text-fg">
           {t("title")}
-        </h1>
+        </h2>
         {adding ? null : (
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
             {t("add")}

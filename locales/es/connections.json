@@ -1,0 +1,9 @@
+{
+  "title": "Conexiones",
+  "subtitle": "Dónde busca ofertas Boba y cómo envía tus candidaturas.",
+  "session.title": "Portales de sesión",
+  "session.hint": "Activar un portal de sesión permite a Boba usar tu propia sesión iniciada. Lee antes el aviso: algunas plataformas restringen o bloquean las cuentas automatizadas.",
+  "session.empty.title": "Aún no hay portales de sesión",
+  "session.empty.hint": "Una Fuente que admita portales de sesión aparecerá aquí cuando esté registrada.",
+  "session.toggle": "Ajustes de sesión de {source}"
+}
