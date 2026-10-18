@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import i18n from "@/lib/i18n";
 import { commands, type Preferences, type PreferencesSnapshot } from "@/lib/ipc/bindings";
-import "@/lib/i18n";
 import Settings from "./index";
 
 // The container and the route are what this file tests; the pages bring their
@@ -15,6 +15,8 @@ vi.mock("@/lib/ipc/bindings", () => ({
     embeddingsStatus: vi.fn(),
     embeddingsOptIn: vi.fn(),
     embeddingsOptOut: vi.fn(),
+    statusProposalsDisclosure: vi.fn(),
+    statusProposalsSaveSettings: vi.fn(),
   },
 }));
 vi.mock("./privacy/audit", () => ({ default: () => null }));
@@ -48,6 +50,14 @@ beforeEach(() => {
       model_id: "multilingual-e5-small",
       destination: null,
       approximate_bytes: 510_656_512,
+    }),
+  );
+  vi.mocked(commands.statusProposalsDisclosure).mockImplementation(() =>
+    ok({
+      mode: "deterministic",
+      acknowledged: true,
+      auto_confirm: false,
+      needs_disclosure: false,
     }),
   );
 });
@@ -101,5 +111,28 @@ describe("Settings nav — absolute links (FX1, issue 3)", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeTruthy();
     expect(settingsLink("Preferences").getAttribute("aria-current")).toBe("page");
     expect(settingsLink("Scoring").getAttribute("aria-current")).toBeNull();
+  });
+});
+
+describe("Settings ▸ Privacy ▸ Disclosures (FX13, stub sweep #6)", () => {
+  it("lists Disclosures in the nav and renders both reply-classification choices", () => {
+    renderSettings("/settings/privacy/audit");
+
+    const link = settingsLink("Disclosures");
+    expect(link.getAttribute("href")).toBe("/settings/privacy/disclosures");
+
+    fireEvent.click(link);
+
+    expect(pathname()).toBe("/settings/privacy/disclosures");
+    expect(screen.getByRole("heading", { level: 1, name: "Disclosures" })).toBeTruthy();
+    expect(settingsLink("Disclosures").getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("radio", { name: /Built-in rules first/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Deterministic classification only/ })).toBeTruthy();
+    expect(screen.getByText(/matched recruiter email text is then sent/)).toBeTruthy();
+  });
+
+  it("ships the nav label in both locales", () => {
+    expect(i18n.t("settings.title", { ns: "status_proposals", lng: "en" })).toBe("Disclosures");
+    expect(i18n.t("settings.title", { ns: "status_proposals", lng: "es" })).toBe("Divulgaciones");
   });
 });

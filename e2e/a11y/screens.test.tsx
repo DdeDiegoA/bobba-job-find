@@ -82,6 +82,8 @@ vi.mock("@/lib/ipc/bindings", () => ({
     sessionOptOut: vi.fn(),
     sessionSignOut: vi.fn(),
     sessionResume: vi.fn(),
+    statusProposalsDisclosure: vi.fn(),
+    statusProposalsPending: vi.fn(),
   },
   events: {
     runReportProgressed: { listen: vi.fn(() => Promise.resolve(() => undefined)) },
@@ -386,6 +388,10 @@ function wireFixtures() {
       },
     ]) as never,
   );
+  vi.mocked(commands.statusProposalsDisclosure).mockReturnValue(
+    ok({ mode: "deterministic", acknowledged: true, auto_confirm: false, needs_disclosure: false }),
+  );
+  vi.mocked(commands.statusProposalsPending).mockReturnValue(ok([]));
   vi.mocked(commands.emailAccounts).mockReturnValue(ok([]));
   vi.mocked(commands.sessionSnapshot).mockReturnValue(
     ok({
