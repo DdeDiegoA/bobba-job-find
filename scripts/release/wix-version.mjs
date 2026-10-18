@@ -34,6 +34,10 @@ try {
 
 const tag = parsed.positionals[0];
 if (!tag) {
+  // A bare usage line reads like a help request; say what is actually wrong.
+  // release.yml calls this with $TAG, which is empty if the shell never
+  // expanded it (REL4: pwsh on Windows did exactly that).
+  console.error("::error::missing tag argument (expected e.g. v1.0.0-beta.1)");
   console.error(USAGE);
   process.exit(1);
 }

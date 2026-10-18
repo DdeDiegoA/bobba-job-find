@@ -154,6 +154,12 @@ jobs:
         os: [macos-latest, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    # REL4: windows-latest defaults to pwsh, so a POSIX `run` step written for
+    # the macOS/Linux legs would silently read `$VAR` as an empty PowerShell
+    # variable there. Keep the whole mixed-OS job on bash (Git Bash on Windows).
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
