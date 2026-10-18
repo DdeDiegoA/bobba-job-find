@@ -48,8 +48,9 @@ If the two requirements differ, stop: the release is broken, not the machine.
 
 ## 2. Build N: create data and a key (expect one prompt)
 
-1. Install **build N** (drag to `/Applications`), launch it. Gatekeeper warns on
-   first install: right-click → **Open** → **Open** (the documented bypass).
+1. Install **build N** (drag to `/Applications`), clear the quarantine flag once
+   (`xattr -dr com.apple.quarantine "/Applications/Boba Job Find.app"`), and launch
+   it. Right-click → **Open** no longer bypasses Gatekeeper on macOS 15+.
 2. Complete onboarding through the first screen that writes data (a profile fact
    is enough), so `boba.db` exists and `db-key` is in the Keychain.
 3. The first Keychain access shows **"Boba Job Find wants to use your confidential
