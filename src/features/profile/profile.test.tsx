@@ -422,7 +422,8 @@ describe("Profile — AI draft in Limited mode (FX8 AC4)", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
 
-    fireEvent.click(await screen.findByRole("link", { name: "Open Settings > AI engine" }));
+    const form = await screen.findByRole("form", { name: "Edit Experience" });
+    fireEvent.click(within(form).getByRole("link", { name: "Open Settings > AI engine" }));
     expect(await screen.findByText("Engine settings")).toBeTruthy();
   });
 });

@@ -6,6 +6,7 @@ import type { FactView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import { FactForm } from "./fact-form";
+import { GapsEntry } from "./gaps-entry";
 import { FactHistory } from "./history";
 import { PROFILE_SECTIONS } from "./sections";
 import { useProfile, useSaveFact } from "./use-profile";
@@ -91,6 +92,9 @@ export default function ProfileIndex() {
             {t("fact.add", { section: sectionLabel })}
           </Button>
         </div>
+
+        {/* FX9: re-run the gap interview without going back to onboarding. */}
+        <GapsEntry />
 
         {profile.isPending ? <p className="text-sm text-fg-muted">{t("loading")}</p> : null}
         {profile.isError ? (
