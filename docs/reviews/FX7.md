@@ -64,3 +64,12 @@ No LLM output is saved here. The test-call reply is shown only and never written
 
 - dev-1 fixes findings 1 and 2 on `hermad/FX7`, with a regression test for each, and re-runs the web gate.
 - Re-review at the new commit. Approval goes to the orquestador as `APPROVED FX7 commit <sha>`.
+
+## Re-review at b20d14f
+
+**Verdict:** APPROVED at `b20d14f` (fixes `5f270fe`, `b20d14f`).
+
+- **Finding 1 (stale result):** fixed. `engine-picker` tags each test with the epoch it started in and drops both the pass and the failure once the CLI or model changed. Onboarding no longer records or auto-stores the stale pair. Regression: `engine.test.tsx` "ignores a test result that lands after the model changed". The same epoch guard covers Settings, since it shares the picker; there is no separate Settings test for it.
+- **Finding 2 (a11y gap):** fixed. `e2e/a11y/screens.test.tsx` audits Settings > AI engine (tree and axe) and pins the picker labels.
+
+Web gate at `b20d14f`: lint, typecheck, `pnpm test` (87 files, 711 tests), check-i18n, check-conventions, gen-bindings `--check`, `e2e/a11y` (78 tests). All exit 0.
