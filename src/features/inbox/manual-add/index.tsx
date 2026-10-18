@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { majorUnits } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import type { ManualOffer } from "@/lib/ipc/bindings";
 import { commands } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
@@ -151,13 +151,11 @@ function OfferCard({ offer, language }: { offer: ManualOffer; language: string }
   const { t } = useTranslation("manual_add");
   const workMode = WORK_MODE_LABELS[offer.work_mode] ?? WORK_MODE_LABELS.unknown;
   const pay = offer.pay_period ? PAY_LABELS[offer.pay_period] : undefined;
+  // formatMoney carries the currency's ISO-4217 exponent (AD-17), so KWD/BHD
+  // keep their three decimals (CH17).
   const salary =
     offer.amount_minor !== null && offer.currency
-      ? new Intl.NumberFormat(language, {
-          style: "currency",
-          currency: offer.currency,
-          maximumFractionDigits: 0,
-        }).format(majorUnits(offer.amount_minor, offer.currency))
+      ? formatMoney(offer.amount_minor, offer.currency, language)
       : null;
 
   return (
