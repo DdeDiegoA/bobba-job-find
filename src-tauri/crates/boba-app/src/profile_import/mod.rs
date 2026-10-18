@@ -155,6 +155,9 @@ pub struct ImportOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct ProposalView {
     pub id: String,
+    /// The item the proposal revises, `None` for a new fact (FX8: the Profile
+    /// lists a fact's pending drafts by this id).
+    pub item_id: Option<String>,
     /// Section id, as `profile:sections.<kind>` labels it.
     pub kind: String,
     pub text_en: Option<String>,
@@ -172,6 +175,7 @@ impl From<&FactProposal> for ProposalView {
     fn from(proposal: &FactProposal) -> Self {
         Self {
             id: proposal.id.clone(),
+            item_id: proposal.item_id.clone(),
             kind: proposal.draft.kind.as_str().to_string(),
             text_en: proposal.draft.text_en.clone(),
             text_es: proposal.draft.text_es.clone(),
@@ -564,6 +568,53 @@ mod tests {
             "source_excerpt": "Backend engineer at Nimbus since 2020",
             "detail": { "organisation": "Nimbus", "start": "2020" },
         })
+    }
+
+    // FX8: a translation draft revises one existing item, so its view must
+    // carry that `item_id` — the Profile filters a fact's pending drafts by it.
+    #[test]
+    fn a_translation_drafts_view_carries_its_item_id() {
+        let draft = FactProposal {
+            id: "01PROPOSAL".to_string(),
+            item_id: Some("01ITEM".to_string()),
+            draft: FactDraft {
+                kind: FactKind::Experience,
+                text_en: Some("Backend engineer".to_string()),
+                text_es: Some("Ingeniero backend".to_string()),
+                evidence: None,
+                detail_json: "{}".to_string(),
+            },
+            source_excerpt: None,
+            untrusted_origin: false,
+            agent_run_id: "run_translate".to_string(),
+            created_at: "2026-10-18T09:00:00.000Z".to_string(),
+        };
+
+        let view = ProposalView::from(&draft);
+        assert_eq!(view.id, "01PROPOSAL");
+        assert_eq!(view.item_id.as_deref(), Some("01ITEM"));
+    }
+
+    // A CV import always creates new items, so its view carries no item_id.
+    #[test]
+    fn a_cv_import_proposals_view_has_no_item_id() {
+        let draft = FactProposal {
+            id: "01PROPOSAL".to_string(),
+            item_id: None,
+            draft: FactDraft {
+                kind: FactKind::Skill,
+                text_en: Some("Rust".to_string()),
+                text_es: None,
+                evidence: None,
+                detail_json: "{}".to_string(),
+            },
+            source_excerpt: Some("Skills: Rust".to_string()),
+            untrusted_origin: false,
+            agent_run_id: "run_import".to_string(),
+            created_at: "2026-10-18T09:00:00.000Z".to_string(),
+        };
+
+        assert_eq!(ProposalView::from(&draft).item_id, None);
     }
 
     // AC1/AC4: the run reads the CV as user input and its proposals are stored

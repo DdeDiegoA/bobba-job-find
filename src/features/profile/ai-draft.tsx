@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -6,7 +7,13 @@ import { ProposalReviewCard } from "@/features/proposal-review";
 import { useCapability } from "@/lib/capabilities";
 import type { FactEdit, FactView, ProposalView } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
-import { useConfirmProposal, useDiscardProposal, useDraftLanguage } from "./use-profile";
+import {
+  pendingDraftsKey,
+  useConfirmProposal,
+  useDiscardProposal,
+  useDraftLanguage,
+  usePendingDrafts,
+} from "./use-profile";
 
 /** Where the user picks or changes the Agent CLI (FX7's Settings page). */
 const AI_ENGINE_PATH = "/settings/ai-engine";
@@ -35,7 +42,11 @@ export function AiDraft({
   const draft = useDraftLanguage();
   const confirm = useConfirmProposal();
   const discard = useDiscardProposal();
-  const [pending, setPending] = useState<ProposalView[]>([]);
+  const queryClient = useQueryClient();
+  // The core keeps drafts across form closes: read them back so none is stranded.
+  const loaded = usePendingDrafts(fact.item_id);
+  const [added, setAdded] = useState<ProposalView[]>([]);
+  const [removed, setRemoved] = useState<string[]>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
   // The fact prop is the snapshot from when the form opened: once the user
   // confirms, the gap is closed even though this object still says otherwise.
@@ -51,6 +62,16 @@ export function AiDraft({
   const confirmed = (proposal: ProposalView, edit: FactEdit | null, lang: string): string => {
     if (edit) return (lang === "es" ? edit.text_es : edit.text_en) ?? "";
     return (lang === "es" ? proposal.text_es : proposal.text_en) ?? "";
+  };
+
+  const pending = mergeDrafts(loaded.data ?? [], added).filter(
+    (item) => !removed.includes(item.id),
+  );
+  /** The core dropped the draft; stop listing it here too. */
+  const dropProposal = (id: string) => {
+    setAdded((current) => current.filter((item) => item.id !== id));
+    setRemoved((current) => [...current, id]);
+    void queryClient.invalidateQueries({ queryKey: pendingDraftsKey(fact.item_id) });
   };
 
   const noticeKey =
@@ -72,7 +93,9 @@ export function AiDraft({
             draft.mutate(
               { itemId: fact.item_id, lang: missing },
               {
-                onSuccess: (outcome) => setPending(outcome.proposals),
+                // Append, never replace: an earlier draft stays actionable.
+                onSuccess: (outcome) =>
+                  setAdded((current) => mergeDrafts(current, outcome.proposals)),
                 onError: fail,
               },
             );
@@ -82,7 +105,9 @@ export function AiDraft({
         </Button>
       </div>
 
-      {!access.available && access.reason ? (
+      {/* FX8 review F3: once the snapshot has loaded, an unavailable action
+          always says why — including when the snapshot itself failed. */}
+      {!access.available && !access.isLoading ? (
         <div
           className="flex flex-col items-start gap-1 rounded-xl bg-surface-muted p-3 text-sm"
           role="status"
@@ -95,7 +120,17 @@ export function AiDraft({
         </div>
       ) : null}
 
-      {errorText ? <p className="text-sm text-danger">{errorText}</p> : null}
+      {/* FX8 review F2: a failed draft is announced, not just printed. */}
+      {errorText ? (
+        <p className="text-sm text-danger" role="alert">
+          {errorText}
+        </p>
+      ) : null}
+      {draft.isPending ? (
+        <p className="text-sm text-fg-muted" role="status">
+          {t("drafts.drafting")}
+        </p>
+      ) : null}
 
       {pending.length > 0 ? (
         <ul className="flex flex-col gap-3">
@@ -121,7 +156,7 @@ export function AiDraft({
                   { id: proposal.id, edit: null },
                   {
                     onSuccess: () => {
-                      setPending((current) => current.filter((item) => item.id !== proposal.id));
+                      dropProposal(proposal.id);
                       onConfirmed(missing, confirmed(proposal, null, missing));
                       setFilled(true);
                     },
@@ -134,7 +169,7 @@ export function AiDraft({
                   { id: proposal.id, edit },
                   {
                     onSuccess: () => {
-                      setPending((current) => current.filter((item) => item.id !== proposal.id));
+                      dropProposal(proposal.id);
                       onConfirmed(missing, confirmed(proposal, edit, missing));
                       setFilled(true);
                     },
@@ -144,8 +179,7 @@ export function AiDraft({
               }
               onDiscard={() =>
                 discard.mutate(proposal.id, {
-                  onSuccess: () =>
-                    setPending((current) => current.filter((item) => item.id !== proposal.id)),
+                  onSuccess: () => dropProposal(proposal.id),
                   onError: fail,
                 })
               }
@@ -155,4 +189,10 @@ export function AiDraft({
       ) : null}
     </section>
   );
+}
+
+/** Keep the drafts in arrival order without duplicating an id. */
+function mergeDrafts(current: ProposalView[], next: ProposalView[]): ProposalView[] {
+  const ids = new Set(current.map((item) => item.id));
+  return [...current, ...next.filter((item) => !ids.has(item.id))];
 }

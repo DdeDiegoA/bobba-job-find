@@ -24,6 +24,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
     profileGapsTranslate: vi.fn(),
     profileGapsConfirm: vi.fn(),
     profileGapsDiscard: vi.fn(),
+    profileImportProposals: vi.fn(),
   },
 }));
 
@@ -40,6 +41,7 @@ const capabilities = (available = true): CapabilitySnapshot => ({
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "prop_es",
+  item_id: "01ITEMEXP",
   kind: "experience",
   text_en: "Senior Backend Engineer",
   text_es: "Ingeniero Backend Senior",
@@ -99,6 +101,7 @@ beforeEach(() => {
   vi.mocked(commands.profileGapsTranslate).mockImplementation(() => ok(translated([])));
   vi.mocked(commands.profileGapsConfirm).mockImplementation(() => ok(snapshot()));
   vi.mocked(commands.profileGapsDiscard).mockImplementation(() => ok(null));
+  vi.mocked(commands.profileImportProposals).mockImplementation(() => ok([]));
 });
 
 describe("Profile — facts and language variants (AC1/AC2)", () => {
@@ -229,6 +232,67 @@ describe("Profile — draft the other language with AI (FX8 AC1)", () => {
     expect(screen.getByLabelText("Spanish")).toHaveValue("Ingeniero Backend Senior");
   });
 
+  it("shows a fact's pending drafts again when the form is reopened", async () => {
+    // The core keeps the draft; reopening must list it, not hide it (F1).
+    const stored: ProposalView[] = [];
+    vi.mocked(commands.profileImportProposals).mockImplementation(() => ok([...stored]));
+    vi.mocked(commands.profileGapsTranslate).mockImplementation(() => ok(translated([proposal()])));
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Draft in Spanish with AI" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft in Spanish with AI" }));
+    stored.push(proposal());
+    await screen.findByText("Ingeniero Backend Senior");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Experience" }));
+    expect(await screen.findByText("Ingeniero Backend Senior")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeTruthy();
+  });
+
+  it("does not offer a confirmed draft again when the form is reopened", async () => {
+    const stored: ProposalView[] = [proposal()];
+    vi.mocked(commands.profileImportProposals).mockImplementation(() => ok([...stored]));
+    vi.mocked(commands.profileGapsConfirm).mockImplementation(() => {
+      stored.length = 0;
+      return ok(snapshot());
+    });
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(commands.profileGapsConfirm).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Experience" }));
+    const form = await screen.findByRole("form", { name: "Edit Experience" });
+    await waitFor(() => expect(within(form).queryByText("Ingeniero Backend Senior")).toBeNull());
+  });
+
+  it("keeps an earlier draft when a second one is requested", async () => {
+    vi.mocked(commands.profileGapsTranslate)
+      .mockImplementationOnce(() =>
+        ok(translated([proposal({ id: "prop_1", text_es: "Primer borrador" })])),
+      )
+      .mockImplementationOnce(() =>
+        ok(translated([proposal({ id: "prop_2", text_es: "Segundo borrador" })])),
+      );
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Draft in Spanish with AI" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft in Spanish with AI" }));
+    await screen.findByText("Primer borrador");
+    fireEvent.click(screen.getByRole("button", { name: "Draft in Spanish with AI" }));
+    await screen.findByText("Segundo borrador");
+
+    // Neither draft is orphaned: both stay actionable.
+    expect(screen.getByText("Primer borrador")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Confirm" })).toHaveLength(2);
+  });
+
   it("stops offering the draft once the language is confirmed", async () => {
     vi.mocked(commands.profileGapsTranslate).mockImplementation(() => ok(translated([proposal()])));
     renderScreen();
@@ -275,9 +339,30 @@ describe("Profile — draft the other language with AI (FX8 AC1)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Draft in Spanish with AI" }));
 
-    expect(await screen.findByText(/needs an AI tool with a verified tool lockdown/)).toBeTruthy();
+    // Announced as an alert, not just printed (FX8 review F2).
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/needs an AI tool with a verified tool lockdown/);
     expect(commands.profileGapsConfirm).not.toHaveBeenCalled();
     expect(commands.profileSaveFact).not.toHaveBeenCalled();
+  });
+
+  it("announces that a draft is running", async () => {
+    let settle!: (value: { status: "ok"; data: TranslateOutcome }) => void;
+    vi.mocked(commands.profileGapsTranslate).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Draft in Spanish with AI" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draft in Spanish with AI" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Drafting…");
+    settle({ status: "ok", data: translated([]) });
   });
 
   it("offers no AI draft for a fact with both variants", async () => {
@@ -306,6 +391,20 @@ describe("Profile — AI draft in Limited mode (FX8 AC4)", () => {
     ).toBeTruthy();
     expect(within(form).getByRole("button", { name: "Draft in Spanish with AI" })).toBeDisabled();
     expect(within(form).getByRole("link", { name: "Open Settings > AI engine" })).toBeTruthy();
+  });
+
+  it("explains the disabled draft when the capability snapshot cannot be read", async () => {
+    vi.mocked(commands.capabilitiesSnapshot).mockImplementation(() =>
+      Promise.reject(new Error("snapshot failed")),
+    );
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit Experience" }));
+
+    const form = await screen.findByRole("form", { name: "Edit Experience" });
+    expect(
+      await within(form).findByText("AI features are off — no Agent CLI connected."),
+    ).toBeTruthy();
+    expect(within(form).getByRole("button", { name: "Draft in Spanish with AI" })).toBeDisabled();
   });
 
   it("navigates from Limited mode to Settings > AI engine", async () => {

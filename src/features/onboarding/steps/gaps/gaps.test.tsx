@@ -43,6 +43,7 @@ const gap = (over: Partial<Gap> = {}): Gap => ({
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "prop_1",
+  item_id: null,
   kind: "eligibility",
   text_en: "Notice period: 1 month",
   text_es: "Preaviso: 1 mes",

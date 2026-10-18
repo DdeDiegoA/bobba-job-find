@@ -11,6 +11,7 @@ import { ProposalReviewCard, type ProposalReviewLabels } from "./index";
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "prop_1",
+  item_id: null,
   kind: "experience",
   text_en: "Senior Backend Engineer",
   text_es: "Ingeniero Backend Senior",
