@@ -2,6 +2,8 @@
 // installer per OS, updater signatures, and a `latest.json` whose version is
 // the tag and whose platform URLs point at assets that actually exist.
 
+import { parseDownloadUrl } from "./latest-json.mjs";
+
 /** The platform keys the updater asks for; a universal DMG fills both macOS. */
 export const PLATFORMS = ["darwin-aarch64", "darwin-x86_64", "windows-x86_64", "linux-x86_64"];
 
@@ -43,8 +45,15 @@ function urlBasename(url) {
   }
 }
 
-/** `{ok, errors}` for `latest.json` against the tag and the published assets. */
-export function checkLatestJson({ json, tag, assets }) {
+/**
+ * `{ok, errors}` for `latest.json` against the tag and the published assets.
+ *
+ * With `repo`, every platform url must be the public download URL for that
+ * repository and tag (REL5): draft asset API ids are rewritten before this
+ * runs, and a draft's assets are not publicly downloadable yet — the check only
+ * compares the url form against the asset list.
+ */
+export function checkLatestJson({ json, tag, assets, repo }) {
   if (!json) {
     return { ok: false, errors: ["latest.json is missing from the release"] };
   }
@@ -62,6 +71,23 @@ export function checkLatestJson({ json, tag, assets }) {
     }
     if (!entry.signature) {
       errors.push(`latest.json ${platform} entry has no signature`);
+    }
+    if (repo) {
+      const download = parseDownloadUrl(entry.url);
+      if (!download) {
+        errors.push(
+          `latest.json ${platform} url is not a public download URL (run fix-latest-json.mjs)`,
+        );
+      } else if (download.repo !== repo) {
+        errors.push(`latest.json ${platform} points at ${download.repo}, not ${repo}`);
+      } else if (download.tag !== tag) {
+        errors.push(`latest.json ${platform} points at tag ${download.tag}, not ${tag}`);
+      } else if (!assets.includes(download.name)) {
+        errors.push(
+          `latest.json ${platform} points at ${download.name}, which is not a published asset`,
+        );
+      }
+      continue;
     }
     const basename = urlBasename(entry.url);
     if (!basename) {

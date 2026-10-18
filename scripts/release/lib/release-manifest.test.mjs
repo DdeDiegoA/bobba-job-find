@@ -101,6 +101,82 @@ describe("checkLatestJson", () => {
     expect(result.ok).toBe(false);
     expect(result.errors.some((e) => e.includes("missing.AppImage.tar.gz"))).toBe(true);
   });
+
+  // REL5: the publish job verifies the form of every url against the repository,
+  // because the run that first tagged v1.0.0-beta.1 shipped draft asset ids.
+  describe("with the repository (the release workflow)", () => {
+    const REPO = "acme/boba-job-find";
+    const publicUrl = (name) =>
+      `https://github.com/${REPO}/releases/download/v0.3.0/${encodeURIComponent(name)}`;
+    const PUBLIC = {
+      ...LATEST,
+      platforms: Object.fromEntries(
+        Object.entries(LATEST.platforms).map(([platform, entry]) => {
+          const name = decodeURIComponent(new URL(entry.url).pathname.split("/").pop());
+          return [platform, { ...entry, url: publicUrl(name) }];
+        }),
+      ),
+    };
+
+    it("accepts public download URLs for the tag", () => {
+      expect(checkLatestJson({ json: PUBLIC, tag: "v0.3.0", assets: ASSETS, repo: REPO })).toEqual({
+        ok: true,
+        errors: [],
+      });
+    });
+
+    it("rejects a draft asset API id", () => {
+      const json = {
+        ...PUBLIC,
+        platforms: {
+          ...PUBLIC.platforms,
+          "linux-x86_64": {
+            signature: "sig",
+            url: "https://api.github.com/repos/acme/boba-job-find/releases/assets/652456087",
+          },
+        },
+      };
+      const result = checkLatestJson({ json, tag: "v0.3.0", assets: ASSETS, repo: REPO });
+      expect(result.ok).toBe(false);
+      expect(
+        result.errors.some((e) => e.includes("linux-x86_64 url is not a public download URL")),
+      ).toBe(true);
+    });
+
+    it("rejects a URL for another tag", () => {
+      const json = {
+        ...PUBLIC,
+        platforms: {
+          ...PUBLIC.platforms,
+          "darwin-aarch64": {
+            signature: "sig",
+            url: `https://github.com/${REPO}/releases/download/v0.2.0/Boba%20Job%20Find.app.tar.gz`,
+          },
+        },
+      };
+      const result = checkLatestJson({ json, tag: "v0.3.0", assets: ASSETS, repo: REPO });
+      expect(result.errors).toContain(
+        "latest.json darwin-aarch64 points at tag v0.2.0, not v0.3.0",
+      );
+    });
+
+    it("rejects a URL for another repository", () => {
+      const json = {
+        ...PUBLIC,
+        platforms: {
+          ...PUBLIC.platforms,
+          "darwin-aarch64": {
+            signature: "sig",
+            url: "https://github.com/someone/fork/releases/download/v0.3.0/Boba%20Job%20Find.app.tar.gz",
+          },
+        },
+      };
+      const result = checkLatestJson({ json, tag: "v0.3.0", assets: ASSETS, repo: REPO });
+      expect(result.errors).toContain(
+        "latest.json darwin-aarch64 points at someone/fork, not acme/boba-job-find",
+      );
+    });
+  });
 });
 
 describe("PLATFORMS", () => {

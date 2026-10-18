@@ -124,9 +124,12 @@ SignPath steps to the Windows matrix entry and remove that section from
    - **guard** — tag/version agreement, updater pubkey, the pin, the secrets.
    - **build** — the matrix, only after `ci` and `guard` pass; the release
      stays a **draft**.
-   - **publish** — downloads the draft, verifies every installer and
-     `latest.json`, re-checks the signature of the `.app` inside the DMG, then
-     publishes (`--latest` for a stable tag, plain publish for a `-beta` tag).
+   - **publish** — downloads the draft, rewrites `latest.json` so every
+     platform url is the public download URL of its asset (a draft carries
+     asset API ids), re-uploads it, verifies every installer and `latest.json`
+     against the release's asset list, re-checks the signature of the `.app`
+     inside the DMG, then publishes (`--latest` for a stable tag, plain publish
+     for a `-beta` tag).
 
    At most one release run per tag: a second run queues behind the first.
 
@@ -209,6 +212,28 @@ Include, every time:
 - **Signature gate fails:** the runner did not sign with the pinned identity.
   Check that `MACOS_CERTIFICATE` matches `macos-identity.pin`; never bypass the
   gate — an ad-hoc build breaks Keychain access for every existing user.
+- **`latest.json` platform urls point at asset ids instead of downloads:** while
+  the release is a draft, tauri-action writes asset API urls
+  (`https://api.github.com/repos/.../releases/assets/<id>`) that 404 for the
+  updater once published (run 39094995728, v1.0.0-beta.1). The publish job now
+  rewrites them with `scripts/release/fix-latest-json.mjs` and re-uploads the
+  file before verifying, so a normal run needs nothing. To recover a draft that
+  failed this way by hand:
+
+  ```sh
+  gh release download v1.0.0-beta.1 --pattern latest.json --dir /tmp/boba-release
+  node scripts/release/fix-latest-json.mjs v1.0.0-beta.1 /tmp/boba-release/latest.json \
+    --repo DdeDiegoA/bobba-job-find
+  gh release upload v1.0.0-beta.1 /tmp/boba-release/latest.json --clobber
+  ```
+
+  The script keeps every signature untouched and fails, naming the platform,
+  when a url's asset is not attached to the release. It rewrites the file in
+  place. Then re-run the failed **publish** job from the run page: it
+  re-downloads the draft, fixes `latest.json` again (idempotent) and publishes.
+  Never publish a draft by hand before that: `verify-release.mjs` rejects the
+  asset-id form and, by design, a draft (its assets are not publicly
+  downloadable yet, so only url form and asset names are checked).
 - **A bad release is already public:** publish a fixed patch version. Do not
   delete the latest release: `latest.json` is resolved by URL, and installed
   apps may already be mid-update.
