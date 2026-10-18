@@ -1,10 +1,10 @@
 # REL3 review (reviewer-1)
 
-Commit reviewed: `7096a45` (branch `hermad/REL3`), on top of `edfd905`.
+Commit reviewed: `0d4f4ca` (branch `hermad/REL3`), on top of `7096a45` and
+`5311729`. Initial review at `7096a45`: changes requested (F1, F2).
 
-**Verdict: CHANGES REQUESTED** (2 findings, 1 medium, 1 low). The CI fix and the
-release gate are correct; the findings are in the new `concurrency` group and in
-a comment that states something false.
+**Verdict: APPROVED.** Both findings are fixed in `0d4f4ca`; see the re-check
+below.
 
 ## Scope
 
@@ -82,3 +82,22 @@ release gate is the same matrix without the macOS signing identity check.
 - The CI gate on a tag still runs the full hygiene, web, rust and e2e matrix, so
   the release cost is about one extra CI run per tag. This is intended.
 - `publish` still needs `guard` directly, so the guard checks are unaffected.
+
+## Re-check at 0d4f4ca
+
+- **F1 fixed.** `ci.yml` takes an optional `workflow_call` input `gate`. The group
+  is `ci-${{ inputs.gate || github.ref }}` and `cancel-in-progress` is
+  `${{ !inputs.gate }}`. `release.yml` passes `gate: ${{ inputs.tag || github.ref_name }}`,
+  so a gate for tag B never shares a group with tag A's gate, and a gate is never
+  cancelled. Push and PR runs have an empty `gate`, so they keep the old behaviour
+  with `cancel-in-progress: true`.
+- **F2 fixed.** The sign-step note in `ci.yml` and the `release.yml` comment now
+  say the tag push runs the import step and takes the "not configured" path. The
+  `RELEASING.md` wording now says the gate is the same workflow minus its macOS
+  signing branch, and that the release build makes the signed bundle and runs
+  the ADR-009 checks. That matches the code.
+- **YAML parsed.** Both files load. `build` needs `[guard, ci]`, `publish` needs
+  `[guard, build]`, and `ci` passes `with.gate`.
+- **Policy.** `check-workflow-policy` and `check-conventions` pass.
+- **Not run.** `actionlint` is not installed, and the `pnpm` gate was not run in
+  the worktree. The workflows cannot run locally.
