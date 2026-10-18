@@ -282,6 +282,55 @@ describe("Shell — Run now (FX4)", () => {
     expect(screen.getByRole("button", { name: "Run now" })).toBeTruthy();
   });
 
+  it("shows the backup reason before a run can start (AC3)", async () => {
+    vi.mocked(commands.jobsRunNow).mockImplementation(() =>
+      Promise.resolve({
+        status: "error" as const,
+        error: { code: "conflict", message_key: "errors.backup.recovery_required" },
+      }),
+    );
+    renderShell("/");
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Create a recovery backup before a search run can start.");
+  });
+
+  it("stays on Run now when the run finishes before the command resolves (review Bug 1)", async () => {
+    let resolveRun: (result: { status: "ok"; data: { run_id: string; joined: boolean } }) => void =
+      () => {};
+    vi.mocked(commands.jobsRunNow).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveRun = resolve;
+        }),
+    );
+    renderShell("/");
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    // The command is in flight, and the run it started ends before it answers.
+    await waitFor(() => expect(commands.jobsRunNow).toHaveBeenCalledTimes(1));
+    emitRunProgress(progress("started"));
+    emitRunProgress(progress("finished"));
+    await act(async () => {
+      resolveRun({ status: "ok", data: { run_id: "run-1", joined: false } });
+    });
+
+    expect(screen.getByRole("button", { name: "Run now" })).toBeTruthy();
+  });
+
+  it("surfaces a failed last-run read instead of saying there are no runs (review Low 2)", async () => {
+    vi.mocked(commands.runReportLatest).mockImplementation(() =>
+      Promise.resolve({
+        status: "error" as const,
+        error: { code: "locked", message_key: "errors.store.locked" },
+      }),
+    );
+    renderShell("/");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Boba can't reach your data yet. Unlock it to continue.");
+  });
+
   it("renders the Kill Switch whether or not Auto is on (AC5)", async () => {
     renderShell("/");
     expect(await screen.findByRole("button", { name: "Kill Switch" })).toBeTruthy();

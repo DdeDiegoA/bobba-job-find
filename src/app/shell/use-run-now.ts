@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { commands, events } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
@@ -29,6 +29,9 @@ export function useRunNow() {
   const [run, setRun] = useState<RunState>({ running: false, lastRunAt: null, newCount: 0 });
   const [message, setMessage] = useState<RunMessage | null>(null);
   const [pending, setPending] = useState(false);
+  // A short run can end before `jobs_run_now` answers (the command spawns it).
+  // Remember its id so the command's answer never re-opens the running state.
+  const finishedRun = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -47,7 +50,15 @@ export function useRunNow() {
             newCount: report.new,
           }));
         })
-        .catch(() => {});
+        .catch((error: unknown) => {
+          // The read failed: say why instead of leaving "No runs yet" up as if
+          // there had been no runs (FX4 review Low 2).
+          if (!alive) return;
+          setMessage({
+            kind: "error",
+            text: isAppError(error) ? renderAppError(error, t) : t("errors.unknown"),
+          });
+        });
     };
 
     refresh();
@@ -57,6 +68,7 @@ export function useRunNow() {
       void Promise.resolve(
         events.runReportProgressed.listen((event) => {
           if (event.payload.phase === "finished") {
+            finishedRun.current = event.payload.run_id;
             setRun((current) => ({ ...current, running: false }));
             refresh();
             return;
@@ -77,7 +89,7 @@ export function useRunNow() {
       alive = false;
       stop?.();
     };
-  }, []);
+  }, [t]);
 
   const runNow = useCallback(() => {
     setMessage(null);
@@ -86,9 +98,10 @@ export function useRunNow() {
       .then(() => commands.jobsRunNow())
       .then(unwrap)
       .then((outcome) => {
-        // An empty id means the slot was already recorded: nothing is running,
-        // so the button must not stay disabled waiting for an event.
-        if (outcome.run_id === "") return;
+        // An empty id means the slot was already recorded, and a run that
+        // already finished has nothing left to follow: either way the button
+        // must not stay disabled waiting for an event that will not come.
+        if (outcome.run_id === "" || finishedRun.current === outcome.run_id) return;
         setRun((current) => ({ ...current, running: true }));
         if (outcome.joined) {
           setMessage({ kind: "info", text: t("shell:topbar.runNow.busy") });
