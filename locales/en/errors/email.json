@@ -1,6 +1,6 @@
 {
   "errors.email.address": "Enter the mailbox address you want to connect.",
-  "errors.email.no_bundled_client": "This build ships no bundled Microsoft client. Add your own client ID under “Advanced”.",
+  "errors.email.no_bundled_client": "This build has no one-click sign-in. Add your own client ID under Connections > Email.",
   "errors.email.browser": "Boba could not open your browser. Open it yourself and try again.",
   "errors.email.timeout": "The sign-in was not finished in time. Start again when you are ready.",
   "errors.email.listen": "Boba could not open its local sign-in listener. Check that no other app is blocking it, then try again.",
@@ -16,7 +16,7 @@
   "errors.email.unknown_connection": "That connection no longer exists.",
   "errors.email.needs_reconsent": "Reading needs a wider permission than this connection has. Connect again and choose “Read and send”.",
   "errors.email.client_secret": "Your own client ID needs its client secret too. Google asks for it when Boba renews access.",
-  "errors.email.gmail_read_needs_byo": "Reading Gmail needs your own Google client ID. Add one under “Advanced”, or connect send-only.",
+  "errors.email.gmail_read_needs_byo": "Reading Gmail needs your own Google client ID. Add one under Connections > Email, or connect send-only.",
   "errors.email.probe_credentials": "The mail server did not accept that password or token.",
   "errors.email.probe_unreachable": "Boba could not reach that mail server. Check the host and port.",
   "errors.email.probe_refused": "That mail server refused the connection test. Check the encryption setting and the port.",

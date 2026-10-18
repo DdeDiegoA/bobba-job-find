@@ -1,6 +1,6 @@
 {
   "errors.email.address": "Escribe la dirección del buzón que quieres conectar.",
-  "errors.email.no_bundled_client": "Esta versión no incluye un cliente de Microsoft. Añade tu propio client ID en «Avanzado».",
+  "errors.email.no_bundled_client": "Esta versión no tiene inicio de sesión en un clic. Añade tu propio client ID en Conexiones > Correo.",
   "errors.email.browser": "Boba no pudo abrir tu navegador. Ábrelo tú y vuelve a intentarlo.",
   "errors.email.timeout": "El inicio de sesión no terminó a tiempo. Vuelve a empezar cuando quieras.",
   "errors.email.listen": "Boba no pudo abrir su receptor local de inicio de sesión. Comprueba que ninguna otra app lo bloquee y vuelve a intentarlo.",
@@ -16,7 +16,7 @@
   "errors.email.unknown_connection": "Esa conexión ya no existe.",
   "errors.email.needs_reconsent": "Leer necesita un permiso más amplio del que tiene esta conexión. Conecta otra vez y elige «Leer y enviar».",
   "errors.email.client_secret": "Tu propio client ID también necesita su client secret. Google lo pide cuando Boba renueva el acceso.",
-  "errors.email.gmail_read_needs_byo": "Leer Gmail necesita tu propio client ID de Google. Añádelo en «Avanzado» o conecta solo para enviar.",
+  "errors.email.gmail_read_needs_byo": "Leer Gmail necesita tu propio client ID de Google. Añádelo en Conexiones > Correo o conecta solo para enviar.",
   "errors.email.probe_credentials": "El servidor de correo no aceptó esa contraseña o token.",
   "errors.email.probe_unreachable": "Boba no pudo alcanzar ese servidor de correo. Revisa el host y el puerto.",
   "errors.email.probe_refused": "Ese servidor de correo rechazó la prueba de conexión. Revisa el cifrado y el puerto.",

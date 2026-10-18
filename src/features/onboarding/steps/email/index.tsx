@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
   useConnectGmail,
@@ -29,15 +30,24 @@ export default function EmailStep(_props: StepProps) {
   const outlook = useConnectOutlook();
   const gmail = useConnectGmail();
   const [address, setAddress] = useState("");
+  const addressHintId = useId();
 
   const failure = outlook.error ?? gmail.error ?? null;
-  const errorText = failure
-    ? isAppError(failure)
-      ? renderAppError(failure, tError)
-      : t("email.error")
-    : null;
+  // FX5: a build with no bundled client can never do one-click sign-in. That is
+  // not an error to repeat, it is a next action: skip, or bring your own client.
+  const noBundledClient =
+    failure !== null &&
+    isAppError(failure) &&
+    failure.message_key === "errors.email.no_bundled_client";
+  const errorText =
+    failure && !noBundledClient
+      ? isAppError(failure)
+        ? renderAppError(failure, tError)
+        : t("email.error")
+      : null;
   const pending = outlook.isPending || gmail.isPending;
-  const canConnect = address.trim() !== "" && !pending;
+  const addressEmpty = address.trim() === "";
+  const canConnect = !addressEmpty && !pending;
 
   return (
     <div className="flex flex-col gap-6">
@@ -73,12 +83,18 @@ export default function EmailStep(_props: StepProps) {
           onChange={(event) => setAddress(event.target.value)}
         />
       </label>
+      {addressEmpty ? (
+        <p id={addressHintId} className="text-xs text-fg-subtle">
+          {t("email.addressHint")}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
           disabled={!canConnect}
+          aria-describedby={addressEmpty ? addressHintId : undefined}
           onClick={() =>
             outlook.mutate({
               address: address.trim(),
@@ -93,6 +109,7 @@ export default function EmailStep(_props: StepProps) {
           type="button"
           variant="outline"
           disabled={!canConnect}
+          aria-describedby={addressEmpty ? addressHintId : undefined}
           onClick={() =>
             gmail.mutate({
               address: address.trim(),
@@ -105,7 +122,25 @@ export default function EmailStep(_props: StepProps) {
         </Button>
       </div>
 
+      {pending ? (
+        <p role="status" className="text-sm text-fg-muted">
+          {t("email.waiting")}
+        </p>
+      ) : null}
+
       <p className="text-xs text-fg-subtle">{t("email.note")}</p>
+
+      {noBundledClient ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-xl border border-border bg-surface-muted p-3 text-sm text-fg"
+        >
+          <p>{t("email.noBundledClient.body")}</p>
+          <Link to="/connections" className="self-start text-fg underline-offset-2 hover:underline">
+            {t("email.noBundledClient.action")}
+          </Link>
+        </div>
+      ) : null}
 
       {errorText ? (
         <p role="alert" className="text-sm text-danger">
