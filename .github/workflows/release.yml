@@ -267,17 +267,18 @@ jobs:
         run: |
           node scripts/release/fix-latest-json.mjs "$TAG" release-assets/latest.json --repo "$REPO"
           gh release upload "$TAG" release-assets/latest.json --clobber
-      # AC1: every installer, a resolvable latest.json for every platform, and
-      # the release still unpublished (the script checks isDraft). --repo makes
-      # the platform urls have to be the public form; a draft's assets are not
-      # downloadable yet, so only their names are checked against the asset list.
-      - name: Installers and latest.json
+      # AC1, draft pass (FX21): every installer and a latest.json resolving every
+      # platform, checked against the release's asset list. --draft is what makes
+      # this run before publication possible: a draft's assets are not
+      # downloadable yet, so only their names and the public url form are
+      # checked. Never run --published here; it fails on a draft by design.
+      - name: Installers and latest.json (draft)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.guard.outputs.tag }}
         run: |
           node scripts/release/verify-release.mjs "$TAG" release-assets \
-            --repo "${{ github.repository }}"
+            --repo "${{ github.repository }}" --draft
       # The check runs on the artifact users actually install, not only on the
       # build tree (a DMG could in theory wrap a different .app). REL6: the DMG
       # carries no software licence agreement (`licenseFile` is gone), so it
@@ -303,3 +304,15 @@ jobs:
             *-*) gh release edit "$TAG" --draft=false ;;
             *) gh release edit "$TAG" --draft=false --latest ;;
           esac
+      # AC1, published pass (FX21): the state users now see. Re-download the
+      # attached latest.json (not the local copy), fail if the release is still
+      # a draft, and fetch every platform url — a 404 here breaks updates on
+      # installed apps. Run last: this is the only step that needs publication.
+      - name: Verify the published release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: |
+          gh release download "$TAG" --dir release-assets --pattern latest.json --clobber
+          node scripts/release/verify-release.mjs "$TAG" release-assets \
+            --repo "${{ github.repository }}" --published
