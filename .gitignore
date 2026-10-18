@@ -28,6 +28,9 @@ target/
 
 # Tauri generated
 src-tauri/gen/
+# Derived by scripts/release/wix-version.mjs in the Windows release job (REL2);
+# never committed, so the app version stays the single source of truth.
+src-tauri/tauri.windows.conf.json
 
 # Python bytecode (scripts/gen_backlog.py and friends)
 __pycache__/

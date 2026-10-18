@@ -70,6 +70,14 @@ jobs:
             echo "::error::scripts/release/macos-identity.pin has no certificate; run scripts/release/generate-macos-identity.sh once (docs/install/RELEASING.md)"
             exit 1
           fi
+      # REL2: WiX/MSI cannot carry the semver pre-release suffix, so the MSI
+      # gets its own numeric version derived from the tag (a beta's counter
+      # becomes the build field). Computing it here fails an unrepresentable
+      # tag before a 90-minute build.
+      - name: MSI (WiX) version is representable
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: node scripts/release/wix-version.mjs "$TAG"
       # Fail before a 20-minute build, not after it.
       - name: Release secrets are configured
         env:
@@ -94,9 +102,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `app` must be listed explicitly: with only `dmg` the bundler deletes
+          # the intermediate .app and ships no updater artifact, which left the
+          # ADR-009 signature gate with nothing to check (REL2).
           - os: macos-latest
             target: universal-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: nsis,msi
@@ -156,6 +167,15 @@ jobs:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: bash scripts/release/import-macos-identity.sh
+      # REL2: the MSI gets a numeric version the tag cannot express directly
+      # (`1.0.0-beta.1` -> `1.0.0.1`). Tauri merges this platform config on
+      # Windows only, so the app version the updater and the guard read stays
+      # semver. Generated, never committed: the next beta needs no edit.
+      - name: MSI (WiX) version from the tag
+        if: runner.os == 'Windows'
+        env:
+          TAG: ${{ needs.guard.outputs.tag }}
+        run: node scripts/release/wix-version.mjs "$TAG" --config src-tauri/tauri.windows.conf.json
       # Builds, minisign-signs the updater artifacts (latest.json included) and
       # attaches everything to a DRAFT release: nothing is public until the
       # publish job has verified it.
