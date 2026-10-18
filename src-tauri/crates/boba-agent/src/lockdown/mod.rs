@@ -222,8 +222,13 @@ fn boba_tool_name(tool: &str) -> String {
 }
 
 /// Whether the CLI reported one of this app's MCP tools.
+///
+/// The server segment is exactly `boba` and the rest is one non-empty tool
+/// name: `mcp__boba__x__get_task_input` names a server `boba__x`, and the bare
+/// `mcp__boba__` names no tool, so neither is this app's (FX22, M-1).
 fn is_boba_tool(tool: &str) -> bool {
-    tool.starts_with(&format!("mcp__{}__", boba_mcp_proto::tool::SERVER_NAME))
+    tool.strip_prefix(&format!("mcp__{}__", boba_mcp_proto::tool::SERVER_NAME))
+        .is_some_and(|name| !name.is_empty() && !name.contains("__"))
 }
 
 /// The `(major, minor)` a version string reports, e.g. `2.1.289 (Claude Code)`.
@@ -391,12 +396,16 @@ mod tests {
         }
         // A CLI that reports no tools is not the configuration we verified.
         assert!(!init_event_is_locked_down(&[]));
-        // FX22 (L-1): the server boundary is the whole `boba__` segment. A
-        // name that only starts with `mcp__boba` belongs to another server.
+        // FX22 (L-1, M-1): the server boundary is the whole `boba__` segment
+        // *and* the tool segment is one name. A name that only starts with
+        // `mcp__boba`, that names a server `boba__x`, or that names no tool at
+        // all belongs to something this build did not pin.
         for near_miss in [
             "mcp__boba_evil__x",
             "mcp__bobax__y",
             "mcp__bob__get_task_input",
+            "mcp__boba__x__get_task_input",
+            "mcp__boba__",
         ] {
             assert!(
                 !init_event_is_locked_down(&[near_miss.to_string()]),

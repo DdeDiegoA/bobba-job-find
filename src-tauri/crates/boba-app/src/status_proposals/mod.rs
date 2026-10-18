@@ -923,8 +923,7 @@ fn prompt(messages: &[(StoredMessage, Vec<CandidateView>)]) -> String {
          `app_id` from that message's listed applications; a `status` of `applied`, \
          `interview`, `offer` or `rejected`; and as `quote` the exact line of the message \
          that shows it, copied verbatim (at least 12 characters). Propose nothing when the \
-         message does not clearly \
-         imply one of those statuses.\n",
+         message does not clearly imply one of those statuses.\n",
     );
     for (message, candidates) in messages {
         let ids: Vec<String> = candidates
