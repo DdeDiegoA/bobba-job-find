@@ -1,8 +1,11 @@
 # CI — quality gate for Boba Job Find (S1.8, NFR-6/NFR-22).
 #
-# Runs on every PR and on pushes to main. No release, no signing, no secrets:
-# the tag-driven release workflow is S10.5 (AD-22). This workflow never talks to
-# a job board or an LLM; all fixtures are recorded (AD-16 / SPINE consistency).
+# Runs on every PR and on pushes to main, and is called by release.yml
+# (`on: workflow_call`) as the gate every installer waits for (REL3): a release
+# only builds after this whole workflow passes on the tagged commit. No signing
+# secrets reach it — the tag-driven release is S10.5 (AD-22). This workflow never
+# talks to a job board or an LLM; all fixtures are recorded (AD-16 / SPINE
+# consistency).
 #
 # Every third-party action is pinned to a full commit SHA (enforced by
 # scripts/ci/check-workflow-policy.mjs, run in the `hygiene` job).
@@ -13,6 +16,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -194,7 +198,12 @@ jobs:
         run: |
           host="$(rustc -vV | sed -n 's/^host: //p')"
           bash scripts/release/build-sidecars.sh "$host"
-          pnpm tauri build --bundles app
+          # S10.5 F1: the minisign key is release-only and CI never receives it,
+          # so the committed updater pubkey must not make Tauri demand the
+          # private key ("A public key has been found, but no private key").
+          # Updater artifacts off: this bundle is the ADR-009 signature check,
+          # not an updater payload (REL3).
+          pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
           node scripts/release/check-macos-signature.mjs "target/release/bundle/macos/Boba Job Find.app"
       - name: macOS signing skipped (pull request or unprovisioned)
         if: runner.os == 'macOS' && steps.macos-sign.outputs.sign != 'yes'

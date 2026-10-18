@@ -1,5 +1,9 @@
 # Release — tag-driven, signed, published (S10.5, AD-22, NFR-16/17/19).
 #
+# REL3: the first job is the whole CI workflow (`on: workflow_call`). No
+# installer is built unless CI passes on the tagged commit, so CI and Release
+# never disagree and a red main can never publish.
+#
 # A `v*` tag (or a manual run naming an existing tag) builds:
 #   macOS   universal DMG (self-signed with the pinned project identity)
 #   Windows NSIS + MSI (unsigned, SmartScreen bypass documented until SignPath)
@@ -22,6 +26,8 @@ on:
         required: true
         type: string
 
+# One run per tag: a second run for the same tag queues behind the first instead
+# of overlapping it, and an in-flight publish is never cancelled (REL3).
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -33,6 +39,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # REL3: the full CI gate, on the exact commit this run builds. A local
+  # reusable workflow is resolved from the caller's ref, so green CI on main can
+  # never stand in for the tagged commit. No `secrets: inherit`: CI needs no
+  # signing material, so its macOS signing step is either skipped (no `push`
+  # event in this run) or sees an empty MACOS_CERTIFICATE and takes the
+  # "not provisioned" notice path.
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
   guard:
     name: Release guard
     # Pinned like ci.yml: `ubuntu-latest` moves to 26.04 on 2026-10-19 (CH16).
@@ -97,7 +113,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.os }})
-    needs: guard
+    needs: [guard, ci]
     strategy:
       fail-fast: false
       matrix:
