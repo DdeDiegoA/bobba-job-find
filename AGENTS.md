@@ -177,3 +177,13 @@ The full wave log with merge SHAs is in `git log --merges` and in
 - **W17–W20**: onboarding, Limited mode, budgets, gap interview, notifications, fraud badge, autostart, valid event names (CH10), embeddings opt-in, duplicate guard, BYO Gmail read (S8.5), data export, network log, retention.
 - **W21–W22** (2026-10-17): release pipeline, signing and updater (S10.5); session-board Auto with core-only limits (S11.3); accessibility and platform QA (S10.6).
 - **Final phase** (2026-10-17): architecture and security docs (FD1); README, CHANGELOG, user guide, CONTRIBUTING and SECURITY (FD2/FD3); cleanup, linters, `check-conventions` and AI-agent docs (CH13); accessibility fixes A11Y-1..8 (CH14).
+- **Public betas** (2026-10-18, repo `github.com/DdeDiegoA/bobba-job-find`):
+  - CI on Linux and Windows (CH15–CH18); release pipeline fixes (REL1–REL6, FX21).
+  - v1.0.0-beta.1 / beta.2 needed a hand publish. From beta.3 on, release.yml publishes on its own: CI gate → builds → verify draft → publish → verify published.
+  - beta.2: AI-engine detection from Finder (FIX1) and the user-reported bugs (FX1–FX5).
+  - beta.3: unmounted screens wired (FX13/FX14/FX5b), the guard against them (FX18), load-safe tests (FX19), shim race (FX20).
+  - beta.4: switch the AI engine (FX7), bilingual profile drafts (FX8/FX9), Suggest improvement (FX10a/b, security), cancel a run (FX15), reply-status proposals (FX16), exact lockdown boundary (FX22).
+
+## Release procedure (agents)
+
+Push main → wait for green CI on that exact commit → then tag `vX` on it. Never push while a release is running; CI and Release must not overlap (Diego, 2026-10-18). A version bump slice sets every field `scripts/release/check-version.mjs` checks.
