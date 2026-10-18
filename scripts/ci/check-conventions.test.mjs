@@ -83,6 +83,32 @@ export const x = Alpha;
     expect(problemsFor(root, "src/features/alpha/index.tsx")).toHaveLength(1);
   });
 
+  it("does not count a leaf imported only by an unreachable file", () => {
+    const root = fixture({
+      "src/features/zz-a/index.tsx": LEAF,
+      "src/features/zz-b/helper.tsx": `import Alpha from "@/features/zz-a";
+export const helper = Alpha;
+`,
+      "src/app/routes.tsx": "export const routes = [];\n",
+    });
+
+    expect(problemsFor(root, "src/features/zz-a/index.tsx")).toHaveLength(1);
+  });
+
+  it("accepts a leaf reached transitively from the routes root", () => {
+    const root = fixture({
+      "src/features/alpha/index.tsx": LEAF,
+      "src/app/helper.tsx": `import Alpha from "@/features/alpha";
+export const helper = Alpha;
+`,
+      "src/app/routes.tsx": `import { helper } from "./helper";
+export const routes = [helper];
+`,
+    });
+
+    expect(checkLeafGuard(root)).toEqual([]);
+  });
+
   it("skips files without a default export (shared modules, not leaves)", () => {
     const root = fixture({
       "src/features/alpha/index.tsx": "export function helper() {}\n",
@@ -114,6 +140,18 @@ describe("leaf guard: allowlist", () => {
     expect(problems.some((problem) => problem.includes("reason"))).toBe(true);
   });
 
+  it("rejects an entry for a leaf file that does not exist", () => {
+    const root = fixture({
+      [ALLOWLIST]: JSON.stringify({
+        allow: [{ path: "src/features/gone/index.tsx", reason: "Was orphaned in beta.2" }],
+      }),
+    });
+
+    const problems = checkLeafGuard(root);
+    expect(problems.some((problem) => problem.includes("src/features/gone/index.tsx"))).toBe(true);
+    expect(problems.some((problem) => problem.includes("stale"))).toBe(true);
+  });
+
   it("rejects an entry that is no longer needed (stale allowlist)", () => {
     const root = fixture({
       "src/features/alpha/index.tsx": LEAF,
@@ -132,6 +170,22 @@ describe("leaf guard: placeholder pages and dead-interaction markers", () => {
     const root = fixture({
       "src/features/alpha/index.tsx": `export default function Alpha() {
   return <h1>Index</h1>;
+}
+`,
+      "src/app/routes.tsx": ROUTES,
+    });
+
+    expect(problemsFor(root, "src/features/alpha/index.tsx")).toHaveLength(1);
+  });
+
+  it("flags a placeholder heading split across lines", () => {
+    const root = fixture({
+      "src/features/alpha/index.tsx": `export default function Alpha() {
+  return (
+    <h1>
+      Index
+    </h1>
+  );
 }
 `,
       "src/app/routes.tsx": ROUTES,

@@ -8,14 +8,17 @@
 // `src/app/containers.test.tsx`, which renders every container for real):
 //
 //   1. A feature leaf (`src/features/**/index.tsx` with a default export) that
-//      no non-test file imports is a screen nobody can reach.
+//      nothing reachable from the app's roots (`src/main`, `src/app/routes`)
+//      imports is a screen nobody can reach. Reachability is transitive, and a
+//      file only a test imports does not count.
 //   2. A page whose body is a lone `<h1>Index</h1>` (or "Placeholder") is a stub.
 //   3. A "ponytail" / "no handler yet" marker on an interactive element marks a
 //      control that ships and does nothing (the old Run now button).
 //
 // Intentional exceptions live in `scripts/ci/leaf-guard.allowlist.json`, one
 // entry per leaf, each with a written reason. Stale entries fail the gate: an
-// allowlist that outlives its reason is how a blanket ignore starts.
+// entry for a file that no longer exists, or for a leaf that is mounted again,
+// is how a blanket ignore starts.
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
@@ -26,10 +29,22 @@ const JSX_EXTENSIONS = [".tsx", ".jsx"];
 const LEAF_PATH = /^src\/features\/(?:.+\/)?index\.tsx$/;
 const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const DEFAULT_EXPORT = /export\s+default\b/;
-const PLACEHOLDER = /<h1\b[^>]*>\s*(?:Index|Placeholder|TODO)\s*<\/h1>/;
+const PLACEHOLDER = /<h1\b[^>]*>\s*(?:Index|Placeholder|TODO)\s*<\/h1>/g;
 const INTERACTIVE = /<(?:Button|button|a|input|select|textarea)\b|role="button"/;
 const STATIC_IMPORT = /import\s+(?:[^"'`;]*?\s+from\s+)?["']([^"']+)["']/g;
 const DYNAMIC_IMPORT = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+
+/**
+ * The app's real roots. Reachability is measured from here, not from "some
+ * file imports it": a leaf imported only by a helper nobody imports is still a
+ * screen nobody can reach (reviewer finding 2).
+ */
+const ENTRY_POINTS = [
+  "src/main.tsx",
+  "src/main.ts",
+  "src/app/routes.tsx",
+  "src/app/routes.ts",
+];
 
 const slash = (path) => path.split(sep).join("/");
 
@@ -82,21 +97,37 @@ function resolveImport(root, importerRel, specifier) {
   return null;
 }
 
-/** Every file mounted by a non-test importer (static, re-export or lazy). */
-function mountedFiles(root, files) {
-  const mounted = new Set();
+/**
+ * Every non-test file reachable from an entry point (static, re-export or lazy
+ * imports, transitively). Tests are neither nodes nor edges: a leaf only a test
+ * imports is a leaf nobody can reach.
+ */
+function reachableFiles(root, files) {
+  const graph = new Map();
   for (const file of files) {
     if (isTestFile(file)) continue;
+    const targets = [];
     const text = readFileSync(join(root, file), "utf8");
     for (const pattern of [STATIC_IMPORT, DYNAMIC_IMPORT]) {
       pattern.lastIndex = 0;
       for (const match of text.matchAll(pattern)) {
         const target = resolveImport(root, file, match[1]);
-        if (target) mounted.add(target);
+        if (target) targets.push(target);
       }
     }
+    graph.set(file, targets);
   }
-  return mounted;
+
+  const reached = new Set(ENTRY_POINTS.filter((entry) => graph.has(entry)));
+  const queue = [...reached];
+  while (queue.length > 0) {
+    for (const target of graph.get(queue.shift()) ?? []) {
+      if (!graph.has(target) || reached.has(target)) continue;
+      reached.add(target);
+      queue.push(target);
+    }
+  }
+  return reached;
 }
 
 /**
@@ -145,13 +176,13 @@ export function checkLeafGuard(root = process.cwd()) {
   const problems = [];
   const allowed = readAllowlist(root, problems);
   const files = walk(root, "src").filter((file) => SOURCE_EXTENSIONS.includes(extname(file)));
-  const mounted = mountedFiles(root, files);
+  const reachable = reachableFiles(root, files);
 
-  // 1. Leaves nobody mounts.
+  // 1. Leaves nobody can reach.
   const leaves = files.filter((file) => LEAF_PATH.test(file));
   for (const leaf of leaves) {
     if (!DEFAULT_EXPORT.test(readFileSync(join(root, leaf), "utf8"))) continue;
-    if (mounted.has(leaf)) {
+    if (reachable.has(leaf)) {
       if (allowed.has(leaf)) {
         problems.push(
           `${ALLOWLIST_PATH}: stale entry for ${leaf} — it is mounted now; drop the entry`,
@@ -161,22 +192,37 @@ export function checkLeafGuard(root = process.cwd()) {
     }
     if (allowed.has(leaf)) continue;
     problems.push(
-      `${leaf}: feature leaf has a default export but no non-test file imports it ` +
-        `— mount it in a route or container, or allow it in ${ALLOWLIST_PATH} with a reason`,
+      `${leaf}: feature leaf has a default export but nothing reachable from ` +
+        `src/main or src/app/routes imports it — mount it in a route or container, ` +
+        `or allow it in ${ALLOWLIST_PATH} with a reason`,
     );
   }
 
-  // 2. Placeholder pages.
+  // An allowlist path that names no leaf is stale: it outlived its file.
+  // (A reachable, allowlisted leaf is reported in the loop above instead.)
+  for (const path of allowed.keys()) {
+    const isLeaf =
+      files.includes(path) &&
+      LEAF_PATH.test(path) &&
+      DEFAULT_EXPORT.test(readFileSync(join(root, path), "utf8"));
+    if (isLeaf) continue;
+    problems.push(
+      `${ALLOWLIST_PATH}: stale entry for ${path} — no such feature leaf; drop the entry`,
+    );
+  }
+
+  // 2. Placeholder pages (matched over the whole file, so a wrapped <h1> counts).
   for (const file of files) {
     if (!JSX_EXTENSIONS.includes(extname(file)) || isTestFile(file)) continue;
-    const lines = readFileSync(join(root, file), "utf8").split("\n");
-    lines.forEach((line, index) => {
-      if (!PLACEHOLDER.test(line)) return;
+    const text = readFileSync(join(root, file), "utf8");
+    PLACEHOLDER.lastIndex = 0;
+    for (const match of text.matchAll(PLACEHOLDER)) {
+      const line = text.slice(0, match.index).split("\n").length;
       problems.push(
-        `${file}:${index + 1}: placeholder page — a lone <h1>Index</h1> is a stub; ` +
+        `${file}:${line}: placeholder page — its heading is literally "Index"; ` +
           "build the real screen (and mount its leaves) or delete the file",
       );
-    });
+    }
   }
 
   // 3. Dead-interaction markers.
