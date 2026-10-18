@@ -53,6 +53,22 @@ describe("pasting the posting text (AC2)", () => {
     expect(screen.getByText("Source: Manual")).toBeTruthy();
   });
 
+  // CH17: the card formats through formatMoney, so a dinar's three decimals
+  // survive instead of rendering KWD 1.250 as "KWD 1".
+  it("shows a three-exponent salary with its decimals", async () => {
+    vi.mocked(commands.ingestManualText).mockReturnValue(
+      ok(offer({ amount_minor: 1_234_500, currency: "KWD" })),
+    );
+    render(<InboxManualAdd />);
+
+    fireEvent.click(screen.getByRole("radio", { name: "The text" }));
+    fireEvent.change(screen.getByLabelText("Posting text"), { target: { value: "hi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add this job" }));
+
+    const salary = await screen.findByText(/KWD/);
+    expect(salary.textContent?.replace(/\s/g, "")).toContain("KWD1,234.500");
+  });
+
   it("shows a posting that states nothing as such, without inventing a company", async () => {
     vi.mocked(commands.ingestManualText).mockReturnValue(
       ok(offer({ title: "", company: "", amount_minor: null, currency: null, pay_period: null })),

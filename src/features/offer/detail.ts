@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { majorUnits } from "@/lib/format";
+import { formatMoney } from "@/lib/format";
 import { commands, type FactorView, type OfferDetailView } from "@/lib/ipc/bindings";
 import { unwrap } from "@/lib/ipc/errors";
 
@@ -113,13 +113,9 @@ export function verdictId(detail: Detail): string | null {
 /** The pay, formatted in the user's locale, `null` when the posting named none. */
 export function payAmount(detail: Detail, locale: string): string | null {
   if (detail.amount_minor === null || !detail.currency) return null;
-  const format = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: detail.currency,
-    maximumFractionDigits: 0,
-  });
-  // Minor units, scaled by the currency's own exponent (AD-17).
-  return format.format(majorUnits(detail.amount_minor, detail.currency));
+  // formatMoney carries the currency's own ISO-4217 exponent (AD-17), so a
+  // three-decimal dinar keeps its decimals and CLP/JPY keep none (CH17).
+  return formatMoney(detail.amount_minor, detail.currency, locale);
 }
 
 /** Whole days since the Offer was posted (or first seen), never negative. */

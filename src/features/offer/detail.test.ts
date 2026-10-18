@@ -92,6 +92,25 @@ describe("the Offer detail helpers", () => {
     expect(payAmount(detail({ currency: null }), "en")).toBeNull();
   });
 
+  // CH17: the detail goes through formatMoney, so each currency keeps its own
+  // ISO-4217 exponent instead of being rounded to whole units. Whitespace is
+  // dropped so an ICU NBSP (U+00A0) versus a plain space does not matter.
+  it("keeps a three-exponent currency's decimals", () => {
+    const noSpace = (s: string | null) => s?.replace(/\s/g, "");
+    expect(noSpace(payAmount(detail({ amount_minor: 1_234_500, currency: "KWD" }), "en-US"))).toBe(
+      "KWD1,234.500",
+    );
+    expect(noSpace(payAmount(detail({ amount_minor: 1_234_500, currency: "BHD" }), "en-US"))).toBe(
+      "BHD1,234.500",
+    );
+  });
+
+  it("shows a zero-exponent currency with no decimals", () => {
+    expect(
+      payAmount(detail({ amount_minor: 1_234_567, currency: "CLP" }), "en-US")?.replace(/\s/g, ""),
+    ).toBe("CLP1,234,567");
+  });
+
   it("counts whole days and never goes negative", () => {
     const now = new Date("2026-10-16T12:00:00Z");
     expect(ageDays(detail(), now)).toBe(2);
