@@ -153,8 +153,11 @@ pub fn convert(settings: &FxSettings, amount_minor: i64, currency: &str) -> Opti
     if rate <= 0.0 {
         return None;
     }
-    // `1 target = rate currency`, so the amount divides by the rate.
-    let converted = (amount_minor as f64) / rate;
+    // `1 target = rate currency`: convert through major units, because the two
+    // currencies need not share a minor-unit exponent (USD cents vs CLP pesos).
+    let source_scale = boba_domain::posting::minor_unit_scale(currency) as f64;
+    let target_scale = boba_domain::posting::minor_unit_scale(&target) as f64;
+    let converted = (amount_minor as f64) / source_scale / rate * target_scale;
     if !converted.is_finite() || converted.abs() > i64::MAX as f64 {
         return None;
     }
@@ -242,6 +245,21 @@ mod tests {
         assert_eq!(converted.amount_minor, 90_909);
         assert_eq!(converted.currency, "EUR");
         assert_eq!(converted.as_of, "2026-10-16");
+    }
+
+    #[test]
+    fn conversion_respects_each_currencys_minor_unit_exponent() {
+        // 1,000.00 USD at 1 CLP = 0.0009 USD is 1,111,111 CLP (no centavos).
+        let to_clp = enabled("CLP", &[("USD", 0.0009)], "2026-10-16");
+        let converted = convert(&to_clp, 100_000, "USD").expect("converted");
+        assert_eq!(converted.amount_minor, 1_111_111);
+        assert_eq!(converted.currency, "CLP");
+
+        // 2,000,000 CLP at 1 USD = 900 CLP is 2,222.22 USD = 222,222 cents.
+        let to_usd = enabled("USD", &[("CLP", 900.0)], "2026-10-16");
+        let converted = convert(&to_usd, 2_000_000, "CLP").expect("converted");
+        assert_eq!(converted.amount_minor, 222_222);
+        assert_eq!(converted.currency, "USD");
     }
 
     #[test]

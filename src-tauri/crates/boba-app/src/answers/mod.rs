@@ -98,15 +98,17 @@ impl Defaults {
 
 /// The salary expectation a salary question is answered with (FR-80): the user's
 /// own Salary Floor, written the way a form reads it. Amounts are the AD-17
-/// money shape — integer minor units, two decimals, like
-/// `boba_domain::posting::Money` — so `600_000` is `USD 6000`.
+/// money shape — integer minor units, scaled by the currency's own ISO-4217
+/// exponent — so `600_000` is `USD 6000` and `6_000_000` is `CLP 6000000`.
 pub fn salary_expectation(amount_minor: i64, currency: &str, period: &str) -> String {
-    let major = amount_minor / 100;
-    let minor = (amount_minor % 100).abs();
+    let exponent = boba_domain::posting::minor_unit_exponent(currency);
+    let scale = 10_i64.pow(exponent);
+    let major = amount_minor / scale;
+    let minor = (amount_minor % scale).abs();
     let amount = if minor == 0 {
         major.to_string()
     } else {
-        format!("{major}.{minor:02}")
+        format!("{major}.{minor:0width$}", width = exponent as usize)
     };
     format!("{currency} {amount} per {period}")
 }
@@ -1497,6 +1499,16 @@ mod tests {
             "USD 6000.50 per month"
         );
         assert_eq!(salary_expectation(4_500, "EUR", "hour"), "EUR 45 per hour");
+        assert_eq!(
+            salary_expectation(6_000_000, "CLP", "month"),
+            "CLP 6000000 per month",
+            "CLP has no minor unit"
+        );
+        assert_eq!(
+            salary_expectation(1_234_500, "KWD", "month"),
+            "KWD 1234.500 per month",
+            "KWD has three decimals"
+        );
         assert_eq!(
             salary_expectation(0, "USD", "year"),
             "USD 0 per year",

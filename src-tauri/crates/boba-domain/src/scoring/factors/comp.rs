@@ -18,7 +18,7 @@
 //! The Offer keeps a posted range's **lower bound** (FR-48), and that is what is
 //! compared: the conservative end of the range, never a midpoint nobody posted.
 
-use crate::posting::Money;
+use crate::posting::{Money, minor_unit_scale};
 
 use super::*;
 
@@ -30,7 +30,7 @@ const CEILING_RATIO: f32 = 1.5;
 pub(super) fn money_phrase(money: &Money) -> String {
     format!(
         "{} {}/{}",
-        money.amount_minor / 100,
+        money.amount_minor / minor_unit_scale(&money.currency),
         money.currency,
         money.period.as_str()
     )

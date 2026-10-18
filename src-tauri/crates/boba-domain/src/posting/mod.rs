@@ -53,6 +53,29 @@ pub struct Money {
     pub period: PayPeriod,
 }
 
+/// The ISO-4217 minor-unit exponent of `currency`: how many decimal digits one
+/// major unit has. Every score, parse and formatter in the app scales with this,
+/// never with a hard-coded 100: CLP, JPY and KRW have none, and the Gulf
+/// currencies have three. A code the table does not name falls back to two,
+/// which is the ISO default (and covers USD, EUR and COP).
+///
+/// Mirrored in `src/lib/format` (`minorUnitExponent`); keep the two in sync.
+pub fn minor_unit_exponent(currency: &str) -> u32 {
+    match currency.trim().to_ascii_uppercase().as_str() {
+        // ISO-4217 currencies with no minor unit.
+        "BIF" | "CLP" | "DJF" | "GNF" | "ISK" | "JPY" | "KMF" | "KRW" | "PYG" | "RWF" | "UGX"
+        | "UYI" | "VND" | "VUV" | "XAF" | "XOF" | "XPF" => 0,
+        // ISO-4217 currencies with three decimal digits.
+        "BHD" | "IQD" | "JOD" | "KWD" | "LYD" | "OMR" | "TND" => 3,
+        _ => 2,
+    }
+}
+
+/// `10^minor_unit_exponent(currency)`, the scale between major and minor units.
+pub fn minor_unit_scale(currency: &str) -> i64 {
+    10_i64.pow(minor_unit_exponent(currency))
+}
+
 const CURRENCY_CODES: &[&str] = &[
     "USD", "EUR", "GBP", "CAD", "AUD", "NZD", "CHF", "SEK", "NOK", "DKK", "PLN", "CZK", "RON",
     "BRL", "MXN", "ARS", "COP", "CLP", "PEN", "INR", "JPY", "SGD", "AED", "ZAR",
@@ -80,17 +103,19 @@ impl Money {
         if needs_marker && currency.is_none() && period.is_none() {
             return None;
         }
+        // `$` is shared by USD/CAD/AUD/MXN; USD is the default (markets: FR-1).
+        let currency = currency.unwrap_or_else(|| "USD".to_string());
         Some(Self {
-            amount_minor: first_amount_minor(text)?,
-            // `$` is shared by USD/CAD/AUD/MXN; USD is the default (markets: FR-1).
-            currency: currency.unwrap_or_else(|| "USD".to_string()),
+            amount_minor: first_amount_minor(text, &currency)?,
+            currency,
             period: period.unwrap_or(PayPeriod::Year),
         })
     }
 }
 
-/// The lower bound of the first number in the line, in minor units.
-fn first_amount_minor(text: &str) -> Option<i64> {
+/// The lower bound of the first number in the line, in `currency`'s minor units.
+fn first_amount_minor(text: &str, currency: &str) -> Option<i64> {
+    let scale = minor_unit_scale(currency);
     let chars: Vec<char> = text.chars().collect();
     for start in 0..chars.len() {
         if !chars[start].is_ascii_digit() {
@@ -115,7 +140,7 @@ fn first_amount_minor(text: &str) -> Option<i64> {
             value = value.checked_mul(1000)?;
         }
         // Untrusted text: an 18-digit number would overflow minor units.
-        return value.checked_mul(100).filter(|minor| *minor > 0);
+        return value.checked_mul(scale).filter(|minor| *minor > 0);
     }
     None
 }
@@ -342,6 +367,29 @@ mod tests {
                 period: PayPeriod::Year,
             })
         );
+    }
+
+    #[test]
+    fn money_uses_the_currencys_own_minor_unit_exponent() {
+        // CLP and JPY have no minor unit, so the number itself is stored.
+        assert_eq!(
+            Money::parse("CLP 1.234.567 per year"),
+            Some(Money {
+                amount_minor: 1_234_567,
+                currency: "CLP".into(),
+                period: PayPeriod::Year,
+            })
+        );
+        assert_eq!(
+            Money::parse("JPY 8,000,000 per year").map(|money| money.amount_minor),
+            Some(8_000_000)
+        );
+        assert_eq!(minor_unit_exponent("CLP"), 0);
+        assert_eq!(minor_unit_exponent("JPY"), 0);
+        assert_eq!(minor_unit_exponent("KRW"), 0);
+        assert_eq!(minor_unit_exponent("KWD"), 3);
+        assert_eq!(minor_unit_exponent("USD"), 2);
+        assert_eq!(minor_unit_exponent("COP"), 2);
     }
 
     #[test]

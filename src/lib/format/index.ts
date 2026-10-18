@@ -33,12 +33,72 @@ export interface FxRates {
   rates: Record<string, number | null>;
 }
 
-/** Format an amount in its own currency for `locale`. */
+/**
+ * The ISO-4217 minor-unit exponent of `currency`: how many decimal digits one
+ * major unit has. Mirrors `boba_domain::posting::minor_unit_exponent` (AD-17):
+ * CLP, JPY and KRW have none and the Gulf currencies have three, so money is
+ * never divided by 100 for every currency. An unnamed code falls back to two,
+ * the ISO default (and the exponent of USD, EUR and COP).
+ */
+export function minorUnitExponent(currency: string): number {
+  switch (currency.trim().toUpperCase()) {
+    case "BIF":
+    case "CLP":
+    case "DJF":
+    case "GNF":
+    case "ISK":
+    case "JPY":
+    case "KMF":
+    case "KRW":
+    case "PYG":
+    case "RWF":
+    case "UGX":
+    case "UYI":
+    case "VND":
+    case "VUV":
+    case "XAF":
+    case "XOF":
+    case "XPF":
+      return 0;
+    case "BHD":
+    case "IQD":
+    case "JOD":
+    case "KWD":
+    case "LYD":
+    case "OMR":
+    case "TND":
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+/** `10^minorUnitExponent(currency)`. */
+export function minorUnitScale(currency: string): number {
+  return 10 ** minorUnitExponent(currency);
+}
+
+/** Minor units to major units: `123_400` USD cents is `1234`. */
+export function majorUnits(amountMinor: number, currency: string): number {
+  return amountMinor / minorUnitScale(currency);
+}
+
+/**
+ * Format an amount in its own currency for `locale`.
+ *
+ * The digit count is the currency's own exponent, never the runtime's CLDR
+ * data: ICU 77 gives COP two decimals and ICU 78 none, which would drop the
+ * cents on newer webviews. CLP and JPY still show none; only the exponent comes
+ * from the table, so nothing is forced to two.
+ */
 export function formatMoney(amountMinor: number, currency: string, locale: string): string {
+  const exponent = minorUnitExponent(currency);
   return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: currency.toUpperCase(),
-  }).format(amountMinor / 100);
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
+  }).format(majorUnits(amountMinor, currency));
 }
 
 /** Format a salary, in compact form for cards: `$1.2K`. */
@@ -48,7 +108,7 @@ export function formatCompactMoney(amountMinor: number, currency: string, locale
     currency: currency.toUpperCase(),
     notation: "compact",
     maximumFractionDigits: 1,
-  }).format(amountMinor / 100);
+  }).format(majorUnits(amountMinor, currency));
 }
 
 /** A plain number for `locale`: `1,234,567`. */
@@ -115,7 +175,10 @@ export function convertWithRates(
   if (!target || target === currency.trim().toUpperCase()) return null;
   const rate = fx.rates[currency.trim().toUpperCase()];
   if (typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0) return null;
-  const converted = Math.round(amountMinor / rate);
+  // Convert through major units: source and target need not share an exponent.
+  const converted = Math.round(
+    (amountMinor / minorUnitScale(currency) / rate) * minorUnitScale(target),
+  );
   if (!Number.isFinite(converted)) return null;
   return { amount_minor: converted, currency: target, as_of: fx.as_of };
 }
