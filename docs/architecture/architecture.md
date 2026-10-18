@@ -283,13 +283,12 @@ agent-pack/
 | `get_pending_postings(limit)` | extract_postings | read (untrusted envelope) |
 | `get_posting(id)`, `get_score_card(id)` | narrate, tailor, review | read |
 | `get_company_research(id)` | tailor, review | read (cached, untrusted) |
-| `get_email_batch(limit)` | classify_emails | read (untrusted) |
 | `propose_profile_facts`, `propose_translations` | profile_import, translate | write-proposal |
 | `propose_posting_features(id, features)` | extract_postings | write-proposal |
 | `save_score_narration(id, lang, text)` | narrate | write-draft |
 | `save_document_draft(app_id, doc)` | tailor | write-draft (schema-validated, AD-15) |
 | `save_review(app_id, findings)` | review | write-draft |
-| `propose_status_change(email_id, app_id, status, quote)` | classify_emails | write-proposal |
+| `propose_status_change(email_id, app_id, status, quote)` | classify_emails | write-proposal (checked against the run's input) |
 
 There are no send, submit, delete, settings or fetch-URL tools (AD-5, AD-6).
 

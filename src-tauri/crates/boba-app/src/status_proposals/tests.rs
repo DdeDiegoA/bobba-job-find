@@ -512,6 +512,32 @@ fn an_llm_proposal_is_verified_and_stored_tainted() {
     assert!(proposal.confidence < AUTO_CONFIRM_CONFIDENCE);
 }
 
+/// FX16: the CLI's own stream names an MCP tool `mcp__boba__<tool>`. Matching
+/// only the bare name dropped every real proposal before this.
+#[test]
+fn a_proposal_named_the_way_the_cli_names_it_is_stored() {
+    let mut event = propose("msg_1", "app_1", "interview", "would love to set up a chat");
+    if let AgentEvent::ToolCall { name, .. } = &mut event {
+        *name = format!("mcp__boba__{PROPOSE_TOOL}");
+    }
+    let harness = llm_harness(vec![event]);
+    seed_offer(&harness, "pst_1", "acme", "jobs@acme.com");
+    harness
+        .apply
+        .seed_application(application("app_1", "pst_1", AppStatus::Applied, "Acme"));
+    harness.repo.seed_message(message(
+        "msg_1",
+        "recruiting@acme.com",
+        "Hello",
+        "We would love to set up a chat about the role.",
+    ));
+
+    let outcome = harness.service.classify(Some("claude_code"), None).unwrap();
+
+    assert_eq!(outcome.classified, 1);
+    assert_eq!(harness.repo.proposals().len(), 1);
+}
+
 #[test]
 fn a_proposal_whose_quote_is_not_in_the_message_is_dropped() {
     let harness = llm_harness(vec![propose("msg_1", "app_1", "offer", "we offer 1M")]);

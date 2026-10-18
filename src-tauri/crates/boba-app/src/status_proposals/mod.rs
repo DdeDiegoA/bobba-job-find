@@ -37,6 +37,7 @@ use boba_domain::mail::{
     ReplyClass, RuleMatch, StatusProposal,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use specta::Type;
 
 use crate::applications::{OfferSnapshot, TrackerService, TransitionInput};
@@ -741,38 +742,7 @@ impl StatusProposalsService {
         &self,
         message: &StoredMessage,
     ) -> Result<Vec<CandidateView>, StatusProposalsError> {
-        let domain = sender_domain(&message.from_address);
-        let mut matched = Vec::new();
-        let mut open = Vec::new();
-        for application in self.apply.applications()? {
-            let snapshot = snapshot(&application);
-            let view = CandidateView {
-                application_id: application.id.clone(),
-                company: snapshot.company.clone(),
-                title: snapshot.title.clone(),
-                status: application.status.as_str().to_string(),
-            };
-            let offer = self
-                .postings
-                .get_offer(&application.posting_id)
-                .ok()
-                .flatten();
-            let matches = domain.as_deref().is_some_and(|domain| {
-                offer.as_ref().is_some_and(|offer| {
-                    offer_matches(offer, domain) || company_matches(&snapshot.company, domain)
-                })
-            });
-            if matches {
-                matched.push(view.clone());
-            }
-            if !application.status.is_terminal() {
-                open.push(view);
-            }
-        }
-        if matched.is_empty() {
-            return Ok(open);
-        }
-        Ok(matched)
+        candidates_for(message, self.apply.as_ref(), self.postings.as_ref())
     }
 
     /// One proposal as the queue shows it.
@@ -824,6 +794,123 @@ impl StatusProposalsService {
     }
 }
 
+/// One `propose_status_change` call the core accepted (S8.4).
+///
+/// The agent names the words; the core returns the message's own line as the
+/// quote (ADR-010: the core disposes). Nothing is written here — the use case
+/// stores the proposal off the run's event stream, and the user approves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcceptedProposal {
+    pub email_id: String,
+    pub app_id: String,
+    /// The message's own line, never the run's transcription of it.
+    pub quote: String,
+}
+
+/// Check one `propose_status_change` call against the data the run was given
+/// (S8.4, ADR-010): the message is one this pass has not read yet (that is the
+/// batch the run's input carried), the status is one of the four the tool may
+/// propose, the quote is a line of that message, and the application is one of
+/// that message's candidates. A refusal goes back to the agent in the existing
+/// tool-error shape, so a bad call costs the run a retry instead of being
+/// stored or silently dropped.
+///
+/// The handler calls this; nothing here writes, moves a card or reads anything
+/// but the batch and the Tracker.
+pub fn validate_agent_proposal(
+    repo: &dyn StatusProposalRepo,
+    apply: &dyn ApplyRepo,
+    postings: &dyn IngestionRepo,
+    args: &Value,
+) -> Result<AcceptedProposal, String> {
+    let text = |key: &str| {
+        args.get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let email_id = text("email_id")
+        .ok_or_else(|| "`propose_status_change` needs the message's `email_id`".to_string())?;
+    let app_id =
+        text("app_id").ok_or_else(|| "`propose_status_change` needs an `app_id`".to_string())?;
+    let status =
+        text("status").ok_or_else(|| "`propose_status_change` needs a `status`".to_string())?;
+    let quote = text("quote")
+        .ok_or_else(|| "`propose_status_change` needs the `quote` that shows it".to_string())?;
+    if class_for_status(&status).is_none() {
+        return Err(format!(
+            "`{status}` is not one of applied, interview, offer, rejected"
+        ));
+    }
+    // The batch is exactly what `classify` asked about: the messages no
+    // classifier has read. `classify` stores the verdict only after the run
+    // ends, so during the run this set is the run's own.
+    let message = repo
+        .messages_unclassified()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|message| message.id == email_id)
+        .ok_or_else(|| format!("`{email_id}` is not in this run's batch"))?;
+    let quote = verified_quote(&message, &quote)
+        .ok_or_else(|| format!("the quote is not a line of `{email_id}`"))?;
+    let candidates =
+        candidates_for(&message, apply, postings).map_err(|error| error.to_string())?;
+    if !candidates
+        .iter()
+        .any(|candidate| candidate.application_id == app_id)
+    {
+        return Err(format!(
+            "`{app_id}` is not one of `{email_id}`'s applications"
+        ));
+    }
+    Ok(AcceptedProposal {
+        email_id,
+        app_id,
+        quote,
+    })
+}
+
+/// The Applications one message could be about (AC2).
+///
+/// A match is either the sender's domain (the address Boba mailed or the
+/// Offer's host) or the company's name inside the sender's domain. When
+/// nothing matches, every open Application is offered so the user can pick.
+fn candidates_for(
+    message: &StoredMessage,
+    apply: &dyn ApplyRepo,
+    postings: &dyn IngestionRepo,
+) -> Result<Vec<CandidateView>, StatusProposalsError> {
+    let domain = sender_domain(&message.from_address);
+    let mut matched = Vec::new();
+    let mut open = Vec::new();
+    for application in apply.applications()? {
+        let snapshot = snapshot(&application);
+        let view = CandidateView {
+            application_id: application.id.clone(),
+            company: snapshot.company.clone(),
+            title: snapshot.title.clone(),
+            status: application.status.as_str().to_string(),
+        };
+        let offer = postings.get_offer(&application.posting_id).ok().flatten();
+        let matches = domain.as_deref().is_some_and(|domain| {
+            offer.as_ref().is_some_and(|offer| {
+                offer_matches(offer, domain) || company_matches(&snapshot.company, domain)
+            })
+        });
+        if matches {
+            matched.push(view.clone());
+        }
+        if !application.status.is_terminal() {
+            open.push(view);
+        }
+    }
+    if matched.is_empty() {
+        return Ok(open);
+    }
+    Ok(matched)
+}
+
 /// The task input the classification run reads (AD-7: plain text, bounded).
 fn prompt(messages: &[(StoredMessage, Vec<CandidateView>)]) -> String {
     let mut prompt = String::from(
@@ -869,7 +956,9 @@ fn answers(events: &[AgentEvent]) -> Vec<LlmAnswer> {
     events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::ToolCall { name, input } if name == PROPOSE_TOOL => {
+            // The CLI's stream names an MCP tool `mcp__boba__<tool>`; the bare
+            // name is what the catalog and the tests use (FX16).
+            AgentEvent::ToolCall { name, input } if is_proposal(name) => {
                 let text = |key: &str| {
                     input
                         .get(key)
@@ -888,6 +977,13 @@ fn answers(events: &[AgentEvent]) -> Vec<LlmAnswer> {
             _ => None,
         })
         .collect()
+}
+
+/// Whether a tool call in the run's stream is the proposal tool. The stream
+/// carries the CLI's name for it (`mcp__boba__propose_status_change`); the
+/// catalog's bare name is the last segment.
+fn is_proposal(name: &str) -> bool {
+    name.rsplit("__").next() == Some(PROPOSE_TOOL)
 }
 
 /// The failure a run reported, if it reported one (FR-21).
