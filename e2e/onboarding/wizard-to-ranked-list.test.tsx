@@ -38,6 +38,7 @@ const ipc = vi.hoisted(() => {
       backupCreate: vi.fn(),
       jobsRunNow: vi.fn(),
       applyRulesSnapshot: vi.fn(),
+      autostartStatus: vi.fn(),
       onboardingStatus: vi.fn(),
       onboardingComplete: vi.fn(),
       offersInbox: vi.fn(),
@@ -136,6 +137,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   vi.mocked(save).mockResolvedValue("/home/me/boba-backup.boba");
+  // A fresh install does not launch at login (S5.4 default off).
+  vi.mocked(commands.autostartStatus).mockResolvedValue({ enabled: false });
 
   vi.mocked(commands.agentEngineSnapshot).mockReturnValue(
     ok({
@@ -314,7 +317,8 @@ describe("first run — wizard to ranked list (AC5, SM-1)", () => {
     expect(await screen.findByRole("heading", { name: "You're ready" })).toBeTruthy();
     expect(await screen.findByText("Review")).toBeTruthy();
     expect(screen.getByText(/08:00/)).toBeTruthy();
-    expect(screen.getByText("Off")).toBeTruthy();
+    // Launch at login reads the OS state (FX14), so it arrives with the query.
+    expect(await screen.findByText("Off")).toBeTruthy();
     fireEvent.click(next());
 
     // Finishing starts the run, records completion in the core and hands over

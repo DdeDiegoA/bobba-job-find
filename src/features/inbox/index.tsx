@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { Toaster } from "sonner";
 import { SuggestionBanner } from "./actions";
 import InboxKeyboard from "./keyboard";
 import InboxList from "./list";
@@ -43,8 +42,8 @@ export default function InboxIndex() {
         <InboxManualAdd />
       </details>
 
-      {/* S6.6: Dismiss offers Undo as a toast (FR-66). */}
-      <Toaster />
+      {/* S6.6: Dismiss offers Undo as a toast (FR-66); the shell mounts the
+          one Toaster the app uses. */}
     </section>
   );
 }

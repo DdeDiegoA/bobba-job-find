@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { NotificationSettings, QuietHours } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError } from "@/lib/ipc/errors";
+import LaunchAtLogin from "./autostart";
 import { useNotifications, useSaveNotifications } from "./use-notifications";
 
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -229,6 +230,8 @@ export default function SettingsNotifications() {
           </div>
         </div>
       ) : null}
+
+      <LaunchAtLogin />
     </section>
   );
 }

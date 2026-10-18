@@ -65,7 +65,13 @@
   "finish.schedule.value": "Every day at {time}, your local time",
   "finish.schedule.hint": "Boba runs the search in the background while you are logged in.",
   "finish.autostart.title": "Launch at login",
+  "finish.autostart.loading": "Checking…",
+  "finish.autostart.on": "On",
   "finish.autostart.off": "Off",
-  "finish.autostart.hint": "You can turn it on later if you want Boba ready every morning.",
-  "finish.firstRun": "Next starts your first Search Run and opens Today with live progress."
+  "finish.autostart.error": "Boba could not read the launch-at-login setting.",
+  "finish.autostart.hintOn": "Boba starts in the tray; your daily search still runs at its scheduled time.",
+  "finish.autostart.hintOff": "Boba opens only when you do. You can turn this on later.",
+  "finish.autostart.change": "Change it in Settings → Notifications",
+  "finish.firstRun": "Next starts your first Search Run and opens Today with live progress.",
+  "finish.firstRunError": "Boba could not start the first search. You can run it again from Today."
 }

@@ -9,6 +9,8 @@ vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
     notificationsSnapshot: vi.fn(),
     notificationsSave: vi.fn(),
+    autostartStatus: vi.fn(),
+    autostartSet: vi.fn(),
   },
 }));
 
@@ -34,8 +36,12 @@ function renderPage() {
 beforeEach(() => {
   vi.mocked(commands.notificationsSnapshot).mockReset();
   vi.mocked(commands.notificationsSave).mockReset();
+  vi.mocked(commands.autostartStatus).mockReset();
+  vi.mocked(commands.autostartSet).mockReset();
   vi.mocked(commands.notificationsSnapshot).mockImplementation(() => ok(stored()));
   vi.mocked(commands.notificationsSave).mockImplementation((settings) => ok(settings));
+  vi.mocked(commands.autostartStatus).mockResolvedValue({ enabled: false });
+  vi.mocked(commands.autostartSet).mockImplementation((enabled) => ok({ enabled }));
 });
 
 describe("Settings → Notifications (S5.3, FR-107)", () => {
@@ -97,5 +103,53 @@ describe("Settings → Notifications (S5.3, FR-107)", () => {
 
     // The core's typed key is what the page shows (AD-3), not a raw string.
     expect(await screen.findByText(/can't reach your data/i)).toBeTruthy();
+  });
+});
+
+describe("Launch at login (FX14, FR-44)", () => {
+  it("reflects the OS state the core reports", async () => {
+    vi.mocked(commands.autostartStatus).mockResolvedValue({ enabled: true });
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", { name: "Start Boba when I log in" });
+    expect((toggle as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("sets it in the core and shows the refreshed state", async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", { name: "Start Boba when I log in" });
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+
+    // The OS now starts Boba at login; the page re-reads that, never assumes it.
+    vi.mocked(commands.autostartStatus).mockResolvedValue({ enabled: true });
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(vi.mocked(commands.autostartSet)).toHaveBeenCalledWith(true));
+    await waitFor(() => expect((toggle as HTMLInputElement).checked).toBe(true));
+    expect(vi.mocked(commands.autostartStatus)).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a translated error when the core refuses", async () => {
+    vi.mocked(commands.autostartSet).mockRejectedValue({
+      code: "locked",
+      message_key: "errors.store.locked",
+      details: null,
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Start Boba when I log in" }));
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toMatch(/can't reach your data/i);
+  });
+
+  it("is a native, focusable checkbox with its own label (keyboard-operable)", async () => {
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", { name: "Start Boba when I log in" });
+    expect(toggle.tagName).toBe("INPUT");
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
   });
 });

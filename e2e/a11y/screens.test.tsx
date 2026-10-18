@@ -18,6 +18,7 @@ import KillSwitch from "@/app/header/kill-switch";
 import ConnectionsIndex from "@/features/connections";
 import OfferDetail from "@/features/offer";
 import SettingsApplyingRules from "@/features/settings/applying/rules";
+import SettingsNotifications from "@/features/settings/notifications";
 import StudioIndex from "@/features/studio";
 import TodayIndex from "@/features/today";
 import TrackerIndex from "@/features/tracker";
@@ -49,6 +50,10 @@ vi.mock("@/lib/ipc/bindings", () => ({
     applyView: vi.fn(),
     applyExportPdfs: vi.fn(),
     applyRulesSnapshot: vi.fn(),
+    notificationsSnapshot: vi.fn(),
+    notificationsSave: vi.fn(),
+    autostartStatus: vi.fn(),
+    autostartSet: vi.fn(),
     applyRuleSave: vi.fn(),
     applyRuleDelete: vi.fn(),
     applyRulesSetEnabled: vi.fn(),
@@ -326,6 +331,17 @@ function wireFixtures() {
     }),
   );
   vi.mocked(commands.applyRulesSnapshot).mockReturnValue(ok(rulesSnapshot()));
+  vi.mocked(commands.notificationsSnapshot).mockReturnValue(
+    ok({
+      events: { digest: true, outbox: true, errors: true },
+      top_matches_shown: 3,
+      notify_when_empty: false,
+      quiet_hours: { enabled: false, from: 22, to: 7, notify_during: false },
+    }) as never,
+  );
+  vi.mocked(commands.notificationsSave).mockImplementation((settings) => ok(settings) as never);
+  vi.mocked(commands.autostartStatus).mockReturnValue(Promise.resolve({ enabled: false }));
+  vi.mocked(commands.autostartSet).mockImplementation((enabled) => ok({ enabled }) as never);
   vi.mocked(commands.sessionAutoSnapshot).mockReturnValue(ok([]));
   vi.mocked(commands.killSwitchStatus).mockReturnValue(
     ok({ engaged: false, since: null }) as never,
@@ -673,5 +689,23 @@ describe("Kill Switch (AC1)", () => {
     const { container } = render(providers(<KillSwitch />));
     await screen.findByRole("status");
     expectClean(auditTree(container));
+  });
+});
+
+describe("Settings → Notifications (FX14 AC4)", () => {
+  it("renders no accessibility violations, launch at login included", async () => {
+    expectClean(
+      await audit(<SettingsNotifications />, "/settings/notifications", () =>
+        screen.findByRole("checkbox", { name: "Start Boba when I log in" }),
+      ),
+    );
+  });
+
+  it("exposes launch at login as a native, focusable, labelled switch", async () => {
+    render(providers(<SettingsNotifications />, "/settings/notifications"));
+    const toggle = await screen.findByRole("checkbox", { name: "Start Boba when I log in" });
+    expect(toggle.tagName).toBe("INPUT");
+    toggle.focus();
+    expect(document.activeElement).toBe(toggle);
   });
 });

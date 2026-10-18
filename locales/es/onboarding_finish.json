@@ -65,7 +65,13 @@
   "finish.schedule.value": "Todos los días a las {time}, tu hora local",
   "finish.schedule.hint": "Boba hace la búsqueda en segundo plano mientras tengas la sesión iniciada.",
   "finish.autostart.title": "Abrir al iniciar sesión",
+  "finish.autostart.loading": "Comprobando…",
+  "finish.autostart.on": "Activado",
   "finish.autostart.off": "Apagado",
-  "finish.autostart.hint": "Puedes activarlo más adelante si quieres que Boba esté lista cada mañana.",
-  "finish.firstRun": "Siguiente inicia tu primera búsqueda y abre Hoy con el progreso en vivo."
+  "finish.autostart.error": "No se pudo leer el inicio automático.",
+  "finish.autostart.hintOn": "Boba se abre en la bandeja; tu búsqueda diaria sigue corriendo a su hora.",
+  "finish.autostart.hintOff": "Boba se abre solo cuando tú la abres. Puedes activarlo más adelante.",
+  "finish.autostart.change": "Cámbialo en Ajustes → Notificaciones",
+  "finish.firstRun": "Siguiente inicia tu primera búsqueda y abre Hoy con el progreso en vivo.",
+  "finish.firstRunError": "Boba no pudo iniciar la primera búsqueda. Puedes ejecutarla de nuevo desde Hoy."
 }

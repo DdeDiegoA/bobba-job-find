@@ -1,6 +1,5 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Toaster } from "sonner";
 import { Board } from "./board/board";
 import TrackerNudges from "./nudges";
 import TrackerStats from "./stats";
@@ -10,8 +9,8 @@ import TrackerStats from "./stats";
  * funnel stats (S9.9, FR-97). The container is owned by this slice (S1.5 left a
  * stub); the board is in `board/` and the stats in `stats/`.
  *
- * The `<Toaster>` lives here because Undo is offered as a toast right after a
- * move (AC2); no other screen has mounted one yet.
+ * Undo is offered as a toast right after a move (AC2); the shell mounts the
+ * one `<Toaster>` the app uses.
  */
 export default function TrackerIndex() {
   const { t } = useTranslation("tracker");
@@ -91,7 +90,6 @@ export default function TrackerIndex() {
           <TrackerStats />
         )}
       </div>
-      <Toaster />
     </section>
   );
 }
