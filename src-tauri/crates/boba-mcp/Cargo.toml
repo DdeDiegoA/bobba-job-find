@@ -7,8 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+# The bin target is `boba-mcp-shim`, not `boba-mcp`: `tauri-build` copies the
+# `binaries/boba-mcp-<triple>` sidecar into `target/<profile>/boba-mcp`, and a
+# bin of that name races the copy and loses, leaving tests a 0-byte,
+# non-executable file (FX20). The shipped sidecar keeps the name `boba-mcp`.
 [[bin]]
-name = "boba-mcp"
+name = "boba-mcp-shim"
 path = "src/main.rs"
 
 [dependencies]

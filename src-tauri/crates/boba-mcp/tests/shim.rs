@@ -4,6 +4,7 @@
 //! invents output (AD-6).
 
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread::JoinHandle;
 
@@ -65,16 +66,61 @@ fn read_message(core: &mut BufReader<wire::Stream>) -> std::io::Result<Option<Va
     Ok(serde_json::from_str(line.trim()).ok())
 }
 
+/// The shim cargo built for these tests. `CARGO_BIN_EXE_*` is the path cargo
+/// guarantees and builds before the tests run; it is never a guess at
+/// `target/debug`.
+///
+/// The target is `boba-mcp-shim`, not `boba-mcp`, because `tauri-build` copies
+/// `src-tauri/binaries/boba-mcp-<triple>` — a 0-byte placeholder until a
+/// release build fills it — to `target/<profile>/boba-mcp` whenever the
+/// desktop crate builds. A bin target of that name races that copy and loses:
+/// the shim tests then spawn an empty, non-executable file and fail with
+/// `PermissionDenied` (FX20). The shipped sidecar is still named `boba-mcp`
+/// (AD-6).
+fn shim_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_boba-mcp-shim"))
+}
+
+/// FX20's regression: the binary these tests spawn is the one cargo built, not
+/// a sidecar placeholder copied over it.
+#[test]
+fn the_spawned_shim_is_the_binary_cargo_built() {
+    let path = shim_path();
+    let metadata = std::fs::metadata(&path)
+        .unwrap_or_else(|error| panic!("shim at {} is not runnable: {error}", path.display()));
+    assert!(
+        metadata.is_file(),
+        "shim at {} is not a file",
+        path.display()
+    );
+    assert!(
+        metadata.len() > 0,
+        "shim at {} is empty: a sidecar placeholder was copied over it",
+        path.display()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            metadata.permissions().mode() & 0o111,
+            0,
+            "shim at {} has no execute bit",
+            path.display()
+        );
+    }
+}
+
 /// Run the shim with `env`, feed it `input`, return status, stdout and stderr.
 fn run_shim(env: &[(&str, &str)], input: &str) -> (ExitStatus, String, String) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_boba-mcp"))
+    let shim = shim_path();
+    let mut child = Command::new(&shim)
         .env_clear()
         .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn the shim");
+        .unwrap_or_else(|error| panic!("spawn the shim {}: {error}", shim.display()));
 
     child
         .stdin
