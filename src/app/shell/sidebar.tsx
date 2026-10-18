@@ -13,7 +13,15 @@ const navLinkBase =
 const controlBase =
   "flex h-9 items-center gap-2 rounded-xl px-2 text-sm text-fg-muted hover:bg-surface-muted hover:text-fg";
 
-export function Sidebar({ run }: { run: RunState }) {
+export function Sidebar({
+  run,
+  cancelling,
+  onCancel,
+}: {
+  run: RunState;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
   const { t } = useTranslation();
 
   return (
@@ -53,7 +61,7 @@ export function Sidebar({ run }: { run: RunState }) {
       </nav>
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
-        <RunChip run={run} />
+        <RunChip run={run} cancelling={cancelling} onCancel={onCancel} />
         <div className="flex items-center gap-2 max-xl:flex-col">
           <ThemeButton />
           <LanguageButton />
@@ -64,17 +72,36 @@ export function Sidebar({ run }: { run: RunState }) {
   );
 }
 
-function RunChip({ run }: { run: RunState }) {
+function RunChip({
+  run,
+  cancelling,
+  onCancel,
+}: {
+  run: RunState;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
   const { t } = useTranslation();
   const label = run.running ? t("shell:sidebar.run.running") : t("shell:sidebar.run.idle");
   return (
-    <p className="flex items-center gap-2 px-2 text-xs text-fg-muted max-xl:justify-center">
+    <div className="flex items-center gap-2 px-2 text-xs text-fg-muted max-xl:justify-center">
       <span
         aria-hidden
         className={cn("size-2 shrink-0 rounded-full", run.running ? "bg-warning" : "bg-success")}
       />
       <span className="truncate max-xl:hidden">{label}</span>
-    </p>
+      {/* FX15: the same cancel as the topbar's, next to the state it changes. */}
+      {run.running && run.runId ? (
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={cancelling}
+          className="ml-auto shrink-0 rounded-md px-1 underline underline-offset-2 hover:text-fg disabled:opacity-60 max-xl:hidden"
+        >
+          {cancelling ? t("shell:sidebar.run.cancelling") : t("shell:sidebar.run.cancel")}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

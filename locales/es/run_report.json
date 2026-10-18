@@ -7,6 +7,15 @@
     "title": "Todavía no hay búsquedas",
     "body": "Boba aún no ha buscado empleos. Se ejecuta según su horario, o lánzala ahora desde la barra superior."
   },
+  "cancelled": {
+    "title": "Búsqueda cancelada",
+    "body": "Detuviste esta búsqueda. Las fuentes que terminaron están en el informe de abajo."
+  },
+  "cancel": {
+    "action": "Cancelar búsqueda",
+    "pending": "Cancelando…",
+    "gone": "Esa búsqueda ya terminó."
+  },
   "partial": {
     "title": "No se pudo conectar con {count} de {total} fuentes",
     "retry": "Reintentar las fuentes fallidas",

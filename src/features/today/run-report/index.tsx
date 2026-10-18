@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { SourceReportView } from "@/lib/ipc/bindings";
-import { isAppError, renderAppError } from "@/lib/ipc/errors";
+import { commands, type SourceReportView } from "@/lib/ipc/bindings";
+import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
 import { cn } from "@/lib/utils";
 import {
   failedSources,
@@ -33,6 +33,26 @@ export default function TodayRunReport() {
     void queryClient.invalidateQueries({ queryKey: runReportKey });
   }, [queryClient]);
   const progress = useRunProgress(reload);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const cancelLive = useCallback(() => {
+    if (!progress || cancelling) return;
+    setCancelError(null);
+    setCancelling(true);
+    void Promise.resolve()
+      .then(() => commands.taskCancel(progress.runId))
+      .then(unwrap)
+      .then((found) => {
+        // No such task: it ended between the click and the call.
+        if (!found) setCancelError(t("cancel.gone"));
+      })
+      .catch((error: unknown) => {
+        setCancelError(
+          isAppError(error) ? renderAppError(error, tError) : tError("errors.unknown"),
+        );
+      })
+      .finally(() => setCancelling(false));
+  }, [progress, cancelling, t, tError]);
 
   if (report.isPending) {
     return (
@@ -76,11 +96,37 @@ export default function TodayRunReport() {
         <h2 id="run-report-title" className="font-display text-xl text-fg">
           {t("title")}
         </h2>
-        <p className="text-sm text-fg-muted">
-          {t("started", { when: new Date(data.started_at).toLocaleString() })} ·{" "}
-          {t("duration", { duration: formatDuration(data.duration_ms) })}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-fg-muted">
+            {t("started", { when: new Date(data.started_at).toLocaleString() })} ·{" "}
+            {t("duration", { duration: formatDuration(data.duration_ms) })}
+          </p>
+          {/* FX15: the report stops being "in progress" the moment the core
+              says so; only a live run can be cancelled. */}
+          {progress ? (
+            <Button size="sm" variant="outline" disabled={cancelling} onClick={cancelLive}>
+              {cancelling ? t("cancel.pending") : t("cancel.action")}
+            </Button>
+          ) : null}
+        </div>
       </div>
+
+      {cancelError ? (
+        <p role="alert" className="text-sm text-danger">
+          {cancelError}
+        </p>
+      ) : null}
+
+      {data.cancelled ? (
+        <div
+          role="status"
+          data-slot="cancelled-run"
+          className="flex flex-col gap-1 rounded-card border border-border bg-surface-muted p-3"
+        >
+          <p className="font-medium text-fg">{t("cancelled.title")}</p>
+          <p className="text-sm text-fg-muted">{t("cancelled.body")}</p>
+        </div>
+      ) : null}
 
       {data.partial ? (
         <div

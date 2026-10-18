@@ -17,12 +17,24 @@ interface TopbarProps {
   message: RunMessage | null;
   /** The command is in flight: keep the button from firing twice. */
   pending: boolean;
+  /** A cancel request is in flight (FX15). */
+  cancelling: boolean;
   onRunNow: () => void;
+  onCancel: () => void;
   searchRef: RefObject<HTMLButtonElement | null>;
   onSearch: () => void;
 }
 
-export function Topbar({ run, message, pending, onRunNow, searchRef, onSearch }: TopbarProps) {
+export function Topbar({
+  run,
+  message,
+  pending,
+  cancelling,
+  onRunNow,
+  onCancel,
+  searchRef,
+  onSearch,
+}: TopbarProps) {
   const { t } = useTranslation();
   const { pathname } = useLocation();
 
@@ -59,6 +71,14 @@ export function Topbar({ run, message, pending, onRunNow, searchRef, onSearch }:
       >
         {run.running ? t("shell:topbar.runNow.running") : t("shell:topbar.runNow")}
       </Button>
+
+      {/* FX15: only while a run is live and its task id is known — the id is
+          what `task_cancel` takes. */}
+      {run.running && run.runId ? (
+        <Button type="button" size="sm" variant="outline" disabled={cancelling} onClick={onCancel}>
+          {cancelling ? t("shell:topbar.cancel.pending") : t("shell:topbar.cancel")}
+        </Button>
+      ) : null}
 
       {message ? (
         <span

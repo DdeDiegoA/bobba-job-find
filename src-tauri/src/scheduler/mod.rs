@@ -395,6 +395,16 @@ fn locked_slots(offset: UtcOffset, now: OffsetDateTime) -> Vec<(JobKind, String)
 /// Run one started job off the tick thread, then close its row: the outcome is
 /// what `job_run` ends with, and a panic in a handler becomes `failed`.
 fn execute<R: Runtime>(app: AppHandle<R>, job: JobKind, run: JobRun) {
+    // FX15: the daily search is a cancellable task from the moment it starts,
+    // under the id its report already carries — so `task_cancel` finds it by
+    // the id the UI holds. The handler checks the token between Sources. The
+    // other jobs have no Cancel control and never consult a token, so they are
+    // not registered (a task nobody can stop would lie about its status).
+    let handle = app
+        .try_state::<crate::events::TaskRegistry>()
+        .filter(|_| job == JobKind::DailySearch)
+        .map(|registry| registry.begin("ingest.run", run.id.clone()));
+    let thread_handle = handle.clone();
     let thread_app = app.clone();
     let thread_run = run.clone();
     let spawned = std::thread::Builder::new()
@@ -402,11 +412,33 @@ fn execute<R: Runtime>(app: AppHandle<R>, job: JobKind, run: JobRun) {
         .spawn(move || {
             let handler = handlers(&thread_app).and_then(|handlers| handlers.get(job));
             let outcome = run_handler(handler, job);
-            close(&thread_app, &thread_run, outcome);
+            let cancelled = thread_handle
+                .as_ref()
+                .is_some_and(crate::events::TaskHandle::is_cancelled);
+            let failed = outcome.is_err();
+            close(&thread_app, &thread_run, outcome, cancelled);
+            if let Some(handle) = thread_handle {
+                let event = if cancelled {
+                    crate::events::TaskOutcome::Cancelled
+                } else if failed {
+                    crate::events::TaskOutcome::Failed
+                } else {
+                    crate::events::TaskOutcome::Completed
+                };
+                handle.finished(&thread_app, event, None);
+            }
         });
     if let Err(error) = spawned {
         tracing::error!(%error, job = job.as_str(), "job thread not started");
-        close(&app, &run, Err(format!("job thread not started: {error}")));
+        close(
+            &app,
+            &run,
+            Err(format!("job thread not started: {error}")),
+            false,
+        );
+        if let Some(handle) = handle {
+            handle.finished(&app, crate::events::TaskOutcome::Failed, None);
+        }
     }
 }
 
@@ -421,16 +453,36 @@ fn run_handler(handler: Option<Arc<dyn JobHandler>>, job: JobKind) -> Result<(),
         .unwrap_or_else(|_| Err(format!("{} handler panicked", job.as_str())))
 }
 
+/// The terminal status a run closes with (FX15): a cancelled run wins over
+/// the handler's clean return, so it never reads as a success.
+fn closing_status(
+    outcome: &Result<(), String>,
+    cancelled: bool,
+) -> (boba_app::jobs::RunStatus, Option<&str>) {
+    if cancelled {
+        return (
+            boba_app::jobs::RunStatus::Cancelled,
+            Some("cancelled by user"),
+        );
+    }
+    match outcome {
+        Ok(()) => (boba_app::jobs::RunStatus::Succeeded, None),
+        Err(error) => (boba_app::jobs::RunStatus::Failed, Some(error.as_str())),
+    }
+}
+
 /// Close a run with the outcome its handler reported.
-fn close<R: Runtime>(app: &AppHandle<R>, run: &JobRun, outcome: Result<(), String>) {
+fn close<R: Runtime>(
+    app: &AppHandle<R>,
+    run: &JobRun,
+    outcome: Result<(), String>,
+    cancelled: bool,
+) {
     let Some(repo) = jobs_repo(app) else {
         return;
     };
     let clock = SystemClock;
-    let (status, detail) = match &outcome {
-        Ok(()) => (boba_app::jobs::RunStatus::Succeeded, None),
-        Err(error) => (boba_app::jobs::RunStatus::Failed, Some(error.as_str())),
-    };
+    let (status, detail) = closing_status(&outcome, cancelled);
     if let Err(error) = repo.finish_run(&run.id, &clock.now_rfc3339(), status, detail) {
         tracing::error!(%error, run = run.id, "job run not closed");
     }
@@ -587,6 +639,27 @@ mod tests {
     use boba_app::ports::backup::{
         BackupError, BackupMeta, BackupPort, BackupStatus, ResetReport, RestoreReport,
     };
+
+    /// FX15: a run the user cancelled closes as cancelled, never as succeeded,
+    /// even though its handler returned cleanly.
+    #[test]
+    fn a_cancelled_run_closes_as_cancelled() {
+        assert_eq!(
+            closing_status(&Ok(()), true),
+            (
+                boba_app::jobs::RunStatus::Cancelled,
+                Some("cancelled by user")
+            )
+        );
+        assert_eq!(
+            closing_status(&Ok(()), false),
+            (boba_app::jobs::RunStatus::Succeeded, None)
+        );
+        assert_eq!(
+            closing_status(&Err("boom".to_string()), false),
+            (boba_app::jobs::RunStatus::Failed, Some("boom"))
+        );
+    }
 
     #[test]
     fn the_stored_schedule_parses_into_times_and_days() {

@@ -7,6 +7,15 @@
     "title": "No run yet",
     "body": "Boba has not searched for jobs yet. It runs on its schedule, or run it now from the top bar."
   },
+  "cancelled": {
+    "title": "Run cancelled",
+    "body": "You stopped this run. The Sources that finished are in the report below."
+  },
+  "cancel": {
+    "action": "Cancel run",
+    "pending": "Cancelling…",
+    "gone": "That run already finished."
+  },
   "partial": {
     "title": "{count} of {total} Sources could not be reached",
     "retry": "Retry failed Sources",

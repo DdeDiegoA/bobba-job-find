@@ -6,6 +6,8 @@ import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
 /** What the shell shows about the daily search (S5.1/S5.2). */
 export interface RunState {
   running: boolean;
+  /** The live run's task id: what Cancel hands to `task_cancel` (FX15). */
+  runId: string | null;
   lastRunAt: string | null;
   newCount: number;
 }
@@ -26,9 +28,15 @@ export interface RunMessage {
  */
 export function useRunNow() {
   const { t } = useTranslation();
-  const [run, setRun] = useState<RunState>({ running: false, lastRunAt: null, newCount: 0 });
+  const [run, setRun] = useState<RunState>({
+    running: false,
+    runId: null,
+    lastRunAt: null,
+    newCount: 0,
+  });
   const [message, setMessage] = useState<RunMessage | null>(null);
   const [pending, setPending] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   // A short run can end before `jobs_run_now` answers (the command spawns it).
   // Remember its id so the command's answer never re-opens the running state.
   const finishedRun = useRef<string | null>(null);
@@ -69,11 +77,24 @@ export function useRunNow() {
         events.runReportProgressed.listen((event) => {
           if (event.payload.phase === "finished") {
             finishedRun.current = event.payload.run_id;
-            setRun((current) => ({ ...current, running: false }));
+            setRun((current) => ({ ...current, running: false, runId: null }));
             refresh();
             return;
           }
-          setRun((current) => ({ ...current, running: true }));
+          // FX15: the run stopped because the user cancelled it. The store
+          // already holds the partial report, so the screen reloads it.
+          if (event.payload.phase === "cancelled") {
+            finishedRun.current = event.payload.run_id;
+            setRun((current) => ({ ...current, running: false, runId: null }));
+            setMessage({ kind: "info", text: t("shell:topbar.cancel.done") });
+            refresh();
+            return;
+          }
+          setRun((current) => ({
+            ...current,
+            running: true,
+            runId: event.payload.run_id,
+          }));
         }),
       )
         .then((unlisten) => {
@@ -102,7 +123,7 @@ export function useRunNow() {
         // already finished has nothing left to follow: either way the button
         // must not stay disabled waiting for an event that will not come.
         if (outcome.run_id === "" || finishedRun.current === outcome.run_id) return;
-        setRun((current) => ({ ...current, running: true }));
+        setRun((current) => ({ ...current, running: true, runId: outcome.run_id }));
         if (outcome.joined) {
           setMessage({ kind: "info", text: t("shell:topbar.runNow.busy") });
         }
@@ -116,5 +137,32 @@ export function useRunNow() {
       .finally(() => setPending(false));
   }, [t]);
 
-  return { run, message, pending, runNow };
+  /**
+   * Ask the core to cancel the live run (FX15). The call only *requests* the
+   * stop: the run finishes its current Source and the `cancelled` lifecycle
+   * event is what moves the screen, so a cancel that lands late never shows a
+   * state the core did not reach.
+   */
+  const cancelRun = useCallback(() => {
+    const runId = run.runId;
+    if (!runId || cancelling) return;
+    setMessage(null);
+    setCancelling(true);
+    void Promise.resolve()
+      .then(() => commands.taskCancel(runId))
+      .then(unwrap)
+      .then((found) => {
+        // No such task: it had already finished (or never started).
+        if (!found) setMessage({ kind: "error", text: t("shell:topbar.cancel.gone") });
+      })
+      .catch((error: unknown) => {
+        setMessage({
+          kind: "error",
+          text: isAppError(error) ? renderAppError(error, t) : t("errors.unknown"),
+        });
+      })
+      .finally(() => setCancelling(false));
+  }, [run.runId, cancelling, t]);
+
+  return { run, message, pending, cancelling, runNow, cancelRun };
 }

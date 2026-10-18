@@ -22,7 +22,8 @@ use std::sync::Arc;
 
 use boba_app::daily_search::report::{RunReport, SourceOutcome};
 use boba_app::daily_search::{
-    AgentPass, DailySearch, RunObserver, RunOptions, RunRepos, RunSource, RunSources, SourceReport,
+    AgentPass, DailySearch, RunCancel, RunObserver, RunOptions, RunRepos, RunSource, RunSources,
+    SourceReport,
 };
 use boba_app::error::{AppError, AppResult};
 use boba_app::jobs::{JobHandler, JobKind};
@@ -99,6 +100,8 @@ pub struct RunReportView {
     pub errors: Vec<String>,
     /// True when at least one Source failed: the banner with Retry (AC3).
     pub partial: bool,
+    /// The user cancelled this run (FX15): what ran is kept and marked.
+    pub cancelled: bool,
 }
 
 impl RunReportView {
@@ -132,6 +135,7 @@ impl RunReportView {
             agent_tasks_used: report.agent_tasks_used,
             errors: report.errors.clone(),
             partial: report.is_partial(),
+            cancelled: report.cancelled,
         }
     }
 }
@@ -139,8 +143,9 @@ impl RunReportView {
 /// A run's live progress, emitted as `run_report:progressed` (AC1).
 ///
 /// One event per phase: `started` (the run began against `total` Sources),
-/// `source` (one Source's turn ended, `done` of `total` now finished) and
-/// `finished` (the report is stored; the screen reads it).
+/// `source` (one Source's turn ended, `done` of `total` now finished),
+/// `finished` (the report is stored; the screen reads it) and `cancelled`
+/// (the user stopped the run between Sources; what ran is stored and marked).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Event)]
 #[tauri_specta(event_name = "run_report:progressed")]
 pub struct RunReportProgressed {
@@ -197,9 +202,10 @@ impl<R: Runtime> RunObserver for EventObserver<R> {
     }
 
     fn run_finished(&self, report: &RunReport) {
+        let phase = progress_phase(report);
         let event = RunReportProgressed {
             run_id: report.run_id.clone(),
-            phase: "finished".to_string(),
+            phase: phase.to_string(),
             done: report.sources.len() as u32,
             total: report.sources.len() as u32,
             source_id: None,
@@ -208,8 +214,18 @@ impl<R: Runtime> RunObserver for EventObserver<R> {
             partial: Some(report.is_partial()),
         };
         if let Err(error) = event.emit(&self.app) {
-            tracing::warn!(run = %report.run_id, phase = "finished", %error, "run_report:progressed not delivered");
+            tracing::warn!(run = %report.run_id, phase, %error, "run_report:progressed not delivered");
         }
+    }
+}
+
+/// The terminal phase a report's event carries (FX15): a run the user
+/// cancelled says so instead of reading as a finished success.
+fn progress_phase(report: &RunReport) -> &'static str {
+    if report.cancelled {
+        "cancelled"
+    } else {
+        "finished"
     }
 }
 
@@ -582,6 +598,17 @@ fn execute<R: Runtime>(
         tracing::info!("daily search: no engine chosen, scoring from deterministic features");
     }
 
+    // FX15: the run asks the registry between Sources whether the user
+    // cancelled it. A host without a registry (a retry command in a test app)
+    // simply has nothing to cancel.
+    let cancel: Option<Arc<dyn RunCancel>> =
+        app.try_state::<crate::events::TaskRegistry>()
+            .map(|registry| {
+                let registry = registry.inner().clone();
+                let run_id = options.run_id.clone();
+                Arc::new(move || registry.is_cancelled(&run_id)) as Arc<dyn RunCancel>
+            });
+
     let service = DailySearch::new(
         live,
         RunRepos {
@@ -603,7 +630,8 @@ fn execute<R: Runtime>(
     ))))
     // S6.9: F3 rides along when the build carries the encoder — the opt-in
     // decides whether it answers (AC1), and a missing mount is simply no F3.
-    .with_embeddings(embeddings(app));
+    .with_embeddings(embeddings(app))
+    .with_cancel(cancel);
 
     let report = service
         .run(options)
@@ -800,7 +828,16 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
                 only_sources: None,
                 agent: None,
             };
-            match execute(&thread_app, options, Some(failed)) {
+            // FX15: a retry is a live run too, so the Cancel control can reach
+            // it. It has no `job_run` row, so only the task registry learns it.
+            let task = thread_app
+                .try_state::<crate::events::TaskRegistry>()
+                .map(|registry| registry.begin("ingest.run", options.run_id.clone()));
+            let outcome = execute(&thread_app, options, Some(failed));
+            let cancelled = task
+                .as_ref()
+                .is_some_and(crate::events::TaskHandle::is_cancelled);
+            let run_failed = match outcome {
                 // The retried Sources replace their failed lines; the Sources
                 // the first run reached keep theirs, so the newest view still
                 // shows the whole run (reviewer-1 F4).
@@ -812,10 +849,22 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
                     ) {
                         tracing::warn!(key = error.message_key, "retried report not stored");
                     }
+                    false
                 }
                 Err(error) => {
                     tracing::warn!(key = error.message_key, "daily search retry failed");
+                    true
                 }
+            };
+            if let Some(task) = task {
+                let event = if cancelled {
+                    crate::events::TaskOutcome::Cancelled
+                } else if run_failed {
+                    crate::events::TaskOutcome::Failed
+                } else {
+                    crate::events::TaskOutcome::Completed
+                };
+                task.finished(&thread_app, event, None);
             }
         });
     if let Err(error) = spawned {
@@ -967,7 +1016,23 @@ mod tests {
             ranked: 0,
             agent_tasks_used: 0,
             errors: Vec::new(),
+            cancelled: false,
         }
+    }
+
+    /// FX15: a cancelled run's terminal event is the cancelled phase, and the
+    /// view carries the flag so the report screen can say so.
+    #[test]
+    fn a_cancelled_run_reports_the_cancelled_phase_and_flag() {
+        let mut cancelled = report("run_c", false);
+        cancelled.cancelled = true;
+
+        assert_eq!(progress_phase(&cancelled), "cancelled");
+        assert!(RunReportView::of(&cancelled).cancelled);
+
+        let finished = report("run_ok", false);
+        assert_eq!(progress_phase(&finished), "finished");
+        assert!(!RunReportView::of(&finished).cancelled);
     }
 
     /// A `SourcesRepo` whose reads can be made to fail, so the fail-closed

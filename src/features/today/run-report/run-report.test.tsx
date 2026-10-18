@@ -15,6 +15,7 @@ vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
     runReportLatest: vi.fn(),
     runReportRetry: vi.fn(),
+    taskCancel: vi.fn(),
   },
   events: {
     runReportProgressed: {
@@ -75,6 +76,7 @@ const report = (over: Partial<RunReportView> = {}): RunReportView => ({
   agent_tasks_used: 4,
   errors: [],
   partial: true,
+  cancelled: false,
   ...over,
 });
 
@@ -90,6 +92,8 @@ function renderPanel() {
 beforeEach(() => {
   vi.mocked(commands.runReportLatest).mockReset();
   vi.mocked(commands.runReportRetry).mockReset();
+  vi.mocked(commands.taskCancel).mockReset();
+  vi.mocked(commands.taskCancel).mockImplementation(() => ok(true));
   onProgress = null;
 });
 
@@ -161,6 +165,58 @@ describe("the run report panel", () => {
 
     await screen.findByText("Remotive");
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("cancelling a run (FX15)", () => {
+  it("marks a cancelled report instead of showing it as a finished success (AC1)", async () => {
+    vi.mocked(commands.runReportLatest).mockReturnValue(ok(report({ cancelled: true })));
+
+    renderPanel();
+
+    expect(await screen.findByText("Run cancelled")).toBeTruthy();
+    expect(screen.getByText(/You stopped this run/)).toBeTruthy();
+  });
+
+  it("keeps the cancelled notice out of a run that finished on its own (AC2)", async () => {
+    vi.mocked(commands.runReportLatest).mockReturnValue(ok(report({ cancelled: false })));
+
+    renderPanel();
+
+    await screen.findByText("Remotive");
+    expect(screen.queryByText("Run cancelled")).toBeNull();
+  });
+
+  it("offers Cancel while a run is live and cancels by its task id (AC1)", async () => {
+    vi.mocked(commands.runReportLatest).mockReturnValue(ok(report()));
+    renderPanel();
+    await waitFor(() => expect(onProgress).not.toBeNull());
+
+    act(() => {
+      onProgress?.({
+        payload: {
+          run_id: "run_live",
+          phase: "source",
+          done: 1,
+          total: 3,
+          source_id: "remotive",
+          source_name: "Remotive",
+          outcome: "ok",
+          partial: null,
+        },
+      });
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    await waitFor(() => expect(commands.taskCancel).toHaveBeenCalledWith("run_live"));
+  });
+
+  it("does not offer Cancel once the run is over (AC2)", async () => {
+    vi.mocked(commands.runReportLatest).mockReturnValue(ok(report()));
+    renderPanel();
+    await screen.findByText("Remotive");
+
+    expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
   });
 });
 

@@ -70,6 +70,9 @@ pub enum RunStatus {
     Failed,
     /// The store was locked when the slot was due: never a success (ADR-009).
     SkippedLocked,
+    /// The user cancelled the run (FX15): never a success, and its partial
+    /// results are kept and marked in the report.
+    Cancelled,
 }
 
 impl RunStatus {
@@ -80,6 +83,7 @@ impl RunStatus {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::SkippedLocked => "skipped_locked",
+            Self::Cancelled => "cancelled",
         }
     }
 
@@ -90,6 +94,7 @@ impl RunStatus {
             "succeeded" => Some(Self::Succeeded),
             "failed" => Some(Self::Failed),
             "skipped_locked" => Some(Self::SkippedLocked),
+            "cancelled" => Some(Self::Cancelled),
             _ => None,
         }
     }
@@ -821,6 +826,7 @@ mod tests {
             RunStatus::Succeeded,
             RunStatus::Failed,
             RunStatus::SkippedLocked,
+            RunStatus::Cancelled,
         ] {
             assert_eq!(RunStatus::parse(status.as_str()), Some(status));
         }
