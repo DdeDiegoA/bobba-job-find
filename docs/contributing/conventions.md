@@ -69,6 +69,13 @@ pre-commit hook. It is a static check — no build, under a second.
 | IPC list | `collect_commands!`/`collect_events!` appear only in `ipc/command_list.rs`; every `#[tauri::command]` fn is registered there |
 | Port list | `mount_port::<...>` is used only in `wiring/port_list.rs`, or in a module whose `mount()` helper `port_list.rs` calls (ADR-012) |
 | Adapter rule | `src-tauri/tests/dependency_rules.rs` is present (the real check is that cargo test) |
+| Mounted leaves | A `src/features/**/index.tsx` with a default export that nothing reachable from `src/main` or `src/app/routes` imports, transitively — a leaf only a test, or only an unreachable helper, imports is still unreachable (the beta.2 stub sweep found six). Also a placeholder page whose heading is literally `Index`, and a `ponytail`/`no handler yet` marker on an interactive element. Exceptions live one per entry, each with a reason, in `scripts/ci/leaf-guard.allowlist.json`; an entry for a missing file or for a leaf that is mounted again fails the gate. Its negative tests are `scripts/ci/check-conventions.test.mjs` |
+
+The runtime half of the mounted-leaf rule is `src/app/containers.test.tsx`: it
+renders every route, every `TODAY_PANELS` entry and every `SETTINGS_PAGES` entry
+in a locked store and Limited mode, and fails when a registered leaf's heading
+is missing. A new panel or page needs one line in its container **and** one line
+in that test's table.
 
 Run it alone with `pnpm check:conventions`. `pnpm check` chains it with Biome,
 tsc and rustfmt.
