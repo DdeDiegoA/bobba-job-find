@@ -17,10 +17,23 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+    inputs:
+      # REL3: release.yml passes the tag here. It keys the concurrency group, so
+      # two release gates can never share one, and it turns cancellation off.
+      gate:
+        description: Concurrency key for a release gate; empty for normal runs
+        required: false
+        type: string
+        default: ""
 
+# A release supplies `gate` (its tag): the group is then per tag and
+# cancel-in-progress is off, so a second dispatch can never cancel a gate that
+# is already building installers. A `workflow_dispatch` run uses
+# `refs/heads/main`, so without this key every dispatch shared one group (REL3
+# review F1). Normal push/PR runs keep superseding their own predecessors.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ inputs.gate || github.ref }}
+  cancel-in-progress: ${{ !inputs.gate }}
 
 permissions:
   contents: read

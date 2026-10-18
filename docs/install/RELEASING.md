@@ -105,8 +105,9 @@ SignPath steps to the Windows matrix entry and remove that section from
    git push origin main
    ```
 
-   The release re-runs the same gate (below), so a red `main` cannot publish —
-   but tagging a broken commit only wastes two long pipelines. Wait for green.
+   The release runs that workflow again on the tagged commit (below), so a red
+   `main` cannot publish — but tagging a broken commit only wastes two long
+   pipelines. Wait for green.
 
 3. Tag the commit CI just passed, and push the tag:
 
@@ -117,7 +118,9 @@ SignPath steps to the Windows matrix entry and remove that section from
 
 4. Watch the workflow. It runs four jobs:
    - **ci** — the entire `ci.yml` matrix (hygiene, web, rust, the three-OS
-     build) on the tagged commit (`on: workflow_call`).
+     build) on the tagged commit (`on: workflow_call`). It holds no signing
+     secrets, so its macOS signing branch is skipped here; the release build
+     makes the signed bundle and runs the ADR-009 checks.
    - **guard** — tag/version agreement, updater pubkey, the pin, the secrets.
    - **build** — the matrix, only after `ci` and `guard` pass; the release
      stays a **draft**.

@@ -42,12 +42,17 @@ jobs:
   # REL3: the full CI gate, on the exact commit this run builds. A local
   # reusable workflow is resolved from the caller's ref, so green CI on main can
   # never stand in for the tagged commit. No `secrets: inherit`: CI needs no
-  # signing material, so its macOS signing step is either skipped (no `push`
-  # event in this run) or sees an empty MACOS_CERTIFICATE and takes the
-  # "not provisioned" notice path.
+  # signing material, so on this tag push its import step sees an empty
+  # MACOS_CERTIFICATE, prints the "not provisioned" notice and builds no signed
+  # bundle; the release build below proves the pinned identity instead.
+  #
+  # `gate` keys the inner concurrency group to this tag, so this run's CI can
+  # never be cancelled by another release's gate (REL3 review F1).
   ci:
     name: CI gate
     uses: ./.github/workflows/ci.yml
+    with:
+      gate: ${{ inputs.tag || github.ref_name }}
 
   guard:
     name: Release guard
