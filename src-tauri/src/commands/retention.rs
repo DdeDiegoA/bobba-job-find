@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use boba_app::jobs::{JobHandler, JobKind};
+use boba_app::jobs::{JobEnd, JobHandler, JobKind};
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::repo::system::SystemRepo;
 use boba_app::retention::{RetentionPolicy, RetentionRepo};
@@ -49,7 +49,7 @@ impl<R: Runtime> RetentionSweepHandler<R> {
 }
 
 impl<R: Runtime> JobHandler for RetentionSweepHandler<R> {
-    fn run(&self, job: JobKind) -> Result<(), String> {
+    fn run(&self, job: JobKind) -> Result<JobEnd, String> {
         if job != JobKind::RetentionSweep {
             return Err(format!("{} is not this handler's job", job.as_str()));
         }
@@ -77,6 +77,6 @@ impl<R: Runtime> JobHandler for RetentionSweepHandler<R> {
             emails = report.emails,
             "retention sweep finished"
         );
-        Ok(())
+        Ok(JobEnd::Completed)
     }
 }

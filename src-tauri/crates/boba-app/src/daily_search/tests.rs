@@ -405,6 +405,52 @@ fn a_run_nobody_cancels_keeps_its_full_report() {
     assert_eq!(report.sources.len(), 2);
 }
 
+/// FX15/review M-1: a cancel that lands after the last Source is honoured
+/// before the agent pass, so the report, the job row and the digest agree.
+#[test]
+fn a_cancel_after_the_last_source_is_honoured_before_the_agent_pass() {
+    let harness = Harness::new(ScriptedSources::new([(
+        source("remotive"),
+        Ok(vec![raw(
+            "a1",
+            "https://jobs.example.com/1",
+            "Backend Engineer",
+        )]),
+    )]));
+    let mut options = Harness::options();
+    options.agent = Some(super::AgentPass {
+        cli: "claude_code".to_string(),
+        model: None,
+        max_tasks: 5,
+    });
+    // False at the top of the only Source's turn (let it run), true at the
+    // check after the loop: the user cancelled before the agent pass.
+    let checks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let cancel = {
+        let checks = Arc::clone(&checks);
+        move || checks.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
+    };
+
+    let report = harness
+        .service()
+        .with_cancel(Some(Arc::new(cancel)))
+        .run(options)
+        .expect("a cancelled run still reports");
+
+    assert!(report.cancelled);
+    assert_eq!(
+        report.sources.len(),
+        1,
+        "the Source that had started finished"
+    );
+    assert_eq!(report.agent_tasks_used, 0);
+    assert_eq!(
+        harness.agent.tasks(),
+        0,
+        "the engine was never asked after the cancel"
+    );
+}
+
 /// AC1: the search request is built from the stored Preferences, not from
 /// nothing: roles and locations reach the adapters.
 #[test]

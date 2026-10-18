@@ -26,7 +26,7 @@ use boba_app::daily_search::{
     SourceReport,
 };
 use boba_app::error::{AppError, AppResult};
-use boba_app::jobs::{JobHandler, JobKind};
+use boba_app::jobs::{JobEnd, JobHandler, JobKind};
 use boba_app::ports::agent::AgentPort;
 use boba_app::ports::clock::ClockPort;
 use boba_app::ports::notifier::NotifierPort;
@@ -503,7 +503,7 @@ impl<R: Runtime> DailySearchHandler<R> {
 }
 
 impl<R: Runtime> JobHandler for DailySearchHandler<R> {
-    fn run(&self, job: JobKind) -> Result<(), String> {
+    fn run(&self, job: JobKind) -> Result<JobEnd, String> {
         if job != JobKind::DailySearch {
             return Err(format!("{} is not this handler's job", job.as_str()));
         }
@@ -528,7 +528,13 @@ impl<R: Runtime> JobHandler for DailySearchHandler<R> {
             .map_err(|error| error.message_key.to_string())?;
         store_report(execution.system.as_ref(), &execution.report)
             .map_err(|error| error.message_key.to_string())?;
-        Ok(())
+        // The row is closed from what the run did (FX15): a run that honoured
+        // the cancel says so, so the row and the report cannot disagree.
+        Ok(if execution.report.cancelled {
+            JobEnd::Cancelled
+        } else {
+            JobEnd::Completed
+        })
     }
 }
 
@@ -834,9 +840,11 @@ pub async fn run_report_retry(app: tauri::AppHandle) -> AppResult<()> {
                 .try_state::<crate::events::TaskRegistry>()
                 .map(|registry| registry.begin("ingest.run", options.run_id.clone()));
             let outcome = execute(&thread_app, options, Some(failed));
-            let cancelled = task
+            // What the retry honoured, not the token (review M-1): the same
+            // source of truth the report carries.
+            let cancelled = outcome
                 .as_ref()
-                .is_some_and(crate::events::TaskHandle::is_cancelled);
+                .is_ok_and(|execution| execution.report.cancelled);
             let run_failed = match outcome {
                 // The retried Sources replace their failed lines; the Sources
                 // the first run reached keep theirs, so the newest view still

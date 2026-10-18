@@ -24,6 +24,7 @@ const listeners = vi.hoisted(() => ({
 vi.mock("@/lib/ipc/bindings", () => ({
   commands: {
     jobsRunNow: vi.fn(),
+    jobsRunning: vi.fn(),
     taskCancel: vi.fn(),
     runReportLatest: vi.fn(),
     killSwitchStatus: vi.fn(),
@@ -112,6 +113,7 @@ beforeEach(() => {
   listeners.run.length = 0;
   listeners.kill.length = 0;
   vi.mocked(commands.jobsRunNow).mockReset();
+  vi.mocked(commands.jobsRunning).mockReset();
   vi.mocked(commands.taskCancel).mockReset();
   vi.mocked(commands.runReportLatest).mockReset();
   vi.mocked(commands.killSwitchStatus).mockReset();
@@ -119,6 +121,7 @@ beforeEach(() => {
   vi.mocked(commands.offersInbox).mockReset();
   vi.mocked(commands.jobsRunNow).mockImplementation(() => ok({ run_id: "run-1", joined: false }));
   vi.mocked(commands.taskCancel).mockImplementation(() => ok(true));
+  vi.mocked(commands.jobsRunning).mockImplementation(() => ok(null));
   vi.mocked(commands.runReportLatest).mockImplementation(() => ok(null));
   vi.mocked(commands.killSwitchStatus).mockImplementation(() =>
     ok({ engaged: false, since: null }),
@@ -381,6 +384,16 @@ describe("Shell — cancel a run (FX15)", () => {
     expect(screen.queryByRole("button", { name: "Cancel run" })).toBeNull();
   });
 
+  it("finds a run that was already live when the shell mounted (review M-2)", async () => {
+    vi.mocked(commands.jobsRunning).mockImplementation(() => ok("run_live"));
+    renderShell("/");
+
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    fireEvent.click(cancel);
+
+    await waitFor(() => expect(commands.taskCancel).toHaveBeenCalledWith("run_live"));
+  });
+
   it("offers the same Cancel from the sidebar run chip (AC1)", async () => {
     renderShell("/");
     fireEvent.click(screen.getByRole("button", { name: "Run now" }));
@@ -389,6 +402,22 @@ describe("Shell — cancel a run (FX15)", () => {
     fireEvent.click(await within(sidebar).findByRole("button", { name: "Cancel" }));
 
     await waitFor(() => expect(commands.taskCancel).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("keeps the cancelling label until the run actually stops (review L-1)", async () => {
+    renderShell("/");
+    fireEvent.click(screen.getByRole("button", { name: "Run now" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+
+    await waitFor(() => expect(commands.taskCancel).toHaveBeenCalledWith("run-1"));
+    // The request was accepted; the run is still finishing its Source.
+    const header = document.querySelector("header") as HTMLElement;
+    expect(await within(header).findByRole("button", { name: "Cancelling…" })).toBeTruthy();
+
+    emitRunProgress(progress("cancelled"));
+    await waitFor(() =>
+      expect(within(header).queryByRole("button", { name: "Cancelling…" })).toBeNull(),
+    );
   });
 
   it("says the run already ended and keeps the state when the core has no such task (AC3)", async () => {

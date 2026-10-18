@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -44,15 +44,25 @@ export default function TodayRunReport() {
       .then(unwrap)
       .then((found) => {
         // No such task: it ended between the click and the call.
-        if (!found) setCancelError(t("cancel.gone"));
+        if (!found) {
+          setCancelError(t("cancel.gone"));
+          setCancelling(false);
+        }
+        // Accepted: the label stays honest until the run is over.
       })
       .catch((error: unknown) => {
         setCancelError(
           isAppError(error) ? renderAppError(error, tError) : tError("errors.unknown"),
         );
-      })
-      .finally(() => setCancelling(false));
+        setCancelling(false);
+      });
   }, [progress, cancelling, t, tError]);
+
+  // Review L-1: the request is done when the run is, not when the command
+  // answers — the terminal phase clears the progress, and this with it.
+  useEffect(() => {
+    if (!progress) setCancelling(false);
+  }, [progress]);
 
   if (report.isPending) {
     return (

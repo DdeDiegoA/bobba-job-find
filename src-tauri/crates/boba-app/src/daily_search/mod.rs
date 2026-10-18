@@ -319,6 +319,14 @@ impl DailySearch {
             reports.push(report);
         }
 
+        // FX15 (review M-1): a cancel that landed after the last Source is
+        // still honoured here, before the agent pass — so the report, the job
+        // row and the digest agree instead of the row saying cancelled while
+        // the report finished.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
+        }
+
         let ended_at = self.clock.now_rfc3339();
         // S4.4's sweep: the Sources the run covered, the window it covered them
         // in. A Source that failed says nothing about the postings it would
@@ -364,11 +372,20 @@ impl DailySearch {
         // S5.3 the announcement is the digest (counts by band, quiet hours and
         // the user's choices); a host without the digest port keeps the plain
         // top-matches notice.
+        // A cancel that lands while scoring runs is honoured too: no digest.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
+        }
         // A cancelled run stays quiet: the user stopped it, so no digest.
         if !cancelled {
             self.announce(&tally, total);
         }
 
+        // Last look before the report is written: whatever the run says here
+        // is what closes its `job_run` row.
+        if !cancelled && self.cancelled() {
+            cancelled = true;
+        }
         let finished_at = self.clock.now_rfc3339();
         let report = RunReport {
             run_id: options.run_id.clone(),

@@ -210,6 +210,13 @@ export const commands = {
     ),
   /**  A manual "Run now" over IPC (FR-41). Registered in `ipc::command_list`. */
   jobsRunNow: () => typedError<RunNowOutcome, AppError_Serialize>(__TAURI_INVOKE("jobs_run_now")),
+  /**
+   *  The daily search running right now (FX15): its `job_run` id, which is also
+   *  the report id and the registry key Cancel targets. `None` when no run is
+   *  live — the shell reads it on mount so a run it did not start (tray, the
+   *  onboarding finish step, a reload mid-run) still offers Cancel.
+   */
+  jobsRunning: () => typedError<string | null, AppError_Serialize>(__TAURI_INVOKE("jobs_running")),
   /**  The channels and the copy-ready kit for one application (AC1/AC2). */
   applyView: (applicationId: string) =>
     typedError<ManualView, AppError_Serialize>(__TAURI_INVOKE("apply_view", { applicationId })),

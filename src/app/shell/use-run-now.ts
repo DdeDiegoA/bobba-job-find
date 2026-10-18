@@ -71,6 +71,23 @@ export function useRunNow() {
 
     refresh();
 
+    // FX15 (review M-2): a run can already be live when this mounts (the tray,
+    // the onboarding finish step, a reload mid-run). The live `job_run` id is
+    // what Cancel targets, so the shell asks for it instead of waiting for the
+    // next progress event.
+    void Promise.resolve()
+      .then(() => commands.jobsRunning())
+      .then(unwrap)
+      .then((liveId) => {
+        if (!alive || !liveId || finishedRun.current === liveId) return;
+        setRun((current) =>
+          current.running ? current : { ...current, running: true, runId: liveId },
+        );
+      })
+      .catch(() => {
+        // No bridge or no store: the event stream still keeps the chip honest.
+      });
+
     let stop: (() => void) | undefined;
     try {
       void Promise.resolve(
@@ -78,6 +95,9 @@ export function useRunNow() {
           if (event.payload.phase === "finished") {
             finishedRun.current = event.payload.run_id;
             setRun((current) => ({ ...current, running: false, runId: null }));
+            // The run stopped on its own before the cancel took effect: the
+            // label must not keep saying "Cancelling…" (review L-1).
+            setCancelling(false);
             refresh();
             return;
           }
@@ -86,6 +106,7 @@ export function useRunNow() {
           if (event.payload.phase === "cancelled") {
             finishedRun.current = event.payload.run_id;
             setRun((current) => ({ ...current, running: false, runId: null }));
+            setCancelling(false);
             setMessage({ kind: "info", text: t("shell:topbar.cancel.done") });
             refresh();
             return;
@@ -111,6 +132,11 @@ export function useRunNow() {
       stop?.();
     };
   }, [t]);
+
+  // Review L-1: if the run is gone, no cancel can still be in flight.
+  useEffect(() => {
+    if (!run.runId) setCancelling(false);
+  }, [run.runId]);
 
   const runNow = useCallback(() => {
     setMessage(null);
@@ -153,15 +179,20 @@ export function useRunNow() {
       .then(unwrap)
       .then((found) => {
         // No such task: it had already finished (or never started).
-        if (!found) setMessage({ kind: "error", text: t("shell:topbar.cancel.gone") });
+        if (!found) {
+          setMessage({ kind: "error", text: t("shell:topbar.cancel.gone") });
+          setCancelling(false);
+        }
+        // Accepted: "Cancelling…" stays until the lifecycle event lands, so
+        // the label never claims the run is back while it is still stopping.
       })
       .catch((error: unknown) => {
         setMessage({
           kind: "error",
           text: isAppError(error) ? renderAppError(error, t) : t("errors.unknown"),
         });
-      })
-      .finally(() => setCancelling(false));
+        setCancelling(false);
+      });
   }, [run.runId, cancelling, t]);
 
   return { run, message, pending, cancelling, runNow, cancelRun };

@@ -211,6 +211,44 @@ describe("cancelling a run (FX15)", () => {
     await waitFor(() => expect(commands.taskCancel).toHaveBeenCalledWith("run_live"));
   });
 
+  it("keeps the cancelling label until the run is over (review L-1)", async () => {
+    vi.mocked(commands.runReportLatest).mockReturnValue(ok(report()));
+    renderPanel();
+    await waitFor(() => expect(onProgress).not.toBeNull());
+    act(() => {
+      onProgress?.({
+        payload: {
+          run_id: "run_live",
+          phase: "source",
+          done: 1,
+          total: 3,
+          source_id: "remotive",
+          source_name: "Remotive",
+          outcome: "ok",
+          partial: null,
+        },
+      });
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    expect(await screen.findByRole("button", { name: "Cancelling…" })).toBeTruthy();
+
+    act(() => {
+      onProgress?.({
+        payload: {
+          run_id: "run_live",
+          phase: "cancelled",
+          done: 3,
+          total: 3,
+          source_id: null,
+          source_name: null,
+          outcome: null,
+          partial: null,
+        },
+      });
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Cancelling…" })).toBeNull());
+  });
+
   it("does not offer Cancel once the run is over (AC2)", async () => {
     vi.mocked(commands.runReportLatest).mockReturnValue(ok(report()));
     renderPanel();
