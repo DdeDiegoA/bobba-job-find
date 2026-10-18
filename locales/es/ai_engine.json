@@ -21,12 +21,18 @@
     "limits": "Límites",
     "summary": "{turns} turnos · {toolCalls} llamadas · {seconds} s"
   },
+  "engine": {
+    "title": "CLI del agente",
+    "body": "Elige el CLI que Boba maneja y el modelo que debe usar. Boba lo prueba antes de guardar, así que un motor que no puede responder nunca se guarda.",
+    "saved": "Motor guardado.",
+    "error": "Boba no pudo guardar el motor."
+  },
   "usage": {
     "title": "Uso de tokens",
     "body": "Haz una llamada de prueba para ver qué reporta tu CLI sobre una tarea. Boba muestra lo que envía el CLI y nunca estima el resto.",
     "run": "Hacer una llamada de prueba",
     "running": "Ejecutando…",
-    "noEngine": "Elige primero un motor en la puesta en marcha para ver su uso.",
+    "noEngine": "Elige y guarda un motor arriba para ver su uso.",
     "error": "La llamada de prueba no pudo ejecutarse.",
     "tokensIn": "Tokens de entrada",
     "tokensOut": "Tokens de salida",

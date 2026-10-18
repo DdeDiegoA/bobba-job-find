@@ -1,15 +1,21 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { commands, type TestCallResult } from "@/lib/ipc/bindings";
+import EnginePicker from "@/features/engine-picker";
+import { commands, type EngineChoice, type TestCallResult } from "@/lib/ipc/bindings";
 import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
 
 /**
  * Settings → AI engine (S2.5, FR-20) with usage display (PRD §6.3).
  *
- * Three things live here, all decided by the core:
+ * Four things live here, all decided by the core:
  *
+ * * **the engine** — the shared picker (FX7): between them, onboarding's engine
+ *   step and this page are the only two ways to pick the CLI and model. Save
+ *   is enabled only after a passing test, so a pair that cannot answer is never
+ *   stored. Saving refreshes the capability snapshot, which is what leaves
+ *   Limited mode (FR-4).
  * * **the per-run offer budget** — how many Offers one Search Run may hand to
  *   the agent (default 30). The value is one `setting` row the daily run reads;
  *   the page only edits it, clamping to the range the core enforces.
@@ -21,6 +27,7 @@ import { isAppError, renderAppError, unwrap } from "@/lib/ipc/errors";
  */
 export default function SettingsAiEngine() {
   const { t, t: tError } = useTranslation("ai_engine");
+  const queryClient = useQueryClient();
   const budget = useQuery({
     queryKey: ["agent", "budget"],
     queryFn: () => commands.agentBudgetSnapshot().then(unwrap),
@@ -55,6 +62,25 @@ export default function SettingsAiEngine() {
       setSaveError(isAppError(error) ? renderAppError(error, tError) : t("budget.error.save")),
   });
 
+  const [engineSaved, setEngineSaved] = useState(false);
+  const [engineError, setEngineError] = useState<string | null>(null);
+  const choose = useMutation({
+    mutationFn: (choice: EngineChoice) =>
+      commands.agentEngineChoose(choice.cli, choice.model).then(unwrap),
+    onSuccess: async () => {
+      setEngineSaved(true);
+      setEngineError(null);
+      // The stored choice feeds Usage here and the capability gate everywhere
+      // else: refetching both is what makes a Saved engine leave Limited mode.
+      await queryClient.invalidateQueries({ queryKey: ["engine", "snapshot"] });
+      await queryClient.invalidateQueries({ queryKey: ["capabilities", "snapshot"] });
+    },
+    onError: (error) => {
+      setEngineSaved(false);
+      setEngineError(isAppError(error) ? renderAppError(error, tError) : t("engine.error"));
+    },
+  });
+
   return (
     <section className="flex flex-col gap-6 p-6" aria-labelledby="settings-ai-engine-title">
       <div className="flex flex-col gap-1">
@@ -63,6 +89,31 @@ export default function SettingsAiEngine() {
         </h1>
         <p className="text-sm text-fg-muted">{t("intro")}</p>
       </div>
+
+      <section className="flex flex-col gap-3" aria-labelledby="ai-engine-engine-title">
+        <h2 id="ai-engine-engine-title" className="font-display text-lg text-fg">
+          {t("engine.title")}
+        </h2>
+        <p className="text-sm text-fg-muted">{t("engine.body")}</p>
+        {engineError ? <p className="text-sm text-danger">{engineError}</p> : null}
+        {engineSaved ? (
+          <p role="status" className="text-sm text-fg-muted">
+            {t("engine.saved")}
+          </p>
+        ) : null}
+        <EnginePicker
+          onChange={() => {
+            setEngineSaved(false);
+            setEngineError(null);
+          }}
+          onSave={(choice) => {
+            setEngineSaved(false);
+            setEngineError(null);
+            choose.mutate(choice);
+          }}
+          saving={choose.isPending}
+        />
+      </section>
 
       <section className="flex flex-col gap-2" aria-labelledby="ai-engine-budget-title">
         <h2 id="ai-engine-budget-title" className="font-display text-lg text-fg">

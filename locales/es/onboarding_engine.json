@@ -47,5 +47,7 @@
   "tasks.name.review_application": "Revisar borradores",
   "tasks.name.answer_questions": "Responder preguntas de criba",
   "tasks.name.classify_emails": "Clasificar correo",
-  "tasks.name.translate_profile": "Traducir tu perfil"
+  "tasks.name.translate_profile": "Traducir tu perfil",
+  "save.action": "Guardar motor",
+  "save.saving": "Guardando…"
 }
