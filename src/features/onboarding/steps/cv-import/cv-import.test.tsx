@@ -22,6 +22,7 @@ const ok = <T,>(data: T) => Promise.resolve({ status: "ok" as const, data });
 
 const proposal = (over: Partial<ProposalView> = {}): ProposalView => ({
   id: "prop_1",
+  item_id: null,
   kind: "experience",
   text_en: "Backend engineer at Nimbus since 2020",
   text_es: null,

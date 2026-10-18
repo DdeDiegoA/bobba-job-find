@@ -2328,6 +2328,11 @@ export type ProfileSnapshot = {
  */
 export type ProposalView = {
   id: string;
+  /**
+   *  The item the proposal revises, `None` for a new fact (FX8: the Profile
+   *  lists a fact's pending drafts by this id).
+   */
+  item_id: string | null;
   /**  Section id, as `profile:sections.<kind>` labels it. */
   kind: string;
   text_en: string | null;

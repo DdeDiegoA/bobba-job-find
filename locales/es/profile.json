@@ -33,5 +33,16 @@
   "form.evidence": "Evidencia — cita el cargo o el proyecto",
   "form.save": "Guardar",
   "form.cancel": "Cancelar",
-  "form.required": "Escribe el texto en inglés o español."
+  "form.required": "Escribe el texto en inglés o español.",
+  "drafts.aria": "Redactar el idioma que falta con IA",
+  "drafts.draft": "Redactar en {lang} con IA",
+  "drafts.drafting": "Redactando…",
+  "drafts.openSettings": "Abrir Configuración > Motor de IA",
+  "drafts.confirm": "Confirmar",
+  "drafts.edit": "Editar",
+  "drafts.saveEdit": "Guardar edición",
+  "drafts.cancel": "Cancelar",
+  "drafts.discard": "Descartar",
+  "drafts.editHint": "Este es el texto propuesto completo. Edita la redacción antes de guardar.",
+  "drafts.untrusted": "Boba lo leyó de un texto que no escribió. Revísalo antes de guardar."
 }

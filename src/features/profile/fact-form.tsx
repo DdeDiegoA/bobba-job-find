@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import type { FactRevisionInput, FactView } from "@/lib/ipc/bindings";
+import { AiDraft } from "./ai-draft";
 import { takesEvidence } from "./sections";
 
 /**
@@ -81,6 +82,17 @@ export function FactForm({
           className="rounded-xl border border-border bg-surface-muted px-3 py-2 text-fg"
         />
       </label>
+
+      {/* FX8: a fact with one variant can draft the other, never auto-filled. */}
+      {fact ? (
+        <AiDraft
+          fact={fact}
+          onConfirmed={(lang, text) => {
+            if (lang === "es") setTextEs(text);
+            else setTextEn(text);
+          }}
+        />
+      ) : null}
 
       {takesEvidence(kind) ? (
         <label className="flex flex-col gap-1 text-sm text-fg-muted">

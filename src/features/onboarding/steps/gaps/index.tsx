@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Gated } from "@/components/gated";
 import { Button } from "@/components/ui/button";
+import { ProposalReviewCard } from "@/features/proposal-review";
 import {
   commands,
   type FactEdit,
@@ -217,13 +218,25 @@ export default function GapsStep({ setAnswer }: StepProps) {
         ) : (
           <ul className="flex flex-col gap-3">
             {drafts.map((proposal) => (
-              <DraftCard
+              <ProposalReviewCard
                 key={proposal.id}
                 proposal={proposal}
                 busy={confirm.isPending || discard.isPending}
+                labels={{
+                  kindLabel: t(`profile:sections.${proposal.kind}`),
+                  textEn: t("onboarding_gaps:drafts.textEn"),
+                  textEs: t("onboarding_gaps:drafts.textEs"),
+                  confirm: t("onboarding_gaps:drafts.confirm"),
+                  edit: t("onboarding_gaps:drafts.edit"),
+                  saveEdit: t("onboarding_gaps:drafts.save"),
+                  cancel: t("onboarding_gaps:drafts.cancel"),
+                  discard: t("onboarding_gaps:drafts.delete"),
+                  editHint: t("onboarding_gaps:drafts.editHint"),
+                  untrusted: t("onboarding_gaps:drafts.untrusted"),
+                }}
                 onConfirm={() => confirm.mutate({ id: proposal.id, edit: null })}
-                onSave={(edit) => confirm.mutate({ id: proposal.id, edit })}
-                onDelete={() => discard.mutate(proposal.id)}
+                onSaveEdit={(edit) => confirm.mutate({ id: proposal.id, edit })}
+                onDiscard={() => discard.mutate(proposal.id)}
               />
             ))}
           </ul>
@@ -404,113 +417,6 @@ function LanguageRow({
             : t("onboarding_gaps:languages.draft", { lang: missing.toUpperCase() })}
         </Button>
       </Gated>
-    </li>
-  );
-}
-
-/**
- * One agent-drafted proposal (AC3). Its text is shown **verbatim as plain
- * text** — whitespace preserved, never truncated, never rendered as markup
- * (AD-7, AD-15) — and nothing is saved until the user confirms or edits it.
- */
-function DraftCard({
-  proposal,
-  busy,
-  onConfirm,
-  onSave,
-  onDelete,
-}: {
-  proposal: ProposalView;
-  busy: boolean;
-  onConfirm: () => void;
-  onSave: (edit: FactEdit) => void;
-  onDelete: () => void;
-}) {
-  const { t } = useTranslation();
-  const [editing, setEditing] = useState(false);
-  const [textEn, setTextEn] = useState(proposal.text_en ?? "");
-  const [textEs, setTextEs] = useState(proposal.text_es ?? "");
-
-  const id = `gap-draft-${proposal.id}`;
-
-  if (editing) {
-    return (
-      <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-        <h3 className="font-medium text-fg">{t(`profile:sections.${proposal.kind}`)}</h3>
-        <label htmlFor={`${id}-en`} className="text-sm font-medium text-fg">
-          {t("onboarding_gaps:drafts.textEn")}
-        </label>
-        <textarea
-          id={`${id}-en`}
-          className="min-h-20 rounded-xl border border-border bg-surface p-3 text-fg"
-          value={textEn}
-          onChange={(event) => setTextEn(event.target.value)}
-        />
-        <label htmlFor={`${id}-es`} className="text-sm font-medium text-fg">
-          {t("onboarding_gaps:drafts.textEs")}
-        </label>
-        <textarea
-          id={`${id}-es`}
-          className="min-h-20 rounded-xl border border-border bg-surface p-3 text-fg"
-          value={textEs}
-          onChange={(event) => setTextEs(event.target.value)}
-        />
-        <p className="text-sm text-fg-muted">{t("onboarding_gaps:drafts.editHint")}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={busy}
-            onClick={() =>
-              onSave({
-                text_en: textEn.trim() === "" ? null : textEn,
-                text_es: textEs.trim() === "" ? null : textEs,
-                evidence: proposal.evidence,
-                detail_json: proposal.detail_json,
-              })
-            }
-          >
-            {t("onboarding_gaps:drafts.save")}
-          </Button>
-          <Button variant="ghost" onClick={() => setEditing(false)}>
-            {t("onboarding_gaps:drafts.cancel")}
-          </Button>
-        </div>
-      </li>
-    );
-  }
-
-  return (
-    <li className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-      <h3 className="font-medium text-fg">{t(`profile:sections.${proposal.kind}`)}</h3>
-      {proposal.untrusted_origin ? (
-        <p className="text-sm text-warning">{t("onboarding_gaps:drafts.untrusted")}</p>
-      ) : null}
-      {proposal.text_en ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs uppercase tracking-wide text-fg-subtle">
-            {t("onboarding_gaps:drafts.textEn")}
-          </span>
-          <p className="whitespace-pre-wrap break-words text-fg">{proposal.text_en}</p>
-        </div>
-      ) : null}
-      {proposal.text_es ? (
-        <div className="flex flex-col gap-1">
-          <span className="text-xs uppercase tracking-wide text-fg-subtle">
-            {t("onboarding_gaps:drafts.textEs")}
-          </span>
-          <p className="whitespace-pre-wrap break-words text-fg">{proposal.text_es}</p>
-        </div>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button disabled={busy} onClick={onConfirm}>
-          {t("onboarding_gaps:drafts.confirm")}
-        </Button>
-        <Button variant="outline" disabled={busy} onClick={() => setEditing(true)}>
-          {t("onboarding_gaps:drafts.edit")}
-        </Button>
-        <Button variant="ghost" disabled={busy} onClick={onDelete}>
-          {t("onboarding_gaps:drafts.delete")}
-        </Button>
-      </div>
     </li>
   );
 }
