@@ -52,7 +52,10 @@ function renderPalette() {
         <CommandPalette />
         <Routes>
           <Route path="/" element={<div>today screen</div>} />
+          <Route path="/inbox" element={<div>inbox screen</div>} />
+          <Route path="/studio" element={<div>studio screen</div>} />
           <Route path="/tracker" element={<div>tracker screen</div>} />
+          <Route path="/settings" element={<div>settings screen</div>} />
           <Route path="/offer/:postingId" element={<div>offer screen</div>} />
         </Routes>
       </MemoryRouter>
@@ -129,6 +132,51 @@ describe("navigating (AC2)", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "zzzz" } });
     await waitFor(() => expect(screen.getByText("No matches")).toBeTruthy());
+  });
+
+  it("hovers the 2nd row and Enter opens the 2nd row's destination", async () => {
+    renderPalette();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const dialog = screen.getByRole("dialog");
+    const options = screen.getAllByRole("option");
+
+    fireEvent.mouseMove(options[1]);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(dialog, { key: "Enter" });
+    expect(await screen.findByText("inbox screen")).toBeTruthy();
+  });
+
+  it("clicks the 3rd row and runs the 3rd row, never the last row", async () => {
+    renderPalette();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const options = screen.getAllByRole("option");
+
+    // A real click moves the pointer first: hover, then press.
+    fireEvent.mouseMove(options[2]);
+    expect(options[2].getAttribute("aria-selected")).toBe("true");
+    expect(options[options.length - 1].getAttribute("aria-selected")).toBe("false");
+
+    fireEvent.mouseDown(options[2]);
+    expect(await screen.findByText("studio screen")).toBeTruthy();
+  });
+
+  it("arrows down past the page rows and Enter opens the offer under the cursor", async () => {
+    renderPalette();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "t" } });
+
+    // "t" matches several pages; the one Offer row follows them.
+    const offer = await screen.findByRole("option", { name: /Senior Data Engineer/ });
+    for (let i = 0; i < screen.getAllByRole("option").length; i += 1) {
+      if (offer.getAttribute("aria-selected") === "true") break;
+      fireEvent.keyDown(dialog, { key: "ArrowDown" });
+    }
+    expect(offer.getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.keyDown(dialog, { key: "Enter" });
+    expect(await screen.findByText("offer screen")).toBeTruthy();
   });
 
   it("gives the focus back when it closes", () => {

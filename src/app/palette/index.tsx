@@ -151,9 +151,6 @@ function PaletteDialog() {
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [hide]);
 
-  // Flat row index per group, so `aria-activedescendant` matches the visual order.
-  let index = -1;
-
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-6 pt-24">
       <div
@@ -198,26 +195,23 @@ function PaletteDialog() {
           >
             {pageRows.length > 0 ? (
               <Group label={t("pages")}>
-                {pageRows.map((row) => {
-                  index += 1;
-                  return (
-                    <Row
-                      key={row.id}
-                      row={row}
-                      index={index}
-                      selected={index === selected}
-                      onHover={() => setActive(index)}
-                      onChoose={() => choose(row)}
-                    />
-                  );
-                })}
+                {pageRows.map((row, i) => (
+                  <Row
+                    key={row.id}
+                    row={row}
+                    index={i}
+                    selected={i === selected}
+                    onHover={() => setActive(i)}
+                    onChoose={() => choose(row)}
+                  />
+                ))}
               </Group>
             ) : null}
 
             {offerRows.length > 0 ? (
               <Group label={t("offers")}>
-                {offerRows.map((row) => {
-                  index += 1;
+                {offerRows.map((row, i) => {
+                  const index = pageRows.length + i;
                   return (
                     <Row
                       key={row.id}
