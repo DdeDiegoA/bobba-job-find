@@ -39,7 +39,7 @@
     "externalBin": ["binaries/boba-mcp"],
     "category": "Productivity",
     "license": "MIT",
-    "licenseFile": "../LICENSE",
+    "resources": { "../LICENSE": "LICENSE" },
     "copyright": "Copyright (c) 2026 Boba Job Find contributors. Portions copyright (c) 2026 Mads Lorentzen (ai-job-search, MIT).",
     "publisher": "Boba Job Find",
     "shortDescription": "Local-first, AI-assisted job search.",

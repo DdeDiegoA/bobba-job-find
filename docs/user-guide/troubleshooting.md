@@ -2,18 +2,27 @@
 
 Most hiccups here have a short fix.
 
-## macOS says it can't check the app (Gatekeeper)
+## macOS says it can't check the app, or that it is damaged (Gatekeeper)
 
-On macOS, Boba is signed with the project's own certificate but not notarised by Apple (Windows and Linux builds are unsigned). Once:
+On macOS, Boba is signed with the project's own certificate but not notarised by Apple
+(Windows and Linux builds are unsigned). A "damaged" warning does not mean the download
+is broken: Gatekeeper is refusing a certificate it does not trust. Drag **Boba Job
+Find** to **Applications**, then clear the quarantine flag once:
 
-1. Open the app and dismiss the warning.
-2. **System Settings → Privacy & Security → Open Anyway**, then **Open**.
+```sh
+xattr -dr com.apple.quarantine "/Applications/Boba Job Find.app"
+```
 
-Or, for a download from this project's releases only:
-`xattr -d com.apple.quarantine "/Applications/Boba Job Find.app"`.
+Open the app normally afterwards. Only do this for a download from this project's
+releases: the command removes the quarantine flag from whatever app you point it at.
 
-Full steps: [docs/install/macos.md](../install/macos.md). If macOS asks for your Keychain
-password *after an update*, don't approve it blindly; check the release's signature as described
+Right-click → **Open** no longer bypasses Gatekeeper on macOS 15 and later, and
+**System Settings → Privacy & Security → Open Anyway** only appears when the warning
+offers it, which a "damaged" warning does not.
+
+Full steps, including how to check the signing certificate against the project's pin:
+[docs/install/macos.md](../install/macos.md). If macOS asks for your Keychain password
+*after an update*, don't approve it blindly; check the release's signature as described
 there.
 
 ## Windows SmartScreen blocks the installer

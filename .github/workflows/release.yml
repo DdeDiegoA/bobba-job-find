@@ -279,13 +279,15 @@ jobs:
           node scripts/release/verify-release.mjs "$TAG" release-assets \
             --repo "${{ github.repository }}"
       # The check runs on the artifact users actually install, not only on the
-      # build tree (a DMG could in theory wrap a different .app).
+      # build tree (a DMG could in theory wrap a different .app). REL6: the DMG
+      # carries no software licence agreement (`licenseFile` is gone), so it
+      # mounts with no prompt; -noverify skips a checksum the build already did.
       - name: The DMG carries the pinned identity
         run: |
           dmg="$(find release-assets -name '*.dmg' -print -quit)"
           mnt="$RUNNER_TEMP/boba-dmg"
           mkdir -p "$mnt"
-          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mnt" >/dev/null
+          hdiutil attach "$dmg" -nobrowse -noverify -noautoopen -readonly -mountpoint "$mnt" >/dev/null
           trap 'hdiutil detach "$mnt" -quiet || true' EXIT
           app="$(find "$mnt" -maxdepth 2 -name '*.app' -print -quit)"
           node scripts/release/check-macos-signature.mjs "$app"
